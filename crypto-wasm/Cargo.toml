@@ -1,0 +1,16 @@
+[package]
+name = "crypto-wasm"
+version = "0.1.0"
+edition = "2024"
+
+lib=["cdylib"]
+
+[dependencies]
+base64 = "0.22.1"
+gloo = "0.11.0"
+pgp = { version = "0.18.0", features = ["wasm"] }
+rand = "0.8.5"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+thiserror = "2.0.17"
+wasm-bindgen = { version = "0.2.106", features = ["serde"] }
