@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      crypto-wasm:
+        specifier: file:./crypto-wasm/pkg
+        version: file:crypto-wasm/pkg
       next:
         specifier: 16.0.10
         version: 16.0.10(@babel/core@7.28.5)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
@@ -821,6 +824,9 @@ packages:
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
+
+  crypto-wasm@file:crypto-wasm/pkg:
+    resolution: {directory: crypto-wasm/pkg, type: directory}
 
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
@@ -2675,6 +2681,8 @@ snapshots:
       path-key: 3.1.1
       shebang-command: 2.0.0
       which: 2.0.2
+
+  crypto-wasm@file:crypto-wasm/pkg: {}
 
   csstype@3.2.3: {}
 

@@ -1,21 +1,28 @@
 import init, {
   generate_and_save_private_keys,
   export_public_keys,
-} from "../crypto-wasm/pkg/crypto_wasm";
+} from "crypto-wasm";
 import { WorkerCallMessage, WasmReturnValue } from "@/utils/schema";
 
-init();
+// @ts-expect-error Worker is provided by the dedicated worker context at runtime.
+const worker: Worker = self;
 
-/* @ts-ignore */
-const worker: Worker = undefined;
+worker.addEventListener("message", async ({ data }) => {
+  console.log("worker received", data);
 
-worker.addEventListener("message", ({ data }) => {
   const parsed = WorkerCallMessage.safeParse(data);
   if (!parsed.success) {
+    console.log("invalid message:", parsed.error);
     return;
   }
 
-  if (parsed.data.call === "generate") {
+  if (parsed.data.call === "init") {
+    if (parsed.data.wasmUrl) {
+      await init(parsed.data.wasmUrl);
+    } else {
+      await init();
+    }
+  } else if (parsed.data.call === "generate") {
     const result = WasmReturnValue.safeParse(
       generate_and_save_private_keys(
         parsed.data.userId,
@@ -27,7 +34,7 @@ worker.addEventListener("message", ({ data }) => {
       worker.postMessage({
         call: "generate",
         success: result.success === true && result.data.result === "ok",
-        data: undefined,
+        data: { keys: result.data.value?.data },
       });
     } else {
       worker.postMessage({
@@ -40,7 +47,9 @@ worker.addEventListener("message", ({ data }) => {
       });
     }
   } else if (parsed.data.call === "export_public_keys") {
-    const result = WasmReturnValue.safeParse(export_public_keys());
+    const result = WasmReturnValue.safeParse(
+      export_public_keys(parsed.data.keys),
+    );
     if (result.success === false) {
       worker.postMessage({
         call: "export_public_keys",

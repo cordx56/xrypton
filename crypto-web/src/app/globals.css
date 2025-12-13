@@ -26,7 +26,7 @@ body {
 }
 
 .input-text {
-  @apply border border-indigo-500;
+  @apply px-4 py-2 m-2 border border-indigo-500;
 }
 
 .p {
@@ -34,7 +34,7 @@ body {
 }
 
 .button {
-  @apply border border-indigo-500 rounded hover:text-indigo-200 hover:bg-indigo-500;
+  @apply border border-indigo-500 rounded px-4 py-2 m-2 text-sm font-medium hover:text-indigo-200 hover:bg-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
 }
 
 .centered {
@@ -42,8 +42,8 @@ body {
 }
 
 .overlay {
-  @apply w-full h-full fixed bg-black/60;
+  @apply fixed inset-0 bg-gray-700/10 backdrop-blur-xs grid place-items-center p-6;
 }
 .dialog {
-  @apply absolute w-2xl max-w-[95%] max-h-[95%];
+  @apply relative w-full max-w-[720px] max-h-[90vh] overflow-y-auto rounded-2xl border border-white/10 bg-[var(--background)] text-[var(--foreground)] shadow-2xl shadow-black/25 p-6;
 }

@@ -12,6 +12,10 @@ export const WasmReturnValue = z.union([
 
 export const WorkerCallMessage = z.union([
   z.object({
+    call: z.literal("init"),
+    wasmUrl: z.string().nullish(),
+  }),
+  z.object({
     call: z.literal("generate"),
     userId: z.string(),
     mainPassphrase: z.string(),
@@ -19,6 +23,7 @@ export const WorkerCallMessage = z.union([
   }),
   z.object({
     call: z.literal("export_public_keys"),
+    keys: z.string(),
   }),
 ]);
 
@@ -36,7 +41,7 @@ const CommonResult = (schema: unknown) =>
 export const WorkerResultMessage = z.union([
   z.object({
     call: z.literal("generate"),
-    ...CommonResult(z.undefined()),
+    ...CommonResult(z.object({ keys: z.string() })),
   }),
   z.object({
     call: z.literal("export_public_keys"),

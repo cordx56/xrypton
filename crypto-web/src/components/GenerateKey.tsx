@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { z } from "zod";
-import { WorkerCallMessage } from "../utils/schema";
+import { WorkerCallMessage } from "@/utils/schema";
+import { useContexts } from "@/utils/context";
 
-const GenerateKey = (worker: Worker) => {
+const GenerateKey = () => {
+  const { worker } = useContexts();
+
   const [userId, setUserId] = useState("");
   const [mainPassphrase, setMainPassphrase] = useState("");
   const [subPassphrase, setSubPassphrase] = useState("");
@@ -14,40 +17,42 @@ const GenerateKey = (worker: Worker) => {
       mainPassphrase,
       subPassphrase,
     };
-    worker.postMessage(message);
+    worker?.postMessage(message);
   };
 
   return (
     <div>
-      <p className="p">
-        User ID:
-        <input
-          className="input-text"
-          type="text"
-          onChange={(e) => setUserId(e.target.value)}
-        />
-      </p>
-      <p className="p">
-        Main passphrase:
-        <input
-          className="input-text"
-          type="password"
-          onChange={(e) => setMainPassphrase(e.target.value)}
-        />
-      </p>
-      <p className="p">
-        Sub passphrase:
-        <input
-          className="input-text"
-          type="password"
-          onChange={(e) => setSubPassphrase(e.target.value)}
-        />
-      </p>
-      <p className="p">
+      <div className="grid grid-cols-3 gap-4 items-center">
+        <div className="col-span-3 sm:col-span-1">User ID:</div>
+        <div className="col-span-3 sm:col-span-2">
+          <input
+            className="input-text w-full"
+            type="text"
+            onChange={(e) => setUserId(e.target.value)}
+          />
+        </div>
+        <div className="col-span-3 sm:col-span-1">Main passphrase:</div>
+        <div className="col-span-3 sm:col-span-2">
+          <input
+            className="input-text w-full"
+            type="password"
+            onChange={(e) => setMainPassphrase(e.target.value)}
+          />
+        </div>
+        <div className="col-span-3 sm:col-span-1">Sub passphrase:</div>
+        <div className="col-span-3 sm:col-span-2">
+          <input
+            className="input-text w-full"
+            type="password"
+            onChange={(e) => setSubPassphrase(e.target.value)}
+          />
+        </div>
+      </div>
+      <div>
         <button className="button" type="button" onClick={generate}>
           Generate Key
         </button>
-      </p>
+      </div>
     </div>
   );
 };
