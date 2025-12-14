@@ -4,7 +4,7 @@ import { WorkerCallMessage } from "@/utils/schema";
 import { useContexts } from "@/utils/context";
 
 const GenerateKey = () => {
-  const { worker } = useContexts();
+  const { worker, workerEventWaiter } = useContexts();
 
   const [userId, setUserId] = useState("");
   const [mainPassphrase, setMainPassphrase] = useState("");
@@ -17,6 +17,13 @@ const GenerateKey = () => {
       mainPassphrase,
       subPassphrase,
     };
+    workerEventWaiter?.("generate", (data) => {
+      console.log(data);
+      if (!data.success) {
+        return;
+      }
+      console.log(data.data);
+    });
     worker?.postMessage(message);
   };
 

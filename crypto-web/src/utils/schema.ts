@@ -27,7 +27,13 @@ export const WorkerCallMessage = z.union([
   }),
 ]);
 
-const CommonResult = (schema: unknown) =>
+export const WorkerResultCallList = {
+  generate: "generate",
+  export_public_keys: "export_public_keys",
+} as const;
+export type WorkerResultCall = typeof WorkerResultCallList[keyof (typeof WorkerResultCallList)];
+
+export const WorkerResult = <T>(schema: T) =>
   z.union([
     z.object({
       success: z.literal(true),
@@ -40,11 +46,11 @@ const CommonResult = (schema: unknown) =>
   ]);
 export const WorkerResultMessage = z.union([
   z.object({
-    call: z.literal("generate"),
-    ...CommonResult(z.object({ keys: z.string() })),
+    call: z.literal(WorkerResultCallList["generate"]),
+    result: WorkerResult(z.object({ keys: z.string() })),
   }),
   z.object({
-    call: z.literal("export_public_keys"),
-    ...CommonResult(z.object({ keys: z.string() })),
+    call: z.literal(WorkerResultCallList["export_public_keys"]),
+    result: WorkerResult(z.object({ keys: z.string() }))
   }),
 ]);
