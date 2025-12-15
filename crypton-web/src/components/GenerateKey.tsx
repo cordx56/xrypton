@@ -2,9 +2,11 @@ import { useState } from "react";
 import { z } from "zod";
 import { WorkerCallMessage } from "@/utils/schema";
 import { useContexts } from "@/utils/context";
+import CommonDialog from "@/components/Dialogs/CommonDialog";
+import CopyPlain from "@/components/CopyPlain";
 
 const GenerateKey = () => {
-  const { worker, workerEventWaiter } = useContexts();
+  const { worker, workerEventWaiter, dialogs } = useContexts();
 
   const [userId, setUserId] = useState("");
   const [mainPassphrase, setMainPassphrase] = useState("");
@@ -22,7 +24,11 @@ const GenerateKey = () => {
       if (!data.success) {
         return;
       }
-      console.log(data.data);
+      dialogs?.pushDialog((close) => (
+        <CommonDialog {...close}>
+          <CopyPlain data={data.data.keys} />
+        </CommonDialog>
+      ));
     });
     worker?.postMessage(message);
   };

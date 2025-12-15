@@ -2,8 +2,12 @@ import { z } from "zod";
 import init, {
   generate_and_save_private_keys,
   export_public_keys,
-} from "crypto-wasm";
-import { WorkerCallMessage, WasmReturnValue, WorkerResultMessage } from "@/utils/schema";
+} from "crypton-wasm";
+import {
+  WorkerCallMessage,
+  WasmReturnValue,
+  WorkerResultMessage,
+} from "@/utils/schema";
 
 // @ts-expect-error Worker is provided by the dedicated worker context at runtime.
 const worker: Worker = self;
@@ -32,14 +36,18 @@ worker.addEventListener("message", async ({ data }) => {
       ),
     );
     if (result.success === true && result.data.result === "ok") {
-      if (result.success === true && result.data.result === "ok" && result.data.value) {
+      if (
+        result.success === true &&
+        result.data.result === "ok" &&
+        result.data.value
+      ) {
         worker.postMessage({
           call: "generate",
           result: {
             success: true,
             data: {
               keys: result.data.value.data,
-            }
+            },
           },
         } as z.infer<typeof WorkerResultMessage>);
       }

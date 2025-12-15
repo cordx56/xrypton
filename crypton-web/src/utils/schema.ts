@@ -31,7 +31,8 @@ export const WorkerResultCallList = {
   generate: "generate",
   export_public_keys: "export_public_keys",
 } as const;
-export type WorkerResultCall = typeof WorkerResultCallList[keyof (typeof WorkerResultCallList)];
+export type WorkerResultCall =
+  (typeof WorkerResultCallList)[keyof typeof WorkerResultCallList];
 
 export const WorkerResult = <T>(schema: T) =>
   z.union([
@@ -51,6 +52,6 @@ export const WorkerResultMessage = z.union([
   }),
   z.object({
     call: z.literal(WorkerResultCallList["export_public_keys"]),
-    result: WorkerResult(z.object({ keys: z.string() }))
+    result: WorkerResult(z.object({ keys: z.string() })),
   }),
 ]);

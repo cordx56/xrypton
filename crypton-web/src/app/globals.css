@@ -25,6 +25,10 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+@utility default-border {
+  @apply border-indigo-500;
+}
+
 .input-text {
   @apply px-4 py-2 m-2 border border-indigo-500;
 }
@@ -34,7 +38,7 @@ body {
 }
 
 .button {
-  @apply border border-indigo-500 rounded px-4 py-2 m-2 text-sm font-medium hover:text-indigo-200 hover:bg-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  @apply default-border border rounded px-4 py-2 m-2 text-sm font-medium hover:text-indigo-200 hover:bg-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
 }
 
 .centered {
@@ -46,4 +50,8 @@ body {
 }
 .dialog {
   @apply relative w-full max-w-[720px] max-h-[90vh] overflow-y-auto rounded-2xl border border-white/10 bg-[var(--background)] text-[var(--foreground)] shadow-2xl shadow-black/25 p-6;
+}
+
+button[type="button"] {
+  @apply cursor-pointer;
 }

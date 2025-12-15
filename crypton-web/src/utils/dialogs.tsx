@@ -1,9 +1,11 @@
 import { useState, FC, ReactNode } from "react";
 
-export type DialogComponent = FC<{
-  close: () => void;
-  setOnClose: (close: () => void) => void;
-}>;
+export type DialogComponent<P extends Object = {}> = FC<
+  {
+    close: () => void;
+    setOnClose: (close: () => void) => void;
+  } & P
+>;
 
 export const useDialogs = (): {
   dialogs: ReactNode[];
