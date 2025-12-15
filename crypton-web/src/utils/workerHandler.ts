@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
 import { z } from "zod";
-import { WorkerResultCall, WorkerResultMessage } from "@/utils/schema";
+import {
+  WorkerResultCall,
+  WorkerResultMessage,
+  WorkerCallMessage,
+} from "@/utils/schema";
 
 type WorkerResult<T extends WorkerResultCall> = Extract<
   z.infer<typeof WorkerResultMessage>,
@@ -14,36 +18,29 @@ export type WorkerEventWaiter = <T extends WorkerResultCall>(
   callback: WorkerEventCallback<T>,
 ) => void;
 
+type WaiterState<T extends WorkerResultCall> = [T, WorkerEventCallback<T>][];
+
 export const useWorkerWaiter = () => {
   const [messageQueue, setMessageQueue] = useState<
     z.infer<typeof WorkerResultMessage>[]
   >([]);
   const [worker, setWorker] = useState<Worker | undefined>(undefined);
 
-  worker?.addEventListener("message", ({ data }) => {
-    const parsed = WorkerResultMessage.safeParse(data);
-    if (!parsed.success) {
-      console.log("invalid Worker message");
-      return;
-    }
-    setMessageQueue((v) => [...v, parsed.data]);
-  });
-
-  const [eventWaiter, setEventWaiter] = useState<
-    [WorkerResultCall, WorkerEventCallback<WorkerResultCall>][]
-  >([]);
-  const workerEventWaiter = <T extends WorkerResultCall>(
+  const [eventWaiterQueue, setEventWaiterQueue] = useState<WaiterState<any>>(
+    [],
+  );
+  const eventWaiter = <T extends WorkerResultCall>(
     event: T,
     callback: WorkerEventCallback<T>,
   ) => {
-    setEventWaiter((v) => [...v, [event, callback]]);
+    setEventWaiterQueue((v) => [...v, [event, callback]]);
   };
   useEffect(() => {
     for (let i = 0; i < messageQueue.length; i++) {
-      for (let j = 0; j < eventWaiter.length; j++) {
-        if (messageQueue[i].call === eventWaiter[j][0]) {
-          eventWaiter[j][1](messageQueue[i].result);
-          setEventWaiter((v) => v.splice(j, 1));
+      for (let j = 0; j < eventWaiterQueue.length; j++) {
+        if (messageQueue[i].call === eventWaiterQueue[j][0]) {
+          eventWaiterQueue[j][1](messageQueue[i].result);
+          setEventWaiterQueue((v) => v.splice(j, 1));
           setMessageQueue((v) => v.splice(i, 1));
           return;
         }
@@ -51,18 +48,31 @@ export const useWorkerWaiter = () => {
     }
   }, [messageQueue]);
 
+  const postMessage = (message: z.infer<typeof WorkerCallMessage>) => {
+    worker?.postMessage(message);
+  };
+
   useEffect(() => {
     const worker = new Worker(new URL("../worker.ts", import.meta.url));
 
     const wasmPath = new URL(
-      "../../crypton-wasm/pkg/crypto_wasm_bg.wasm",
+      "../../crypton-wasm/pkg/crypton_wasm_bg.wasm",
       import.meta.url,
     ).toString();
     const wasmUrl = new URL(wasmPath, document.baseURI).toString();
+
+    worker.addEventListener("message", ({ data }) => {
+      const parsed = WorkerResultMessage.safeParse(data);
+      if (!parsed.success) {
+        console.log("invalid Worker message");
+        return;
+      }
+      setMessageQueue((v) => [...v, parsed.data]);
+    });
 
     worker.postMessage({ call: "init", wasmUrl });
     setWorker(worker);
   }, []);
 
-  return { worker, workerEventWaiter };
+  return { worker, eventWaiter, postMessage };
 };

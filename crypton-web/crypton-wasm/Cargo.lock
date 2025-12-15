@@ -370,7 +370,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "crypto-wasm"
+name = "crypton-wasm"
 version = "0.1.0"
 dependencies = [
  "base64",

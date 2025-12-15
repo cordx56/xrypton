@@ -46,7 +46,7 @@ impl ReturnValue {
 }
 
 #[wasm_bindgen]
-pub fn generate_and_save_private_keys(
+pub fn generate_private_keys(
     user_id: String,
     main_passphrase: String,
     sub_passphrase: String,

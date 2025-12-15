@@ -6,7 +6,7 @@ import CommonDialog from "@/components/Dialogs/CommonDialog";
 import CopyPlain from "@/components/CopyPlain";
 
 const GenerateKey = () => {
-  const { worker, workerEventWaiter, dialogs } = useContexts();
+  const { worker, dialogs, privateKeys } = useContexts();
 
   const [userId, setUserId] = useState("");
   const [mainPassphrase, setMainPassphrase] = useState("");
@@ -19,11 +19,13 @@ const GenerateKey = () => {
       mainPassphrase,
       subPassphrase,
     };
-    workerEventWaiter?.("generate", (data) => {
+    worker?.eventWaiter("generate", (data) => {
       console.log(data);
       if (!data.success) {
         return;
       }
+      localStorage.setItem("private_keys", data.data.keys);
+      privateKeys?.setKeys(data.data.keys);
       dialogs?.pushDialog((close) => (
         <CommonDialog {...close}>
           <CopyPlain data={data.data.keys} />

@@ -10,11 +10,13 @@
     "fmt": "prettier -w src"
   },
   "dependencies": {
+    "crypton-wasm": "file:./crypton-wasm/pkg",
     "next": "16.0.10",
+    "qr-scanner": "^1.4.2",
+    "qrcode.react": "^4.2.0",
     "react": "19.2.1",
     "react-dom": "19.2.1",
-    "zod": "^4.1.13",
-    "crypton-wasm": "file:./crypton-wasm/pkg"
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

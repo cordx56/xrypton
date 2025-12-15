@@ -11,13 +11,13 @@ const CommonDialog: DialogComponent<{
   }, []);
   return (
     <div className="flex flex-col">
-      <div className="flex justify-between default-border border-b">
+      <div className="flex justify-between default-border border-b px-2 pb-2 mb-4">
         <div>{title ? title : null}</div>
         <button type="button" onClick={onClose}>
           X
         </button>
       </div>
-      <div className="h-full">{children}</div>
+      <div className="h-full px-2">{children}</div>
     </div>
   );
 };
