@@ -13,9 +13,17 @@ export default function Home() {
   return (
     <>
       <div className="centered">
+        <h1 className="my-2 py-2 default-border border-b text-xl text-center">
+          Crypton
+        </h1>
         <div className="flex flex-col md:flex-row">
           <div className="flex flex-col w-full md:w-1/2">
-            {publicKeys?.keys ? <QrDisplay data={publicKeys.keys} /> : null}
+            {publicKeys?.keys ? (
+              <div className="default-border border rounded-lg m-2">
+                <h2 className="my-2 text-lg text-center">Your public keys</h2>
+                <QrDisplay data={publicKeys.keys} />
+              </div>
+            ) : null}
             <div className="flex flex-col md:flex-row justify-center text-xl">
               <button
                 type="button"

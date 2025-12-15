@@ -33,6 +33,10 @@ body {
   background: var(--background);
 }
 
+@utility selected {
+  @apply text-indigo-200 bg-indigo-500;
+}
+
 .input-text {
   @apply px-4 py-2 m-2 border border-indigo-500;
 }
@@ -42,7 +46,7 @@ body {
 }
 
 .button {
-  @apply default-border border rounded px-4 py-2 m-2 background font-medium hover:text-indigo-200 hover:bg-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  @apply default-border border rounded px-4 py-2 m-2 background font-medium hover:selected transition-all disabled:opacity-50 disabled:cursor-not-allowed;
 }
 
 .centered {

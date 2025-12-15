@@ -44,7 +44,11 @@ const Decrypt = () => {
         />
       </p>
       <p className="p">Input encrypted message</p>
-      <textarea value={message} onChange={(e) => setMessage(e.target.value)} />
+      <textarea
+        className="h-24 input-text"
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+      />
       <p className="p">
         <button type="button" className="button" onClick={decrypt}>
           Decrypt

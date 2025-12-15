@@ -8,6 +8,8 @@ import {
 import { useWorkerWaiter } from "@/utils/workerHandler";
 import { useDialogs } from "@/utils/dialogs";
 
+import InitDialog from "@/components/Dialogs/InitDialog";
+
 type ContextsType = {
   worker?: ReturnType<typeof useWorkerWaiter>;
   dialogs?: ReturnType<typeof useDialogs>;
@@ -29,7 +31,11 @@ export const ContextProvider = ({ children }: { children: ReactNode }) => {
 
   const [privateKeys, setPrivateKeys] = useState<string | undefined>(undefined);
   useEffect(() => {
-    setPrivateKeys(localStorage.getItem("private_keys") ?? undefined);
+    const pk = localStorage.getItem("private_keys") ?? undefined;
+    setPrivateKeys(pk);
+    if (pk === undefined) {
+      dialogs.pushDialog((p) => <InitDialog {...p} />);
+    }
   }, []);
   const [publicKeys, setPublicKeys] = useState<string | undefined>(undefined);
   useEffect(() => {

@@ -19,7 +19,7 @@ const Code = ({ code }: { code: string }) => {
       >
         {copyMessage}
       </button>
-      <pre>
+      <pre className="overflow-auto">
         <code>{code}</code>
       </pre>
     </div>

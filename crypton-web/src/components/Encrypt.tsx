@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useContexts } from "@/utils/context";
 import CommonDialog from "@/components/Dialogs/CommonDialog";
 import Code from "@/components/Code";
-import QrReader from "@/components/QrReader";
+import Contacts from "@/components/Contacts";
 
 const Encrypt = () => {
   const { worker, dialogs } = useContexts();
@@ -40,6 +40,7 @@ const Encrypt = () => {
         <div className="flex flex-col text-center">
           <p className="p">Input your message</p>
           <textarea
+            className="h-24 input-text"
             value={payload}
             onChange={(e) => setPayload(e.target.value)}
           />
@@ -50,9 +51,9 @@ const Encrypt = () => {
           </p>
         </div>
       ) : (
-        <div className="text-center">
-          <p className="p">Read public key QR</p>
-          <QrReader setData={setPublicKeys}></QrReader>
+        <div>
+          <p>Contacts</p>
+          <Contacts select={(_name, keys) => setPublicKeys(keys)} />
         </div>
       )}
     </div>
