@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { useContexts } from "@/utils/context";
+import { useContexts, getContacts } from "@/utils/context";
 import CommonDialog from "@/components/Dialogs/CommonDialog";
 import Code from "@/components/Code";
 
 const Decrypt = () => {
   const { worker, dialogs, privateKeys } = useContexts();
 
-  const [passPhrase, setPassPhrase] = useState<string>("");
+  const [passphrase, setPassphrase] = useState<string>("");
   const [message, setMessage] = useState("");
 
   const decrypt = () => {
@@ -25,8 +25,9 @@ const Decrypt = () => {
       });
       worker?.postMessage({
         call: "decrypt",
-        passPhrase,
-        keys: privateKeys.keys,
+        passphrase,
+        privateKeys: privateKeys.keys,
+        knownPublicKeys: getContacts(),
         message,
       });
     }
@@ -39,8 +40,8 @@ const Decrypt = () => {
         <input
           type="password"
           className="input-text"
-          value={passPhrase}
-          onChange={(e) => setPassPhrase(e.target.value)}
+          value={passphrase}
+          onChange={(e) => setPassphrase(e.target.value)}
         />
       </p>
       <p className="p">Input encrypted message</p>

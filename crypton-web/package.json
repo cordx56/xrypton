@@ -3,14 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "predev": "npm run build:sw",
+    "dev": "next dev --webpack",
+    "prebuild": "npm run build:sw",
+    "build": "next build --webpack",
+    "build:sw": "tsup",
     "start": "next start",
     "lint": "eslint",
     "fmt": "prettier -w src"
   },
   "dependencies": {
-    "crypton-wasm": "file:./crypton-wasm/pkg",
+    "crypton-common": "file:../crypton-common",
+    "crypton-wasm": "file:../crypton-wasm/pkg",
     "next": "16.0.10",
     "qr-scanner": "^1.4.2",
     "qrcode.react": "^4.2.0",
@@ -27,6 +31,7 @@
     "eslint-config-next": "16.0.10",
     "prettier": "^3.7.4",
     "tailwindcss": "^4",
+    "tsup": "^8.5.1",
     "typescript": "^5"
   }
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useContexts } from "@/utils/context";
+import { useContexts, getContacts, setContacts as saveContactsStorage } from "@/utils/context";
 import { DialogComponent } from "@/utils/dialogs";
 import CommonDialog from "@/components/Dialogs/CommonDialog";
 import QrReader from "@/components/QrReader";
@@ -42,7 +42,9 @@ const AddContact: DialogComponent<{
         <div className="text-center">
           <p className="p">Read public key QR</p>
           <QrReader setData={setPubKey}></QrReader>
-        </div>
+          <p className="p">Or paste public key</p>
+            <textarea className="input-text" onChange={(e) => setPubKey(e.target.value)} />
+          </div>
       )}
     </CommonDialog>
   );
@@ -56,10 +58,10 @@ const Contacts = ({
   const { dialogs } = useContexts();
 
   const [contacts, setContacts] = useState<Record<string, string>>(
-    JSON.parse(localStorage.getItem("contacts") ?? "{}"),
+    getContacts(),
   );
   const saveContacts = (contacts: Record<string, string>) => {
-    localStorage.setItem("contacts", JSON.stringify(contacts));
+    saveContactsStorage(contacts);
   };
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string[]>([]);

@@ -1,23 +1,16 @@
 import { z } from "zod";
 
-export const WasmResultData = z.union([
-  z.object({ type: z.literal("string"), data: z.string() }),
-  z.object({ type: z.literal("base64"), data: z.string() }),
-]);
-
-export const WasmReturnValue = z.union([
-  z.object({ result: z.literal("ok"), value: WasmResultData.nullish() }),
-  z.object({ result: z.literal("error"), message: z.string() }),
-]);
-
 export const WorkerResultCallList = {
   generate: "generate",
   export_public_keys: "export_public_keys",
   encrypt: "encrypt",
   decrypt: "decrypt",
+  verify: "verify",
 } as const;
 export type WorkerResultCall =
   (typeof WorkerResultCallList)[keyof typeof WorkerResultCallList];
+
+export const Contacts = z.record(z.string(), z.string());
 
 export const WorkerCallMessage = z.union([
   z.object({
@@ -36,13 +29,22 @@ export const WorkerCallMessage = z.union([
   }),
   z.object({
     call: z.literal(WorkerResultCallList["encrypt"]),
-    keys: z.string(),
+    passphrase: z.string(),
+    privateKeys: z.string(),
+    publicKeys: z.string(),
     payload: z.base64(),
   }),
   z.object({
     call: z.literal(WorkerResultCallList["decrypt"]),
-    keys: z.string(),
-    passPhrase: z.string(),
+    passphrase: z.string(),
+    privateKeys: z.string(),
+    knownPublicKeys: Contacts,
+    message: z.string(),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["verify"]),
+    passphrase: z.string(),
+    publicKeys: z.string(),
     message: z.string(),
   }),
 ]);
@@ -73,6 +75,6 @@ export const WorkerResultMessage = z.union([
   }),
   z.object({
     call: z.literal(WorkerResultCallList["decrypt"]),
-    result: WorkerResult(z.object({ payload: z.base64() })),
+    result: WorkerResult(z.object({ sender: z.string(), payload: z.base64() })),
   }),
 ]);

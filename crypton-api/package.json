@@ -1,0 +1,19 @@
+{
+  "name": "crypton-api",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy --minify",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "fmt": "prettier -w src"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.953.0",
+    "hono": "^4.11.1"
+  },
+  "devDependencies": {
+    "prettier": "^3.7.4",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.4.0"
+  }
+}

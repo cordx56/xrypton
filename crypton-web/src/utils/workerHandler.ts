@@ -53,13 +53,7 @@ export const useWorkerWaiter = () => {
   };
 
   useEffect(() => {
-    const worker = new Worker(new URL("../worker.ts", import.meta.url));
-
-    const wasmPath = new URL(
-      "../../crypton-wasm/pkg/crypton_wasm_bg.wasm",
-      import.meta.url,
-    ).toString();
-    const wasmUrl = new URL(wasmPath, document.baseURI).toString();
+    const worker = new Worker(new URL("@/worker", import.meta.url));
 
     worker.addEventListener("message", ({ data }) => {
       const parsed = WorkerResultMessage.safeParse(data);
@@ -70,7 +64,7 @@ export const useWorkerWaiter = () => {
       setMessageQueue((v) => [...v, parsed.data]);
     });
 
-    worker.postMessage({ call: "init", wasmUrl });
+    worker.postMessage({ call: "init" });
     setWorker(worker);
   }, []);
 

@@ -22,6 +22,11 @@ export default function Home() {
               <div className="default-border border rounded-lg m-2">
                 <h2 className="my-2 text-lg text-center">Your public keys</h2>
                 <QrDisplay data={publicKeys.keys} />
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => navigator.clipboard.writeText(publicKeys.keys!)}
+                >Copy</button>
               </div>
             ) : null}
             <div className="flex flex-col md:flex-row justify-center text-xl">

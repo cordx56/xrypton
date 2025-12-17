@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { z } from "zod";
 import { WorkerCallMessage } from "@/utils/schema";
-import { useContexts } from "@/utils/context";
+import { useContexts, setPrivateKeys, setSubPassphrase as saveSubPassphrase } from "@/utils/context";
 import CommonDialog from "@/components/Dialogs/CommonDialog";
 import CopyPlain from "@/components/CopyPlain";
 
@@ -24,7 +24,9 @@ const GenerateKey = () => {
       if (!data.success) {
         return;
       }
-      localStorage.setItem("private_keys", data.data.keys);
+
+      setPrivateKeys(data.data.keys);
+      saveSubPassphrase(subPassphrase);
       privateKeys?.setKeys(data.data.keys);
       dialogs?.pushDialog((close) => (
         <CommonDialog {...close}>

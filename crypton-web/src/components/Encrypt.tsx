@@ -1,17 +1,18 @@
 import { useState } from "react";
-import { useContexts } from "@/utils/context";
+import { useContexts, getSubPassphrase } from "@/utils/context";
 import CommonDialog from "@/components/Dialogs/CommonDialog";
 import Code from "@/components/Code";
 import Contacts from "@/components/Contacts";
 
 const Encrypt = () => {
-  const { worker, dialogs } = useContexts();
+  const { worker, dialogs, privateKeys } = useContexts();
 
   const [publickKeys, setPublicKeys] = useState<string | undefined>(undefined);
   const [payload, setPayload] = useState("");
 
   const encrypt = () => {
-    if (publickKeys) {
+    const passphrase = getSubPassphrase();
+    if (publickKeys && privateKeys?.keys && passphrase) {
       const encoded = Buffer.from(new TextEncoder().encode(payload)).toString(
         "base64",
       );
@@ -29,7 +30,9 @@ const Encrypt = () => {
       worker?.postMessage({
         call: "encrypt",
         payload: encoded,
-        keys: publickKeys,
+        privateKeys: privateKeys.keys,
+        publicKeys: publickKeys,
+        passphrase,
       });
     }
   };

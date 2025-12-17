@@ -2,12 +2,13 @@ import { z } from "zod";
 import init, {
   generate_private_keys,
   export_public_keys,
-  encrypt,
+  sign_and_encrypt,
   decrypt,
+  verify,
 } from "crypton-wasm";
+import { WasmReturnValue } from "crypton-common";
 import {
   WorkerCallMessage,
-  WasmReturnValue,
   WorkerResultMessage,
 } from "@/utils/schema";
 
@@ -60,7 +61,7 @@ worker.addEventListener("message", async ({ data }) => {
         result: {
           success: true,
           data: {
-            keys: result.data.value.data,
+            keys: result.data.value[0].data,
           },
         },
       } as z.infer<typeof WorkerResultMessage>);
@@ -90,7 +91,7 @@ worker.addEventListener("message", async ({ data }) => {
         result: {
           success: true,
           data: {
-            keys: result.data.value.data,
+            keys: result.data.value[0].data,
           },
         },
       } as z.infer<typeof WorkerResultMessage>);
@@ -108,19 +109,19 @@ worker.addEventListener("message", async ({ data }) => {
     }
   } else if (parsed.data.call === "encrypt") {
     const data = Buffer.from(parsed.data.payload, "base64");
-    const result = WasmReturnValue.safeParse(encrypt(parsed.data.keys, data));
+    const result = WasmReturnValue.safeParse(sign_and_encrypt(parsed.data.privateKeys, parsed.data.publicKeys, parsed.data.passphrase, data));
     if (
       result.success === true &&
       result.data.result === "ok" &&
       result.data.value &&
-      result.data.value.type === "string"
+      result.data.value[0].type === "string"
     ) {
       post({
         call: "encrypt",
         result: {
           success: true,
           data: {
-            message: result.data.value.data,
+            message: result.data.value[0].data,
           },
         },
       } as z.infer<typeof WorkerResultMessage>);
@@ -137,34 +138,65 @@ worker.addEventListener("message", async ({ data }) => {
       });
     }
   } else if (parsed.data.call === "decrypt") {
+    const knownPubKeys = parsed.data.knownPublicKeys;
+
     const result = WasmReturnValue.safeParse(
-      decrypt(parsed.data.keys, parsed.data.passPhrase, parsed.data.message),
+      decrypt(parsed.data.privateKeys, parsed.data.passphrase, parsed.data.message),
     );
     if (
       result.success === true &&
-      result.data.result === "ok" &&
-      result.data.value?.type === "base64"
-    ) {
-      post({
-        call: "decrypt",
-        result: {
-          success: true,
-          data: {
-            payload: result.data.value.data,
+      result.data.result === "ok") {
+      if (
+        result.data.value[0].type === "string" &&
+        result.data.value[0].data.length !== 0 &&
+        result.data.value[1].type === "base64" &&
+        Object.keys(knownPubKeys).includes(result.data.value[0].data)
+      ) {
+        const checkResult = WasmReturnValue.safeParse(verify(knownPubKeys[result.data.value[0].data], result.data.value[1].data));
+        if (checkResult.success) {
+          post({
+            call: "decrypt",
+            result: {
+              success: true,
+              data: {
+                sender: result.data.value[0].data,
+                payload: result.data.value[1].data,
+              },
+            },
+          });
+        } else {
+          post({
+            call: "decrypt",
+            result: {
+              success: false,
+              message: "verification failed",
+            },
+          });
+        }
+        return;
+      } else {
+        post({
+          call: "decrypt",
+          result: {
+            success: true,
+            data: {
+              sender: result.data.value[0].data,
+              payload: result.data.value[1].data,
+            },
           },
-        },
-      } as z.infer<typeof WorkerResultMessage>);
-    } else {
-      post({
-        call: "encrypt",
-        result: {
-          success: false,
-          message:
-            result.data?.result === "error"
-              ? result.data.message
-              : "message parse error",
-        },
-      });
+        });
+        return;
+      }
     }
+    post({
+      call: "encrypt",
+      result: {
+        success: false,
+        message:
+          result.data?.result === "error"
+            ? result.data.message
+            : "message parse error",
+      },
+    });
   }
 });
