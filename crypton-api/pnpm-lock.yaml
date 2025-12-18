@@ -11,10 +11,19 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.953.0
         version: 3.953.0
+      crypton-common:
+        specifier: file:../crypton-common
+        version: file:../crypton-common
+      crypton-wasm:
+        specifier: file:../crypton-wasm/pkg
+        version: file:../crypton-wasm/pkg
       hono:
         specifier: ^4.11.1
         version: 4.11.1
     devDependencies:
+      '@types/node':
+        specifier: ^25.0.3
+        version: 25.0.3
       prettier:
         specifier: ^3.7.4
         version: 3.7.4
@@ -739,6 +748,9 @@ packages:
   '@speed-highlight/core@1.2.12':
     resolution: {integrity: sha512-uilwrK0Ygyri5dToHYdZSjcvpS2ZwX0w5aSt3GCEN9hrjxWCoeV4Z2DTXuxjwbntaLQIEEAlCeNQss5SoHvAEA==}
 
+  '@types/node@25.0.3':
+    resolution: {integrity: sha512-W609buLVRVmeW693xKfzHeIV6nJGGz98uCPfeXI1ELMLXVeKYZ9m15fAMSaUPBHYLGFsVRcMmSCksQOrZV9BYA==}
+
   acorn-walk@8.3.2:
     resolution: {integrity: sha512-cjkyv4OtNCIeqhHrfS81QWXoCBPExR/J62oyEqepVw8WaQeSqpW2uhuLPh1m9eWhDuOo/jUXVTlifvesOWp/4A==}
     engines: {node: '>=0.4.0'}
@@ -771,6 +783,12 @@ packages:
   cookie@1.1.1:
     resolution: {integrity: sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ==}
     engines: {node: '>=18'}
+
+  crypton-common@file:../crypton-common:
+    resolution: {directory: ../crypton-common, type: directory}
+
+  crypton-wasm@file:../crypton-wasm/pkg:
+    resolution: {directory: ../crypton-wasm/pkg, type: directory}
 
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
@@ -863,6 +881,9 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  undici-types@7.16.0:
+    resolution: {integrity: sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw==}
+
   undici@7.14.0:
     resolution: {integrity: sha512-Vqs8HTzjpQXZeXdpsfChQTlafcMQaaIwnGwLam1wudSSjlJeQ3bw1j+TLPePgrCnCpUXx7Ba5Pdpf5OBih62NQ==}
     engines: {node: '>=20.18.1'}
@@ -905,6 +926,9 @@ packages:
 
   zod@3.22.3:
     resolution: {integrity: sha512-EjIevzuJRiRPbVH4mGc8nApb/lVLKVpmUhAaR5R5doKGfAnGJ6Gr3CViAVjP+4FWSxCsybeWQdcgCtbX+7oZug==}
+
+  zod@4.2.1:
+    resolution: {integrity: sha512-0wZ1IRqGGhMP76gLqz8EyfBXKk0J2qo2+H3fi4mcUP/KtTocoX08nmIAHl1Z2kJIZbZee8KOpBCSNPRgauucjw==}
 
 snapshots:
 
@@ -1937,6 +1961,10 @@ snapshots:
 
   '@speed-highlight/core@1.2.12': {}
 
+  '@types/node@25.0.3':
+    dependencies:
+      undici-types: 7.16.0
+
   acorn-walk@8.3.2: {}
 
   acorn@8.14.0: {}
@@ -1962,6 +1990,12 @@ snapshots:
       color-string: 1.9.1
 
   cookie@1.1.1: {}
+
+  crypton-common@file:../crypton-common:
+    dependencies:
+      zod: 4.2.1
+
+  crypton-wasm@file:../crypton-wasm/pkg: {}
 
   detect-libc@2.1.2: {}
 
@@ -2081,6 +2115,8 @@ snapshots:
 
   typescript@5.9.3: {}
 
+  undici-types@7.16.0: {}
+
   undici@7.14.0: {}
 
   unenv@2.0.0-rc.24:
@@ -2127,3 +2163,5 @@ snapshots:
       youch-core: 0.3.3
 
   zod@3.22.3: {}
+
+  zod@4.2.1: {}

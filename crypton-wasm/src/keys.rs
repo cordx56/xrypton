@@ -166,6 +166,14 @@ impl PublicKeys {
     pub fn get_signing_sub_key_id(&self) -> String {
         self.signing_public().key_id().to_string()
     }
+    pub fn get_user_ids(&self) -> Vec<String> {
+        self.keys
+            .details
+            .users
+            .iter()
+            .map(|v| v.id.to_string())
+            .collect()
+    }
 
     #[tracing::instrument]
     pub fn encrypt(&self, plain: Vec<u8>) -> Result<String, Error> {

@@ -106,6 +106,16 @@ pub fn get_signing_sub_key_id(public_keys: String) -> Result<JsValue, JsValue> {
     }
     .to_value())
 }
+#[wasm_bindgen]
+pub fn get_pub_key_user_ids(public_keys: String) -> Result<JsValue, JsValue> {
+    let keys = get_public_keys(public_keys)?;
+    let value = keys
+        .get_user_ids()
+        .into_iter()
+        .map(|data| ResultData::String { data })
+        .collect();
+    Ok(ReturnValue::Ok { value }.to_value())
+}
 
 #[wasm_bindgen]
 pub fn sign_and_encrypt(
