@@ -1,14 +1,29 @@
 import { useState } from "react";
-import { useContexts, getContacts, setContacts as saveContactsStorage } from "@/utils/context";
+import { z } from "zod";
+import { useContexts, getContacts, saveContacts } from "@/utils/context";
+import { Contacts } from "@/utils/schema";
 import { DialogComponent } from "@/utils/dialogs";
 import CommonDialog from "@/components/Dialogs/CommonDialog";
 import QrReader from "@/components/QrReader";
 
 const AddContact: DialogComponent<{
-  add: (name: string, keys: string) => void;
+  add: (keyId: string, name: string, keys: string) => void;
 }> = ({ close, setOnClose, add }) => {
+  const { worker } = useContexts();
+
   const [name, setName] = useState("");
+  const [keyId, setKeyId] = useState("");
   const [pubKey, setPubKey] = useState<string | null>(null);
+  const checkPubkey = (publicKeys: string) => {
+    worker?.eventWaiter("get_key_id", (data) => {
+      console.log(data);
+      if (data.success) {
+        setPubKey(publicKeys);
+        setKeyId(data.data.key_id);
+      }
+    });
+    worker?.postMessage({ call: "get_key_id", publicKeys });
+  };
 
   return (
     <CommonDialog close={close} setOnClose={setOnClose}>
@@ -30,7 +45,7 @@ const AddContact: DialogComponent<{
               className="button"
               disabled={name.length === 0}
               onClick={() => {
-                add(name, pubKey);
+                add(keyId, name, pubKey);
                 close();
               }}
             >
@@ -41,28 +56,27 @@ const AddContact: DialogComponent<{
       ) : (
         <div className="text-center">
           <p className="p">Read public key QR</p>
-          <QrReader setData={setPubKey}></QrReader>
+          <QrReader setData={checkPubkey}></QrReader>
           <p className="p">Or paste public key</p>
-            <textarea className="input-text" onChange={(e) => setPubKey(e.target.value)} />
-          </div>
+          <textarea
+            className="input-text"
+            onChange={(e) => checkPubkey(e.target.value)}
+          />
+        </div>
       )}
     </CommonDialog>
   );
 };
 
-const Contacts = ({
+const ContactsList = ({
   select,
 }: {
-  select: (name: string, keys: string) => void;
+  select: (keyId: string, name: string, keys: string) => void;
 }) => {
   const { dialogs } = useContexts();
 
-  const [contacts, setContacts] = useState<Record<string, string>>(
-    getContacts(),
-  );
-  const saveContacts = (contacts: Record<string, string>) => {
-    saveContactsStorage(contacts);
-  };
+  const [contacts, setContacts] =
+    useState<z.infer<typeof Contacts>>(getContacts());
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
 
@@ -78,15 +92,17 @@ const Contacts = ({
         />
       </div>
       <ul className="m-2 border default-border">
-        {Object.keys(contacts)
-          .filter((v) => search.length === 0 || v.includes(search))
-          .map((v, i) => (
+        {Object.entries(contacts)
+          .filter(
+            ([_key, data]) => search.length === 0 || data.name.includes(search),
+          )
+          .map(([key, data]) => (
             <li
-              key={i}
-              className={`default-border border-b p-2 ${selected.includes(v) ? "selected" : ""}`}
-              onClick={() => setSelected([v])}
+              key={key}
+              className={`default-border border-b p-2 ${selected.includes(key) ? "selected" : ""}`}
+              onClick={() => setSelected([key])}
             >
-              {v}
+              {data.name}
             </li>
           ))}
       </ul>
@@ -98,9 +114,9 @@ const Contacts = ({
             dialogs?.pushDialog((p) => (
               <AddContact
                 {...p}
-                add={(name, keys) => {
+                add={(keyId, name, publicKeys) => {
                   setContacts((v) => {
-                    v[name] = keys;
+                    v[keyId] = { name, publicKeys };
                     saveContacts(v);
                     return v;
                   });
@@ -132,7 +148,13 @@ const Contacts = ({
           type="button"
           className="button m-2"
           disabled={selected.length !== 1}
-          onClick={() => select(selected[0], contacts[selected[0]])}
+          onClick={() =>
+            select(
+              selected[0],
+              contacts[selected[0]].name,
+              contacts[selected[0]].publicKeys,
+            )
+          }
         >
           OK
         </button>
@@ -141,4 +163,4 @@ const Contacts = ({
   );
 };
 
-export default Contacts;
+export default ContactsList;

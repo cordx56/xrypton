@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { z } from "zod";
 import { WorkerCallMessage } from "@/utils/schema";
-import { useContexts, setPrivateKeys, setSubPassphrase as saveSubPassphrase } from "@/utils/context";
+import {
+  useContexts,
+  savePrivateKeys,
+  saveSubPassphrase,
+} from "@/utils/context";
 import CommonDialog from "@/components/Dialogs/CommonDialog";
 import CopyPlain from "@/components/CopyPlain";
 
@@ -25,7 +29,7 @@ const GenerateKey = () => {
         return;
       }
 
-      setPrivateKeys(data.data.keys);
+      savePrivateKeys(data.data.keys);
       saveSubPassphrase(subPassphrase);
       privateKeys?.setKeys(data.data.keys);
       dialogs?.pushDialog((close) => (

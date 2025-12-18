@@ -1,13 +1,11 @@
 use crate::*;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use pgp::{armor, bytes::Bytes, composed::*, crypto, packet, ser::Serialize, types::*};
+use pgp::{
+    bytes::Bytes,
+    composed::*,
+    crypto, packet,
+    types::{KeyDetails, *},
+};
 use rand::rngs::OsRng;
-
-#[derive(Debug)]
-pub enum PrivateKeyType {
-    Signing,
-    Encryption,
-}
 
 #[derive(Debug)]
 pub struct PrivateKeys {
@@ -52,32 +50,36 @@ impl PrivateKeys {
             .to_armored_string(OsRng::default(), ArmorOptions::default())
             .map_err(|e| Error::EncryptionError(e.to_string()))
     }
-    /// returns (signer, data)
+    /// returns (data, signature, issuers)
     #[tracing::instrument]
     pub fn decrypt(
         &self,
         passphrase: &str,
         armor: &str,
-    ) -> Result<(Option<String>, Vec<u8>), Error> {
+    ) -> Result<(Vec<u8>, Option<String>, Vec<String>), Error> {
         let (msg, _) =
             Message::from_string(armor).map_err(|e| Error::DecryptionError(e.to_string()))?;
         let mut decrypted = msg
             .decrypt(&Password::from(passphrase), &self.keys)
             .map_err(|e| Error::DecryptionError(e.to_string()))?;
-        let signer = match &decrypted {
-            Message::Signed { reader, .. } => reader
-                .signature()
-                .signers_userid()
-                .map(|v| String::from_utf8(v.to_vec()).ok())
-                .flatten(),
+        let data = decrypted
+            .as_data_vec()
+            .map_err(|e| Error::DecryptionError(e.to_string()))?;
+        let signature = match &decrypted {
+            Message::Signed { reader, .. } => Some(reader.signature()),
+            Message::SignedOnePass { reader, .. } => reader.signature(),
             _ => None,
         };
-        Ok((
-            signer,
-            decrypted
-                .as_data_vec()
-                .map_err(|e| Error::DecryptionError(e.to_string()))?,
-        ))
+        let issuers = signature
+            .map(|v| v.issuer().iter().map(|w| w.to_string()).collect())
+            .unwrap_or(Vec::new());
+        let signature = signature.map_or(Ok(None), |v| {
+            DetachedSignature::new(v.clone())
+                .to_armored_string(ArmorOptions::default())
+                .map(Some)
+                .map_err(|e| Error::VerificationError(e.to_string()))
+        })?;
+        Ok((data, signature, issuers))
     }
 
     #[tracing::instrument]
@@ -161,6 +163,10 @@ impl PublicKeys {
             .unwrap()
     }
 
+    pub fn get_signing_sub_key_id(&self) -> String {
+        self.signing_public().key_id().to_string()
+    }
+
     #[tracing::instrument]
     pub fn encrypt(&self, plain: Vec<u8>) -> Result<String, Error> {
         let mut builder = MessageBuilder::from_bytes("", plain)
@@ -173,24 +179,19 @@ impl PublicKeys {
             .map_err(|e| Error::EncryptionError(e.to_string()))
     }
     #[tracing::instrument]
-    pub fn verify(&self, armored_or_base64: &str) -> Result<(), Error> {
-        let verify = |msg: Message<'_>| {
-            msg.verify(self.signing_public())
-                .map(|_| ())
-                .map_err(|e| Error::VerificationError(e.to_string()))
-        };
-
-        match Message::from_string(armored_or_base64).map(|v| v.0) {
-            Ok(v) => verify(v),
-            Err(_) => {
-                let decoded = URL_SAFE
-                    .decode(armored_or_base64)
-                    .map_err(|e| Error::VerificationError(e.to_string()))?;
-                let msg = Message::from_bytes(decoded.as_slice())
-                    .map_err(|e| Error::VerificationError(e.to_string()))?;
-                verify(msg)
-            }
-        }
+    pub fn verify(&self, armored: &str) -> Result<(), Error> {
+        let (mut msg, _) =
+            Message::from_string(armored).map_err(|e| Error::VerificationError(e.to_string()))?;
+        msg.verify_read(self.signing_public())
+            .map(|_| ())
+            .map_err(|e| Error::VerificationError(e.to_string()))
+    }
+    #[tracing::instrument]
+    pub fn verify_detached_signature(&self, armored: &str, data: &[u8]) -> Result<(), Error> {
+        let (sig, _) = DetachedSignature::from_string(armored)
+            .map_err(|e| Error::VerificationError(e.to_string()))?;
+        sig.verify(self.signing_public(), data)
+            .map_err(|e| Error::VerificationError(e.to_string()))
     }
 }
 impl TryFrom<&str> for PublicKeys {

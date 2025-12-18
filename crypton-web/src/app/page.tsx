@@ -25,8 +25,12 @@ export default function Home() {
                 <button
                   type="button"
                   className="button"
-                  onClick={() => navigator.clipboard.writeText(publicKeys.keys!)}
-                >Copy</button>
+                  onClick={() =>
+                    navigator.clipboard.writeText(publicKeys.keys!)
+                  }
+                >
+                  Copy
+                </button>
               </div>
             ) : null}
             <div className="flex flex-col md:flex-row justify-center text-xl">

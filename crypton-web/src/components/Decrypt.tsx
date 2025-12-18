@@ -10,14 +10,26 @@ const Decrypt = () => {
   const [message, setMessage] = useState("");
 
   const decrypt = () => {
+    const contacts = getContacts();
     if (privateKeys?.keys) {
       worker?.eventWaiter("decrypt", (result) => {
         if (result.success) {
           const text = new TextDecoder().decode(
             Buffer.from(result.data.payload, "base64"),
           );
+
+          const issuers = result.data.key_ids;
+          const senders = Object.entries(contacts)
+            .filter(([k, _v]) => issuers.includes(k))
+            .map(([_k, v]) => v.name);
+
           dialogs?.pushDialog((p) => (
-            <CommonDialog {...p}>
+            <CommonDialog
+              {...p}
+              title={
+                0 < senders.length ? `Message from ${senders.join(", ")}` : ""
+              }
+            >
               <Code code={text} />
             </CommonDialog>
           ));
@@ -27,7 +39,7 @@ const Decrypt = () => {
         call: "decrypt",
         passphrase,
         privateKeys: privateKeys.keys,
-        knownPublicKeys: getContacts(),
+        knownPublicKeys: contacts,
         message,
       });
     }

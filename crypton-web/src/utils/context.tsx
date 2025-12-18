@@ -29,16 +29,22 @@ type ContextsType = {
 
 const Contexts = createContext<ContextsType>({});
 
-export const getPrivateKeys = () => localStorage.getItem("private_keys") ?? undefined;
-export const setPrivateKeys = (v: string) => localStorage.setItem("private_keys", v) ?? undefined;
-export const getSubPassphrase = () => localStorage.getItem("sub_passphrase") ?? undefined;
-export const setSubPassphrase = (v: string) => localStorage.setItem("sub_passphrase", v) ?? undefined;
+export const getPrivateKeys = () =>
+  localStorage.getItem("private_keys") ?? undefined;
+export const savePrivateKeys = (v: string) =>
+  localStorage.setItem("private_keys", v) ?? undefined;
+export const getSubPassphrase = () =>
+  localStorage.getItem("sub_passphrase") ?? undefined;
+export const saveSubPassphrase = (v: string) =>
+  localStorage.setItem("sub_passphrase", v) ?? undefined;
 
 export const getContacts = () => {
-  const parsed = Contacts.safeParse(JSON.parse(localStorage.getItem("contacts") ?? "{}"))
+  const parsed = Contacts.safeParse(
+    JSON.parse(localStorage.getItem("contacts") ?? "{}"),
+  );
   return parsed.data ?? {};
 };
-export const setContacts = (contacts: z.infer<typeof Contacts>) => {
+export const saveContacts = (contacts: z.infer<typeof Contacts>) => {
   localStorage.setItem("contacts", JSON.stringify(contacts));
 };
 

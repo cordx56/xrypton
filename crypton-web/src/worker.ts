@@ -2,15 +2,13 @@ import { z } from "zod";
 import init, {
   generate_private_keys,
   export_public_keys,
+  get_signing_sub_key_id,
   sign_and_encrypt,
   decrypt,
-  verify,
+  verify_detached_signature,
 } from "crypton-wasm";
 import { WasmReturnValue } from "crypton-common";
-import {
-  WorkerCallMessage,
-  WorkerResultMessage,
-} from "@/utils/schema";
+import { WorkerCallMessage, WorkerResultMessage } from "@/utils/schema";
 
 // @ts-expect-error Worker is provided by the dedicated worker context at runtime.
 const worker: Worker = self;
@@ -107,9 +105,30 @@ worker.addEventListener("message", async ({ data }) => {
         },
       });
     }
+  } else if (parsed.data.call === "get_key_id") {
+    const result = WasmReturnValue.safeParse(
+      get_signing_sub_key_id(parsed.data.publicKeys),
+    );
+    if (
+      result.success &&
+      result.data.result === "ok" &&
+      result.data.value[0].type === "string"
+    ) {
+      post({
+        call: "get_key_id",
+        result: { success: true, data: { key_id: result.data.value[0].data } },
+      });
+    }
   } else if (parsed.data.call === "encrypt") {
     const data = Buffer.from(parsed.data.payload, "base64");
-    const result = WasmReturnValue.safeParse(sign_and_encrypt(parsed.data.privateKeys, parsed.data.publicKeys, parsed.data.passphrase, data));
+    const result = WasmReturnValue.safeParse(
+      sign_and_encrypt(
+        parsed.data.privateKeys,
+        parsed.data.publicKeys,
+        parsed.data.passphrase,
+        data,
+      ),
+    );
     if (
       result.success === true &&
       result.data.result === "ok" &&
@@ -138,58 +157,80 @@ worker.addEventListener("message", async ({ data }) => {
       });
     }
   } else if (parsed.data.call === "decrypt") {
-    const knownPubKeys = parsed.data.knownPublicKeys;
+    const knownPubKeys = new Map(Object.entries(parsed.data.knownPublicKeys));
 
     const result = WasmReturnValue.safeParse(
-      decrypt(parsed.data.privateKeys, parsed.data.passphrase, parsed.data.message),
+      decrypt(
+        parsed.data.privateKeys,
+        parsed.data.passphrase,
+        parsed.data.message,
+      ),
     );
     if (
       result.success === true &&
-      result.data.result === "ok") {
-      if (
-        result.data.value[0].type === "string" &&
-        result.data.value[0].data.length !== 0 &&
-        result.data.value[1].type === "base64" &&
-        Object.keys(knownPubKeys).includes(result.data.value[0].data)
-      ) {
-        const checkResult = WasmReturnValue.safeParse(verify(knownPubKeys[result.data.value[0].data], result.data.value[1].data));
-        if (checkResult.success) {
-          post({
-            call: "decrypt",
-            result: {
-              success: true,
-              data: {
-                sender: result.data.value[0].data,
-                payload: result.data.value[1].data,
+      result.data.result === "ok" &&
+      result.data.value[0].type === "base64"
+    ) {
+      if (1 < result.data.value.length) {
+        const data = Buffer.from(result.data.value[0].data, "base64");
+        const detachedSignature = result.data.value[1].data;
+        const keyIds = result.data.value.slice(2);
+        for (const keyId of keyIds) {
+          const pubKey = knownPubKeys.get(keyId.data);
+          if (pubKey === undefined) {
+            post({
+              call: "decrypt",
+              result: {
+                success: false,
+                message: "unknown sender",
               },
-            },
-          });
-        } else {
-          post({
-            call: "decrypt",
-            result: {
-              success: false,
-              message: "verification failed",
-            },
-          });
+            });
+            return;
+          }
+          const checkResult = WasmReturnValue.safeParse(
+            verify_detached_signature(
+              pubKey.publicKeys,
+              detachedSignature,
+              data,
+            ),
+          );
+          if (!checkResult.success) {
+            post({
+              call: "decrypt",
+              result: {
+                success: false,
+                message: "verification failed",
+              },
+            });
+            return;
+          }
         }
-        return;
+        post({
+          call: "decrypt",
+          result: {
+            success: true,
+            data: {
+              key_ids: keyIds.map((v) => v.data),
+              payload: result.data.value[0].data,
+            },
+          },
+        });
       } else {
         post({
           call: "decrypt",
           result: {
             success: true,
             data: {
-              sender: result.data.value[0].data,
-              payload: result.data.value[1].data,
+              key_ids: [],
+              payload: result.data.value[0].data,
             },
           },
         });
-        return;
       }
+      return;
     }
     post({
-      call: "encrypt",
+      call: "decrypt",
       result: {
         success: false,
         message:

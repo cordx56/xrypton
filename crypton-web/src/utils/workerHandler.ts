@@ -59,6 +59,7 @@ export const useWorkerWaiter = () => {
       const parsed = WorkerResultMessage.safeParse(data);
       if (!parsed.success) {
         console.log("invalid Worker message");
+        console.log(parsed.error);
         return;
       }
       setMessageQueue((v) => [...v, parsed.data]);

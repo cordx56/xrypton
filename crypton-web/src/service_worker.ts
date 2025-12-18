@@ -34,15 +34,17 @@ sw.addEventListener("push", (ev) => {
   const pass = getSubPassphrase();
   if (pass === undefined) {
     ev.waitUntil(
-      sw.registration.showNotification("New message received", { body: "Encrypted" })
+      sw.registration.showNotification("New message received", {
+        body: "Encrypted",
+      }),
     );
     return;
   }
-  const result = WasmReturnValue.safeParse(decrypt(keys, pass, data.data.encrypted));
+  const result = WasmReturnValue.safeParse(
+    decrypt(keys, pass, data.data.encrypted),
+  );
   if (!result.success || result.data.result !== "ok") {
     return;
   }
-  ev.waitUntil(
-    sw.registration.showNotification("", { body: "" })
-  );
+  ev.waitUntil(sw.registration.showNotification("", { body: "" }));
 });

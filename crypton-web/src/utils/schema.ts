@@ -6,11 +6,15 @@ export const WorkerResultCallList = {
   encrypt: "encrypt",
   decrypt: "decrypt",
   verify: "verify",
+  get_key_id: "get_key_id",
 } as const;
 export type WorkerResultCall =
   (typeof WorkerResultCallList)[keyof typeof WorkerResultCallList];
 
-export const Contacts = z.record(z.string(), z.string());
+export const Contacts = z.record(
+  z.string(),
+  z.object({ name: z.string(), publicKeys: z.string() }),
+);
 
 export const WorkerCallMessage = z.union([
   z.object({
@@ -47,6 +51,10 @@ export const WorkerCallMessage = z.union([
     publicKeys: z.string(),
     message: z.string(),
   }),
+  z.object({
+    call: z.literal(WorkerResultCallList["get_key_id"]),
+    publicKeys: z.string(),
+  }),
 ]);
 
 export const WorkerResult = <T>(schema: T) =>
@@ -75,6 +83,12 @@ export const WorkerResultMessage = z.union([
   }),
   z.object({
     call: z.literal(WorkerResultCallList["decrypt"]),
-    result: WorkerResult(z.object({ sender: z.string(), payload: z.base64() })),
+    result: WorkerResult(
+      z.object({ key_ids: z.string().array(), payload: z.base64url() }),
+    ),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["get_key_id"]),
+    result: WorkerResult(z.object({ key_id: z.string() })),
   }),
 ]);

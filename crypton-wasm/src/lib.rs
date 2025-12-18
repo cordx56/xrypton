@@ -19,8 +19,6 @@ pub enum Error {
     VerificationError(String),
     #[error("invalid payload error: {0}")]
     InvalidPayload(String),
-    #[error("web storage error: {0}")]
-    WebStorageError(String),
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -99,6 +97,17 @@ pub fn export_public_keys(keys: String) -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen]
+pub fn get_signing_sub_key_id(public_keys: String) -> Result<JsValue, JsValue> {
+    let keys = get_public_keys(public_keys)?;
+    Ok(ReturnValue::Ok {
+        value: vec![ResultData::String {
+            data: keys.get_signing_sub_key_id(),
+        }],
+    }
+    .to_value())
+}
+
+#[wasm_bindgen]
 pub fn sign_and_encrypt(
     private_key: String,
     public_key: String,
@@ -123,23 +132,23 @@ pub fn sign_and_encrypt(
 #[wasm_bindgen]
 pub fn decrypt(private_key: String, sub_passphrase: &str, data: &str) -> Result<JsValue, JsValue> {
     let private = get_private_keys(private_key)?;
-    let (sender, data) = private.decrypt(sub_passphrase, data).map_err(|e| {
+    let (data, signature, key_ids) = private.decrypt(sub_passphrase, data).map_err(|e| {
         ReturnValue::Error {
             message: e.to_string(),
         }
         .to_value()
     })?;
-    Ok(ReturnValue::Ok {
-        value: vec![
-            ResultData::String {
-                data: sender.unwrap_or("".to_string()),
-            },
-            ResultData::Base64 {
-                data: URL_SAFE.encode(&data),
-            },
-        ],
+    let mut result = Vec::with_capacity(1 + key_ids.len());
+    result.push(ResultData::Base64 {
+        data: URL_SAFE.encode(&data),
+    });
+    if let Some(data) = signature {
+        result.push(ResultData::String { data });
+        for key_id in key_ids {
+            result.push(ResultData::String { data: key_id });
+        }
     }
-    .to_value())
+    Ok(ReturnValue::Ok { value: result }.to_value())
 }
 
 #[wasm_bindgen]
@@ -159,13 +168,29 @@ pub fn sign(keys: String, sub_passphrase: &str, data: Vec<u8>) -> Result<JsValue
     .to_value())
 }
 #[wasm_bindgen]
-pub fn verify(public_key: String, armored_or_base64: &str) -> Result<JsValue, JsValue> {
+pub fn verify(public_key: String, armored: &str) -> Result<JsValue, JsValue> {
     let keys = get_public_keys(public_key)?;
-    keys.verify(armored_or_base64).map_err(|e| {
+    keys.verify(armored).map_err(|e| {
         ReturnValue::Error {
             message: e.to_string(),
         }
         .to_value()
     })?;
+    Ok(ReturnValue::Ok { value: Vec::new() }.to_value())
+}
+#[wasm_bindgen]
+pub fn verify_detached_signature(
+    public_key: String,
+    armored: &str,
+    data: Vec<u8>,
+) -> Result<JsValue, JsValue> {
+    let keys = get_public_keys(public_key)?;
+    keys.verify_detached_signature(armored, &data)
+        .map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
     Ok(ReturnValue::Ok { value: Vec::new() }.to_value())
 }

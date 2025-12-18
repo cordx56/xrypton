@@ -13,7 +13,7 @@ importers:
         version: file:../crypton-common
       crypton-wasm:
         specifier: file:../crypton-wasm/pkg
-        version: file:../crypton-wasm/pkg
+        version: pkg@file:../crypton-wasm/pkg
       next:
         specifier: 16.0.10
         version: 16.0.10(@babel/core@7.28.5)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
@@ -1137,9 +1137,6 @@ packages:
   crypton-common@file:../crypton-common:
     resolution: {directory: ../crypton-common, type: directory}
 
-  crypton-wasm@file:../crypton-wasm/pkg:
-    resolution: {directory: ../crypton-wasm/pkg, type: directory}
-
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
@@ -1956,6 +1953,9 @@ packages:
 
   pkg-types@1.3.1:
     resolution: {integrity: sha512-/Jm5M4RvtBFVkKWRu2BLUTNP8/M2a+UwuAX+ae4770q1qVGtfjG+WTCupoZixokjmHiry8uI+dlY8KXYV5HVVQ==}
+
+  pkg@file:../crypton-wasm/pkg:
+    resolution: {directory: ../crypton-wasm/pkg, type: directory}
 
   possible-typed-array-names@1.1.0:
     resolution: {integrity: sha512-/+5VFTchJDoVj3bhoqi6UeymcD00DAwb1nJwamzPvHEszJ4FpF6SNNbUbOS8yI56qHzdV8eK0qEfOSiodkTdxg==}
@@ -3297,8 +3297,6 @@ snapshots:
     dependencies:
       zod: 4.2.1
 
-  crypton-wasm@file:../crypton-wasm/pkg: {}
-
   csstype@3.2.3: {}
 
   damerau-levenshtein@1.0.8: {}
@@ -4266,6 +4264,8 @@ snapshots:
       confbox: 0.1.8
       mlly: 1.8.0
       pathe: 2.0.3
+
+  pkg@file:../crypton-wasm/pkg: {}
 
   possible-typed-array-names@1.1.0: {}
 

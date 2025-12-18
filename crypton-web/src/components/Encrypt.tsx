@@ -56,7 +56,7 @@ const Encrypt = () => {
       ) : (
         <div>
           <p>Contacts</p>
-          <Contacts select={(_name, keys) => setPublicKeys(keys)} />
+          <Contacts select={(_keyId, _name, keys) => setPublicKeys(keys)} />
         </div>
       )}
     </div>
