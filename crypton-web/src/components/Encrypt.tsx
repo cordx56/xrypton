@@ -9,9 +9,9 @@ const Encrypt = () => {
 
   const [publickKeys, setPublicKeys] = useState<string | undefined>(undefined);
   const [payload, setPayload] = useState("");
+  const [passphrase, setPassphrase] = useState(getSubPassphrase() ?? "");
 
   const encrypt = () => {
-    const passphrase = getSubPassphrase();
     if (publickKeys && privateKeys?.keys && passphrase) {
       const encoded = Buffer.from(new TextEncoder().encode(payload)).toString(
         "base64",
@@ -41,6 +41,15 @@ const Encrypt = () => {
     <div>
       {publickKeys ? (
         <div className="flex flex-col text-center">
+          <p className="p">
+            passphrase:{" "}
+            <input
+              type="password"
+              className="input-text"
+              value={passphrase}
+              onChange={(e) => setPassphrase(e.target.value)}
+            />
+          </p>
           <p className="p">Input your message</p>
           <textarea
             className="h-24 input-text"

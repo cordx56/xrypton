@@ -1,36 +1,105 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# crypton web frontend
 
-## Getting Started
+## 機能
 
-First, run the development server:
+以下の機能を、Next.js、TypeScriptで実装すること。
+なお、すべてクライアントサイドで動かすが、SSGのためにNext.jsを選択している。
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+### wasm
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+PGP関連の処理はwasmに依存する。
+このwasmはWeb Workerで実装し、メインスレッドが固まることのないようにする。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### APIとの通信
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `../crypton-api` のエンドポイントを利用すること。
+- fetch APIを用いること。
+- baseUrlを変更できるようにすること。
+- 適切なラッパーなどを作成することを厭わない。
+- zodライブラリを用いてデシリアライズせよ。
 
-## Learn More
+### UI
 
-To learn more about Next.js, take a look at the following resources:
+#### 共通
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- TailwindCSSを用いること。
+- TailwindCSSの表記を用いて、レスポンシブ対応すること。
+- TailwindCSSの記述を用いて、ダークモード対応すること。
+- デザインを共通化できるところは極力共通化すること。
+  - ボタンや入力欄などは、色以外については一般に共通化できる。
+- borderなどは影などを用いて目立ちすぎず自然に表現すること。
+- テーマカラーを選択でき、テーマカラーでほどほどに装飾を施す。
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+#### 機能
 
-## Deploy on Vercel
+次のような機能を実装する。
+なお、表示言語はデフォルトで英語、設定で日本語に切り替えられるようにする。
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- 画面下のタブ選択をアイコンでできるようにする。
+  - タブは、チャット、通話、プロフィール（自身のアイコン）
+- 画面上には選択しているタブの名前を表示する。
+  - ここの右側にはそれぞれアイコンを使ってボタンを表示する。
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+##### チャット
+
+- 右上に四角とペンで新規チャット作成画面をおく。
+- リストは最初に30件程度表示され、下にスクロールすると追加でロードされる。
+- モバイル
+  - チャットの相手がリストで表示される。
+  - 個人相手であれば左にアイコン、その隣の上に名前、下に薄めの文字でステータスが表示される。
+  - そうでなければ、参加者のアイコンを重ねてブラーをかけたアイコンと、設定したグループ名が用いられる。
+  - 対象を選択すると、次にスレッド選択画面になる。スレッドのリストは名前のみ。
+  - スレッド選択でチャット画面に移る。
+- PC
+  - 左側から、チャットグループ一覧、スレッド一覧、が細めの幅で続き、残りはチャット画面とする。
+  - アイコンや表示名などはモバイルと一緒。
+- チャット画面は、左にアイコン、右にアイコンの半分くらいの縦幅で名前、薄い文字で時刻を表示し、名前の下に文章が続く。
+  - 連続したメッセージはアイコンと名前を都度表示させない。
+  - 日にちを跨ぐ時は、横線と日にちを表示する。
+
+##### プロフィール画面
+
+プロフィール画面は次のような実装とする。
+
+- アイコンは正方形の物をアップロードできるが、表示はrounded-fullで円形になる。
+  - 透過もそのまま扱う。
+- 右上にペンと歯車を表示し、それぞれプロフィール編集、設定画面を表示できる。
+- 通常は編集不能なプロフィールが表示されるだけであるが、プロフィール編集ボタンを押すとそれぞれがテキストボックスになる。
+  - アイコンは選択すると画像アップロード画面になる。
+  - 編集モードでは右上のボタン配置は保存ボタンのみとなる。
+- 公開鍵表示ボタンで、上から公開鍵のQRコード、コピーボタンが配置されたダイアログが表示される。
+
+配置は
+
+- モバイル
+  - 上から、センタリングされたアイコン、ID、表示名、ステータス、プロフィール、公開鍵表示ボタンを配置する。
+- PC
+  - 左側に上からアイコン、ID、表示名、ステータス、右側に上からプロフィール、公開鍵表示ボタンを配置する。
+
+##### 設定画面
+
+上から順に、
+
+- アカウント切替（グリッドでアイコンをならべる）
+- アカウント追加（登録と同じ画面に遷移）
+- テーマ設定
+  - ダイアログを表示し、テーマカラーをギラギラしない程度の赤、緑、青、暗くて落ち着いた赤、緑、青から選択できる。
+  - 全体の背景色はライト、ダークから選べる。
+- API設定
+  - baseUrlの変更をダイアログ表示。
+  - 今後追加される可能性がある。
+- ログアウト
+  - 赤色ボタン
+- 公開鍵削除
+  - 事実上のアカウント削除
+  - 赤色ボタン
+
+### PWA対応
+
+PWAに対応し、以下の機能を実装すること。
+
+- モバイル、PCで専用アプリケーションとして振る舞うよう、ホーム画面追加、全画面表示ができること。
+- メッセージをpush通知で受け取れること。
+  - 可能な限り外部依存せず、有料サービスは避けること。
+- push通知を復号し、名前、内容を通知に表示できること。
+- 通話の通知はpush通知で受け取ること。

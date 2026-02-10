@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { useContexts, getContacts } from "@/utils/context";
+import { useContexts, getContacts, getSubPassphrase } from "@/utils/context";
 import CommonDialog from "@/components/Dialogs/CommonDialog";
 import Code from "@/components/Code";
 
 const Decrypt = () => {
   const { worker, dialogs, privateKeys } = useContexts();
 
-  const [passphrase, setPassphrase] = useState<string>("");
+  const [passphrase, setPassphrase] = useState<string>(getSubPassphrase() ?? "");
   const [message, setMessage] = useState("");
 
   const decrypt = () => {

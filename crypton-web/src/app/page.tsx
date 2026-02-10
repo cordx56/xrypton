@@ -2,10 +2,11 @@
 
 import { useContexts } from "@/utils/context";
 import CommonDialog from "@/components/Dialogs/CommonDialog";
-import GenerateKey from "@/components/GenerateKey";
+import Config from "@/components/Config";
 import QrDisplay from "@/components/QrDisplay";
 import Encrypt from "@/components/Encrypt";
 import Decrypt from "@/components/Decrypt";
+import Code from "@/components/Code";
 
 export default function Home() {
   const { dialogs, publicKeys } = useContexts();
@@ -19,17 +20,20 @@ export default function Home() {
         <div className="flex flex-col md:flex-row">
           <div className="flex flex-col w-full md:w-1/2">
             {publicKeys?.keys ? (
-              <div className="default-border border rounded-lg m-2">
+              <div className="flex flex-col default-border border rounded-lg m-2">
                 <h2 className="my-2 text-lg text-center">Your public keys</h2>
                 <QrDisplay data={publicKeys.keys} />
                 <button
                   type="button"
                   className="button"
                   onClick={() =>
-                    navigator.clipboard.writeText(publicKeys.keys!)
+                    dialogs?.pushDialog((p) =>
+                      <CommonDialog {...p}>
+                        <Code code={publicKeys.keys ?? ""} />
+                      </CommonDialog>)
                   }
                 >
-                  Copy
+                  Show
                 </button>
               </div>
             ) : null}
@@ -67,13 +71,13 @@ export default function Home() {
               className="button"
               onClick={() =>
                 dialogs?.pushDialog((p) => (
-                  <CommonDialog {...p}>
-                    <GenerateKey />
+                  <CommonDialog {...p} title="Config">
+                    <Config />
                   </CommonDialog>
                 ))
               }
             >
-              Generate Keys
+              Configure
             </button>
           </div>
         </div>

@@ -15,6 +15,7 @@ const GenerateKey = () => {
   const [userId, setUserId] = useState("");
   const [mainPassphrase, setMainPassphrase] = useState("");
   const [subPassphrase, setSubPassphrase] = useState("");
+  const [saveSubPass, setSaveSubPass] = useState(true);
 
   const generate = () => {
     const message: z.infer<typeof WorkerCallMessage> = {
@@ -30,7 +31,9 @@ const GenerateKey = () => {
       }
 
       savePrivateKeys(data.data.keys);
-      saveSubPassphrase(subPassphrase);
+      if (saveSubPass) {
+        saveSubPassphrase(subPassphrase);
+      }
       privateKeys?.setKeys(data.data.keys);
       dialogs?.pushDialog((close) => (
         <CommonDialog {...close}>
@@ -67,6 +70,17 @@ const GenerateKey = () => {
             type="password"
             onChange={(e) => setSubPassphrase(e.target.value)}
           />
+        </div>
+        <div className="col-span-3">
+          <label>
+            Save sub passphrase
+            <input
+              className="m-2"
+              type="checkbox"
+              checked={saveSubPass}
+              onChange={(e) => setSaveSubPass(e.target.checked)}
+            />
+          </label>
         </div>
       </div>
       <div>
