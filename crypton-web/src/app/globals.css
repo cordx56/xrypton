@@ -1,22 +1,66 @@
 @import "tailwindcss";
 
+/* --- Theme color definitions --- */
 :root {
+  --color-theme-muted-red: #b56576;
+  --color-theme-muted-green: #6b9080;
+  --color-theme-muted-blue: #6c8ebf;
+  --color-theme-dark-red: #8b3a4a;
+  --color-theme-dark-green: #3a5a48;
+  --color-theme-dark-blue: #3a5a8b;
+}
+
+/* --- Light mode defaults --- */
+:root,
+[data-mode="light"] {
   --background: #ffffff;
   --foreground: #171717;
+  --muted: #6b7280;
+  --accent: #6c8ebf;
+}
+
+/* --- Dark mode --- */
+[data-mode="dark"] {
+  --background: #1a1a1a;
+  --foreground: #ededed;
+  --muted: #9ca3af;
+  --accent: #6c8ebf;
+}
+
+/* --- Theme color overrides --- */
+[data-theme="muted-red"] {
+  --accent: var(--color-theme-muted-red);
+}
+[data-theme="muted-green"] {
+  --accent: var(--color-theme-muted-green);
+}
+[data-theme="muted-blue"] {
+  --accent: var(--color-theme-muted-blue);
+}
+[data-theme="dark-red"] {
+  --accent: var(--color-theme-dark-red);
+}
+[data-theme="dark-green"] {
+  --accent: var(--color-theme-dark-green);
+}
+[data-theme="dark-blue"] {
+  --accent: var(--color-theme-dark-blue);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--background);
+  --color-fg: var(--foreground);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "Fira Code", monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #1a1a1a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
@@ -25,8 +69,9 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* --- Legacy utility classes (backward compat with existing components) --- */
 @utility default-border {
-  @apply border-indigo-500;
+  border-color: var(--accent);
 }
 
 @utility background {
@@ -34,11 +79,13 @@ body {
 }
 
 @utility selected {
-  @apply text-indigo-200 bg-indigo-500;
+  color: var(--background);
+  background: var(--accent);
 }
 
 .input-text {
-  @apply px-4 py-2 m-2 border border-indigo-500;
+  @apply px-4 py-2 m-2 border;
+  border-color: var(--accent);
 }
 
 .p {
@@ -55,11 +102,45 @@ body {
 
 .overlay {
   @apply fixed inset-0 bg-gray-700/10 backdrop-blur-xs grid place-items-center p-6;
-}
-.dialog {
-  @apply relative w-full max-w-[720px] max-h-[90vh] overflow-y-auto rounded-2xl border border-white/10 bg-[var(--background)] text-[var(--foreground)] shadow-2xl shadow-black/25 p-6;
+  z-index: 50;
 }
 
-button[type="button"] {
+.dialog {
+  @apply relative w-full max-w-[720px] max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl shadow-black/25 p-6;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--accent);
+}
+
+button {
   @apply cursor-pointer;
+  touch-action: manipulation;
+}
+
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.animate-slide-down {
+  animation: slide-down 0.3s ease-out backwards;
+}
+
+.animate-fade-out {
+  animation: fade-out 0.3s ease-in forwards;
 }

@@ -1,8 +1,7 @@
 use crate::*;
 use pgp::{
-    bytes::Bytes,
     composed::*,
-    crypto, packet,
+    crypto,
     types::{KeyDetails, *},
 };
 use rand::rngs::OsRng;
@@ -20,15 +19,6 @@ impl PrivateKeys {
             .next()
             .unwrap()
     }
-    pub fn encryption_secret(&self) -> &SignedSecretSubKey {
-        self.keys
-            .secret_subkeys
-            .iter()
-            .filter(|k| k.signed_public_key().key.is_encryption_key())
-            .next()
-            .unwrap()
-    }
-
     pub fn public_keys(&self) -> String {
         self.keys
             .signed_public_key()
@@ -36,20 +26,6 @@ impl PrivateKeys {
             .unwrap()
     }
 
-    #[tracing::instrument]
-    pub fn encrypt(&self, plain: Vec<u8>) -> Result<String, Error> {
-        let mut builder = MessageBuilder::from_bytes("", plain)
-            .seipd_v1(OsRng::default(), crypto::sym::SymmetricKeyAlgorithm::AES256);
-        builder
-            .encrypt_to_key(
-                OsRng::default(),
-                &self.encryption_secret().signed_public_key(),
-            )
-            .map_err(|e| Error::EncryptionError(e.to_string()))?;
-        builder
-            .to_armored_string(OsRng::default(), ArmorOptions::default())
-            .map_err(|e| Error::EncryptionError(e.to_string()))
-    }
     /// returns (data, signature, issuers)
     #[tracing::instrument]
     pub fn decrypt(
@@ -84,6 +60,41 @@ impl PrivateKeys {
 
     #[tracing::instrument]
     pub fn sign(&self, passphrase: &str, data: Vec<u8>) -> Result<String, Error> {
+        let mut builder = MessageBuilder::from_bytes("", data);
+        builder.sign(
+            &self.signing_secret().key,
+            Password::from(passphrase),
+            crypto::hash::HashAlgorithm::Sha512,
+        );
+        builder
+            .to_armored_string(OsRng, ArmorOptions::default())
+            .map_err(|e| Error::SigningError(e.to_string()))
+    }
+    /// 主鍵のパスフレーズを検証する。
+    pub fn validate_main_passphrase(&self, passphrase: &str) -> Result<(), Error> {
+        self.keys
+            .unlock(&Password::from(passphrase), |_, _| Ok(()))
+            .map_err(|e| Error::KeyFormatError(e.to_string()))?
+            .map_err(|e: pgp::errors::Error| Error::KeyFormatError(e.to_string()))
+    }
+
+    /// サブ鍵のパスフレーズを検証する。
+    pub fn validate_sub_passphrase(&self, passphrase: &str) -> Result<(), Error> {
+        self.signing_secret()
+            .unlock(&Password::from(passphrase), |_, _| Ok(()))
+            .map_err(|e| Error::KeyFormatError(e.to_string()))?
+            .map_err(|e: pgp::errors::Error| Error::KeyFormatError(e.to_string()))
+    }
+
+    /// 複数受信者の公開鍵宛に署名+暗号化する。
+    /// 各受信者は自分の秘密鍵で復号できる。
+    #[tracing::instrument]
+    pub fn sign_and_encrypt(
+        &self,
+        passphrase: &str,
+        recipients: &[&PublicKeys],
+        data: Vec<u8>,
+    ) -> Result<String, Error> {
         let mut builder = MessageBuilder::from_bytes("", data)
             .seipd_v1(OsRng::default(), crypto::sym::SymmetricKeyAlgorithm::AES256);
         builder.sign(
@@ -91,27 +102,11 @@ impl PrivateKeys {
             Password::from(passphrase),
             crypto::hash::HashAlgorithm::Sha512,
         );
-        builder
-            .to_armored_string(OsRng::default(), ArmorOptions::default())
-            .map_err(|e| Error::SigningError(e.to_string()))
-    }
-    #[tracing::instrument]
-    pub fn sign_and_encrypt(
-        &self,
-        passphrase: &str,
-        public: &PublicKeys,
-        data: Vec<u8>,
-    ) -> Result<String, Error> {
-        let mut builder = MessageBuilder::from_bytes("", data)
-            .seipd_v1(OsRng::default(), crypto::sym::SymmetricKeyAlgorithm::AES256);
-        builder
-            .sign(
-                &self.signing_secret().key,
-                Password::from(passphrase),
-                crypto::hash::HashAlgorithm::Sha512,
-            )
-            .encrypt_to_key(OsRng::default(), public.encryption_public())
-            .map_err(|e| Error::SigningError(e.to_string()))?;
+        for recipient in recipients {
+            builder
+                .encrypt_to_key(OsRng::default(), recipient.encryption_public())
+                .map_err(|e| Error::SigningError(e.to_string()))?;
+        }
         builder
             .to_armored_string(OsRng::default(), ArmorOptions::default())
             .map_err(|e| Error::SigningError(e.to_string()))
@@ -176,17 +171,6 @@ impl PublicKeys {
     }
 
     #[tracing::instrument]
-    pub fn encrypt(&self, plain: Vec<u8>) -> Result<String, Error> {
-        let mut builder = MessageBuilder::from_bytes("", plain)
-            .seipd_v1(OsRng::default(), crypto::sym::SymmetricKeyAlgorithm::AES256);
-        builder
-            .encrypt_to_key(OsRng::default(), &self.encryption_public())
-            .map_err(|e| Error::EncryptionError(e.to_string()))?;
-        builder
-            .to_armored_string(OsRng::default(), ArmorOptions::default())
-            .map_err(|e| Error::EncryptionError(e.to_string()))
-    }
-    #[tracing::instrument]
     pub fn verify(&self, armored: &str) -> Result<(), Error> {
         let (mut msg, _) =
             Message::from_string(armored).map_err(|e| Error::VerificationError(e.to_string()))?;
@@ -217,34 +201,6 @@ impl TryFrom<&str> for PublicKeys {
         } else {
             Ok(PublicKeys { keys })
         }
-    }
-}
-
-fn make_secret_key_stub(secret: &mut SignedSecretKey) -> Result<(), Error> {
-    let primary_key = &mut secret.primary_key;
-    if let SecretParams::Encrypted(params) = primary_key.secret_params() {
-        /*
-        let s2k_params = S2kParams::Cfb {
-            sym_alg: crypto::sym::SymmetricKeyAlgorithm::Plaintext,
-            s2k: StringToKey::Private {
-                typ: 101,
-                unknown: Bytes::new(),
-            },
-            iv: Bytes::new(),
-        };
-        */
-        let new_params =
-            EncryptedSecretParams::new(Bytes::new(), params.string_to_key_params().clone());
-        let secret_params = SecretParams::Encrypted(new_params);
-        let public_key = primary_key.public_key().clone();
-        let secret_key = packet::SecretKey::new(public_key, secret_params)
-            .map_err(|e| Error::KeyGenerationError(e.to_string()))?;
-        *primary_key = secret_key;
-        Ok(())
-    } else {
-        Err(Error::KeyFormatError(
-            "invalid secret key format".to_string(),
-        ))
     }
 }
 
@@ -296,9 +252,7 @@ pub fn generate_keys(
         .to_armored_string(ArmorOptions::default())
         .map_err(|e| Error::KeyGenerationError(e.to_string()))?;
 
-    let subkeys = signed.clone();
-    //make_secret_key_stub(&mut subkeys)?;
-    let subkeys = subkeys
+    let subkeys = signed
         .to_armored_string(ArmorOptions::default())
         .map_err(|e| Error::KeyGenerationError(e.to_string()))?;
 
@@ -334,25 +288,5 @@ QV3hL3V6GgI=
 -----END PGP PRIVATE KEY BLOCK-----"#;
         let subkeys = PrivateKeys::try_from(data).unwrap();
         dbg!(subkeys.keys);
-    }
-
-    #[test]
-    fn encrypt_and_decrypt() {
-        let pass = "passphrase";
-        let user_id = "cordx56 <cord@x56.jp>";
-        let (_, subkeys) =
-            generate_keys(user_id.to_string(), pass.to_string(), pass.to_string()).unwrap();
-        println!("{subkeys}");
-
-        let subkeys = PrivateKeys::try_from(subkeys.as_str()).unwrap();
-        dbg!(&subkeys);
-
-        let plain = b"Hello, world!";
-        let encrypted = subkeys.encrypt(plain.to_vec()).unwrap();
-        dbg!(&encrypted);
-
-        //let decrypted = subkeys.decrypt(pass, &encrypted).unwrap();
-
-        //assert_eq!(&decrypted, plain);
     }
 }

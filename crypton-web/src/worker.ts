@@ -3,26 +3,33 @@ import init, {
   generate_private_keys,
   export_public_keys,
   get_signing_sub_key_id,
+  sign,
   sign_and_encrypt,
   decrypt,
   verify_detached_signature,
+  validate_passphrases,
 } from "crypton-wasm";
-import { WasmReturnValue } from "crypton-common";
-import { WorkerCallMessage, WorkerResultMessage } from "@/utils/schema";
+import {
+  WasmReturnValue,
+  WorkerCallMessage,
+  WorkerResultMessage,
+} from "@/utils/schema";
 
 // @ts-expect-error Worker is provided by the dedicated worker context at runtime.
 const worker: Worker = self;
 
 let initialized = false;
 
+/** 標準base64をbase64urlに変換 */
+const toBase64Url = (b64: string): string =>
+  b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
 worker.addEventListener("message", async ({ data }) => {
-  console.log("worker received", data);
   const post = (msg: z.infer<typeof WorkerResultMessage>) =>
     worker.postMessage(msg);
 
   const parsed = WorkerCallMessage.safeParse(data);
   if (!parsed.success) {
-    console.log("invalid message:", parsed.error);
     return;
   }
 
@@ -156,16 +163,96 @@ worker.addEventListener("message", async ({ data }) => {
         },
       });
     }
+  } else if (parsed.data.call === "sign") {
+    const payload = new TextEncoder().encode(parsed.data.payload);
+    const result = WasmReturnValue.safeParse(
+      sign(parsed.data.keys, parsed.data.passphrase, payload),
+    );
+    if (
+      result.success === true &&
+      result.data.result === "ok" &&
+      result.data.value[0].type === "base64"
+    ) {
+      // base64url エンコードされた armored メッセージをデコードして返す
+      const decoded = atob(
+        result.data.value[0].data.replace(/-/g, "+").replace(/_/g, "/"),
+      );
+      post({
+        call: "sign",
+        result: {
+          success: true,
+          data: { signed_message: decoded },
+        },
+      });
+    } else {
+      post({
+        call: "sign",
+        result: {
+          success: false,
+          message:
+            result.data?.result === "error"
+              ? result.data.message
+              : "sign error",
+        },
+      });
+    }
+  } else if (parsed.data.call === "validate_passphrases") {
+    try {
+      const result = WasmReturnValue.safeParse(
+        validate_passphrases(
+          parsed.data.privateKeys,
+          parsed.data.mainPassphrase,
+          parsed.data.subPassphrase,
+        ),
+      );
+      if (result.success && result.data.result === "ok") {
+        post({
+          call: "validate_passphrases",
+          result: { success: true, data: {} },
+        });
+      } else {
+        post({
+          call: "validate_passphrases",
+          result: {
+            success: false,
+            message:
+              result.data?.result === "error"
+                ? result.data.message
+                : "validation error",
+          },
+        });
+      }
+    } catch (e) {
+      post({
+        call: "validate_passphrases",
+        result: {
+          success: false,
+          message: e instanceof Error ? e.message : "validation error",
+        },
+      });
+    }
   } else if (parsed.data.call === "decrypt") {
     const knownPubKeys = new Map(Object.entries(parsed.data.knownPublicKeys));
 
-    const result = WasmReturnValue.safeParse(
-      decrypt(
-        parsed.data.privateKeys,
-        parsed.data.passphrase,
-        parsed.data.message,
-      ),
-    );
+    let result;
+    try {
+      result = WasmReturnValue.safeParse(
+        decrypt(
+          parsed.data.privateKeys,
+          parsed.data.passphrase,
+          parsed.data.message,
+        ),
+      );
+    } catch (e) {
+      post({
+        call: "decrypt",
+        result: {
+          success: false,
+          message: e instanceof Error ? e.message : "decrypt error",
+        },
+      });
+      return;
+    }
     if (
       result.success === true &&
       result.data.result === "ok" &&
@@ -211,7 +298,7 @@ worker.addEventListener("message", async ({ data }) => {
             success: true,
             data: {
               key_ids: keyIds.map((v) => v.data),
-              payload: result.data.value[0].data,
+              payload: toBase64Url(result.data.value[0].data),
             },
           },
         });
@@ -222,7 +309,7 @@ worker.addEventListener("message", async ({ data }) => {
             success: true,
             data: {
               key_ids: [],
-              payload: result.data.value[0].data,
+              payload: toBase64Url(result.data.value[0].data),
             },
           },
         });

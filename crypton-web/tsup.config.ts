@@ -9,4 +9,7 @@ export default defineConfig({
   splitting: false,
   platform: "browser",
   minify: true,
+  loader: {
+    ".wasm": "binary",
+  },
 });

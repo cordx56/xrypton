@@ -1,0 +1,135 @@
+use super::models::{ChatGroupRow, ChatMemberRow};
+use super::{Db, sql};
+use crate::types::{ChatId, ThreadId, UserId};
+
+#[tracing::instrument(skip(pool), err)]
+pub async fn create_chat_group(
+    pool: &Db,
+    id: &ChatId,
+    name: &str,
+    created_by: &UserId,
+    member_ids: &[String],
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    let q = sql("INSERT INTO chat_groups (id, name, created_by) VALUES (?, ?, ?)");
+    sqlx::query(&q)
+        .bind(id.as_str())
+        .bind(name)
+        .bind(created_by.as_str())
+        .execute(&mut *tx)
+        .await?;
+
+    // 作成者もメンバーに追加
+    let q = sql("INSERT INTO chat_members (chat_id, user_id) VALUES (?, ?)");
+    sqlx::query(&q)
+        .bind(id.as_str())
+        .bind(created_by.as_str())
+        .execute(&mut *tx)
+        .await?;
+
+    let q = sql(
+        "INSERT INTO chat_members (chat_id, user_id) VALUES (?, ?) ON CONFLICT (chat_id, user_id) DO NOTHING",
+    );
+    for member_id in member_ids {
+        if member_id != created_by.as_str() {
+            sqlx::query(&q)
+                .bind(id.as_str())
+                .bind(member_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+
+    // generalスレッドを自動作成
+    let general_thread_id = ThreadId::new_v4();
+    let q = sql("INSERT INTO threads (id, chat_id, name, created_by) VALUES (?, ?, 'general', ?)");
+    sqlx::query(&q)
+        .bind(general_thread_id.as_str())
+        .bind(id.as_str())
+        .bind(created_by.as_str())
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
+#[tracing::instrument(skip(pool), err)]
+pub async fn get_user_chat_groups(
+    pool: &Db,
+    user_id: &UserId,
+) -> Result<Vec<ChatGroupRow>, sqlx::Error> {
+    let q = sql("SELECT g.* FROM chat_groups g
+         INNER JOIN chat_members m ON g.id = m.chat_id
+         WHERE m.user_id = ? AND g.archived_at IS NULL
+         ORDER BY g.created_at DESC");
+    sqlx::query_as::<_, ChatGroupRow>(&q)
+        .bind(user_id.as_str())
+        .fetch_all(pool)
+        .await
+}
+
+#[tracing::instrument(skip(pool), err)]
+pub async fn get_user_archived_chat_groups(
+    pool: &Db,
+    user_id: &UserId,
+) -> Result<Vec<ChatGroupRow>, sqlx::Error> {
+    let q = sql("SELECT g.* FROM chat_groups g
+         INNER JOIN chat_members m ON g.id = m.chat_id
+         WHERE m.user_id = ? AND g.archived_at IS NOT NULL
+         ORDER BY g.archived_at DESC");
+    sqlx::query_as::<_, ChatGroupRow>(&q)
+        .bind(user_id.as_str())
+        .fetch_all(pool)
+        .await
+}
+
+#[tracing::instrument(skip(pool), err)]
+pub async fn archive_chat_group(pool: &Db, chat_id: &ChatId) -> Result<bool, sqlx::Error> {
+    let q = sql("UPDATE chat_groups SET archived_at = CURRENT_TIMESTAMP WHERE id = ?");
+    let result = sqlx::query(&q).bind(chat_id.as_str()).execute(pool).await?;
+    Ok(result.rows_affected() > 0)
+}
+
+#[tracing::instrument(skip(pool), err)]
+pub async fn unarchive_chat_group(pool: &Db, chat_id: &ChatId) -> Result<bool, sqlx::Error> {
+    let q = sql("UPDATE chat_groups SET archived_at = NULL WHERE id = ?");
+    let result = sqlx::query(&q).bind(chat_id.as_str()).execute(pool).await?;
+    Ok(result.rows_affected() > 0)
+}
+
+#[tracing::instrument(skip(pool), err)]
+pub async fn get_chat_group(
+    pool: &Db,
+    chat_id: &ChatId,
+) -> Result<Option<ChatGroupRow>, sqlx::Error> {
+    let q = sql("SELECT * FROM chat_groups WHERE id = ?");
+    sqlx::query_as::<_, ChatGroupRow>(&q)
+        .bind(chat_id.as_str())
+        .fetch_optional(pool)
+        .await
+}
+
+#[tracing::instrument(skip(pool), err)]
+pub async fn get_chat_members(
+    pool: &Db,
+    chat_id: &ChatId,
+) -> Result<Vec<ChatMemberRow>, sqlx::Error> {
+    let q = sql("SELECT * FROM chat_members WHERE chat_id = ?");
+    sqlx::query_as::<_, ChatMemberRow>(&q)
+        .bind(chat_id.as_str())
+        .fetch_all(pool)
+        .await
+}
+
+#[tracing::instrument(skip(pool), err)]
+pub async fn is_member(pool: &Db, chat_id: &ChatId, user_id: &UserId) -> Result<bool, sqlx::Error> {
+    let q = sql("SELECT 1 FROM chat_members WHERE chat_id = ? AND user_id = ?");
+    let row: Option<(i32,)> = sqlx::query_as(&q)
+        .bind(chat_id.as_str())
+        .bind(user_id.as_str())
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.is_some())
+}

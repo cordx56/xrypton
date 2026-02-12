@@ -120,14 +120,24 @@ pub fn get_pub_key_user_ids(public_keys: String) -> Result<JsValue, JsValue> {
 #[wasm_bindgen]
 pub fn sign_and_encrypt(
     private_key: String,
-    public_key: String,
+    public_keys: Vec<String>,
     sub_passphrase: &str,
     plain: Vec<u8>,
 ) -> Result<JsValue, JsValue> {
     let private = get_private_keys(private_key)?;
-    let public = get_public_keys(public_key)?;
+    let recipients: Vec<keys::PublicKeys> = public_keys
+        .iter()
+        .map(|k| keys::PublicKeys::try_from(k.as_str()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
+    let recipient_refs: Vec<&keys::PublicKeys> = recipients.iter().collect();
     let armored = private
-        .sign_and_encrypt(sub_passphrase, &public, plain)
+        .sign_and_encrypt(sub_passphrase, &recipient_refs, plain)
         .map_err(|e| {
             ReturnValue::Error {
                 message: e.to_string(),
@@ -188,6 +198,29 @@ pub fn verify(public_key: String, armored: &str) -> Result<JsValue, JsValue> {
     })?;
     Ok(ReturnValue::Ok { value: Vec::new() }.to_value())
 }
+#[wasm_bindgen]
+pub fn validate_passphrases(
+    private_key: String,
+    main_passphrase: &str,
+    sub_passphrase: &str,
+) -> Result<JsValue, JsValue> {
+    let keys = get_private_keys(private_key)?;
+    keys.validate_main_passphrase(main_passphrase)
+        .map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
+    keys.validate_sub_passphrase(sub_passphrase).map_err(|e| {
+        ReturnValue::Error {
+            message: e.to_string(),
+        }
+        .to_value()
+    })?;
+    Ok(ReturnValue::Ok { value: Vec::new() }.to_value())
+}
+
 #[wasm_bindgen]
 pub fn verify_detached_signature(
     public_key: String,

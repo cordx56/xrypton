@@ -1,0 +1,20 @@
+{
+  "name": "Crypton",
+  "short_name": "Crypton",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a2e",
+  "theme_color": "#6c8ebf",
+  "icons": [
+    {
+      "src": "/crypton.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/crypton.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

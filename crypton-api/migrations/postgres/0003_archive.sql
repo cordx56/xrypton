@@ -1,0 +1,2 @@
+ALTER TABLE chat_groups ADD COLUMN archived_at TIMESTAMPTZ;
+ALTER TABLE threads ADD COLUMN archived_at TIMESTAMPTZ;

@@ -13,7 +13,10 @@
     "fmt": "prettier -w src"
   },
   "dependencies": {
-    "crypton-common": "file:../crypton-common",
+    "@fortawesome/fontawesome-svg-core": "^7.2.0",
+    "@fortawesome/free-regular-svg-icons": "^7.2.0",
+    "@fortawesome/free-solid-svg-icons": "^7.2.0",
+    "@fortawesome/react-fontawesome": "^3.2.0",
     "crypton-wasm": "file:../crypton-wasm/pkg",
     "next": "16.0.10",
     "qr-scanner": "^1.4.2",
