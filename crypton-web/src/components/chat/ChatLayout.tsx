@@ -244,6 +244,8 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const decryptVersionRef = useRef(0);
   // fetchGroupDetailの完了を待つためのPromise
   const groupDetailReady = useRef<Promise<void>>(Promise.resolve());
+  // 空名グループの解決済み表示名キャッシュ（再選択時にIDが表示されるのを防ぐ）
+  const resolvedGroupNamesRef = useRef<Record<string, string>>({});
   // メンバー署名公開鍵のキャッシュ（検証用、グループ選択時に取得）
   const knownPublicKeys = useRef<PublicKeyMap>({});
   // メンバー暗号化公開鍵のキャッシュ（暗号化用、グループ選択時に取得）
@@ -290,6 +292,10 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
 
     switch (data.type) {
       case "message": {
+        // 自己メッセージの場合、送信側の楽観的追加で処理するため
+        // メッセージリストの再取得をスキップ（ファイル送信時に完了前に表示されるのを防ぐ）
+        if (data.is_self) break;
+
         // Worker経由で暗号文を復号
         let body = "New message";
         if (
@@ -340,10 +346,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           }
         }
 
-        // 自己メッセージではアプリ内通知バナーを表示しない
-        if (!data.is_self) {
-          showNotification({ displayName, iconUrl, body });
-        }
+        showNotification({ displayName, iconUrl, body });
 
         // 現在表示中のチャットと一致する場合、メッセージリストを再取得
         const currentChatId = chatIdRef.current;
@@ -533,7 +536,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       keyIdToUserId.current = keyIdMap;
       setMemberProfiles(profiles);
 
-      // 空名グループの場合、メンバー表示名で代替
+      // 空名グループの場合、メンバー表示名で代替しキャッシュに保存
       if (!data.group?.name) {
         const others = Object.entries(profiles)
           .filter(([id]) => id !== auth.userId)
@@ -542,6 +545,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           others.length > 0
             ? others.join(", ")
             : (profiles[auth.userId!]?.display_name ?? groupId);
+        resolvedGroupNamesRef.current[groupId] = displayName;
         setSelectedGroupName(displayName);
       }
     },
@@ -554,7 +558,10 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     warnedKeyChanges.current.clear();
     // グループ名を仮設定（空名の場合はfetchGroupDetailでメンバー表示名に更新される）
     const group = chat.groups.find((g) => g.id === chatId);
-    if (group) setSelectedGroupName(group.name || group.id);
+    if (group)
+      setSelectedGroupName(
+        group.name || resolvedGroupNamesRef.current[chatId] || group.id,
+      );
     groupDetailReady.current = fetchGroupDetail(chatId).catch(() => {});
   }, [chatId]);
 
@@ -718,7 +725,9 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   // グループ選択
   const selectGroup = useCallback(
     (group: ChatGroup) => {
-      setSelectedGroupName(group.name || group.id);
+      setSelectedGroupName(
+        group.name || resolvedGroupNamesRef.current[group.id] || group.id,
+      );
       router.push(`/chat/${group.id}`);
     },
     [router],
