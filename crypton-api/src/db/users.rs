@@ -59,6 +59,39 @@ pub async fn delete_user(pool: &Db, id: &UserId) -> Result<bool, sqlx::Error> {
     Ok(result.rows_affected() > 0)
 }
 
+#[tracing::instrument(
+    skip(pool, encryption_public_key, signing_public_key, signing_key_id),
+    err
+)]
+pub async fn update_user_keys(
+    pool: &Db,
+    id: &UserId,
+    encryption_public_key: &str,
+    signing_public_key: &str,
+    signing_key_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let now = chrono::Utc::now();
+    let q = sql("UPDATE users
+         SET encryption_public_key = ?,
+             signing_public_key = ?,
+             signing_key_id = ?,
+             updated_at = ?
+         WHERE id = ?");
+    #[cfg(not(feature = "postgres"))]
+    let now_bind = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    #[cfg(feature = "postgres")]
+    let now_bind = now;
+    let result = sqlx::query(&q)
+        .bind(encryption_public_key)
+        .bind(signing_public_key)
+        .bind(signing_key_id)
+        .bind(now_bind)
+        .bind(id.as_str())
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 #[tracing::instrument(skip(pool), err)]
 pub async fn get_profile(pool: &Db, user_id: &UserId) -> Result<Option<ProfileRow>, sqlx::Error> {
     let q = sql("SELECT * FROM profiles WHERE user_id = ?");
@@ -99,4 +132,47 @@ pub async fn update_profile(
         .execute(pool)
         .await?;
     Ok(result.rows_affected() > 0)
+}
+
+/// 大文字小文字を区別しないユーザ検索
+#[tracing::instrument(skip(pool), err)]
+pub async fn get_user_case_insensitive(
+    pool: &Db,
+    id: &str,
+) -> Result<Option<UserRow>, sqlx::Error> {
+    let q = sql("SELECT * FROM users WHERE LOWER(id) = LOWER(?)");
+    sqlx::query_as::<_, UserRow>(&q)
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+}
+
+/// 外部ユーザの公開鍵をupsertする（INSERT ON CONFLICT UPDATE）
+#[tracing::instrument(skip(pool, encryption_public_key, signing_public_key), err)]
+pub async fn upsert_external_user(
+    pool: &Db,
+    full_id: &str,
+    encryption_public_key: &str,
+    signing_public_key: &str,
+    signing_key_id: &str,
+) -> Result<(), sqlx::Error> {
+    let q = sql(
+        "INSERT INTO users (id, encryption_public_key, signing_public_key, signing_key_id)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET
+             encryption_public_key = ?,
+             signing_public_key = ?,
+             signing_key_id = ?",
+    );
+    sqlx::query(&q)
+        .bind(full_id)
+        .bind(encryption_public_key)
+        .bind(signing_public_key)
+        .bind(signing_key_id)
+        .bind(encryption_public_key)
+        .bind(signing_public_key)
+        .bind(signing_key_id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }

@@ -1,19 +1,35 @@
 import { z } from "zod";
-import init, { decrypt } from "crypton-wasm";
+import init, { decrypt, sign } from "crypton-wasm";
 import { Notification, WasmReturnValue } from "@/utils/schema";
+import { decodeBase64Url } from "@/utils/base64";
 import { getKey } from "@/utils/keyStore";
 
-init();
+/** アクティブアカウントのプレフィックス付きキーを取得する */
+const getAccountKey = async (key: string): Promise<string | undefined> => {
+  const activeId = await getKey("activeAccountId");
+  if (!activeId) return getKey(key);
+  return getKey(`account:${activeId}:${key}`);
+};
+
+const wasmReady = init();
 
 // @ts-ignore
 const sw: ServiceWorkerGlobalScope = self;
 
-/** メインアプリのすべてのクライアントにメッセージを転送する */
-const forwardToClients = async (data: z.infer<typeof Notification>) => {
+/** メインアプリのすべてのクライアントにメッセージを転送する。
+ *  可視状態のクライアントに転送できた場合は true を返す。 */
+const forwardToClients = async (
+  data: z.infer<typeof Notification>,
+): Promise<boolean> => {
   const clients = await sw.clients.matchAll({ type: "window" });
+  let hasVisible = false;
   for (const client of clients) {
     client.postMessage(data);
+    if ((client as WindowClient).visibilityState === "visible") {
+      hasVisible = true;
+    }
   }
+  return hasVisible;
 };
 
 /** 復号結果(WasmReturnValue)からプレーンテキストを抽出する */
@@ -24,11 +40,43 @@ const extractPlaintext = (
   const first = result.value[0];
   if (!first || first.type !== "base64") return undefined;
   try {
-    const raw = atob(first.data);
-    const bytes = Uint8Array.from(raw, (c) => c.charCodeAt(0));
-    return new TextDecoder().decode(bytes);
+    return decodeBase64Url(first.data);
   } catch {
     return undefined;
+  }
+};
+
+/** 認証付きfetchヘルパー。WASM sign()でPGP署名を生成しAuthorizationヘッダに付与する */
+const authenticatedFetch = async (
+  url: string,
+  privateKeys: string,
+  subPassphrase: string,
+): Promise<Response | null> => {
+  try {
+    const payload = JSON.stringify({
+      nonce: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+    });
+    const encoded = new TextEncoder().encode(payload);
+    const signResult = WasmReturnValue.safeParse(
+      sign(privateKeys, subPassphrase, encoded),
+    );
+    if (
+      !signResult.success ||
+      signResult.data.result !== "ok" ||
+      signResult.data.value[0]?.type !== "base64"
+    ) {
+      return null;
+    }
+    // base64urlエンコードされたarmoredメッセージをデコード
+    const armoredMessage = decodeBase64Url(signResult.data.value[0].data);
+    const resp = await fetch(url, {
+      headers: { Authorization: btoa(armoredMessage) },
+    });
+    if (!resp.ok) return null;
+    return resp;
+  } catch {
+    return null;
   }
 };
 
@@ -54,37 +102,37 @@ sw.addEventListener("push", (ev) => {
     case "message": {
       ev.waitUntil(
         (async () => {
-          // iOS Safariではclients.matchAll()が空を返す場合があるため、
-          // 可視判定に関係なく常にクライアントへ転送する
-          await forwardToClients(notification);
+          // クライアントへ転送（自己メッセージでもデータ同期のため転送する）
+          const hasVisible = await forwardToClients(notification);
 
-          const allClients = await sw.clients.matchAll({
-            type: "window",
-            includeUncontrolled: true,
-          });
-          const hasVisible = allClients.some(
-            (c) => c.visibilityState === "visible",
-          );
+          // 自己メッセージはデータ同期のみでブラウザ通知を表示しない
+          if (notification.is_self) return;
 
-          // 可視クライアントがあればOS通知は不要
+          // 可視クライアントがいればブラウザ通知をスキップ
+          // iOS Safariではclients.matchAll()が空を返す場合があるが、
+          // その場合は hasVisible=false となりフォールバックで通知を表示する
           if (hasVisible) return;
 
-          // 送信者名（バックエンドが付与、なければフォールバック）
-          const title = notification.sender_name ?? "New message";
+          // 送信者名（バックエンドが付与、空文字やundefinedならフォールバック）
+          const title = notification.sender_name || "New message";
 
           // sender_idからアイコンURLを構築（絶対URLにする）
           let icon: string | undefined;
           if (notification.sender_id) {
-            icon = `${sw.location.origin}/api/v1/user/${notification.sender_id}/icon`;
+            icon = `${sw.location.origin}/api/v1/user/${encodeURIComponent(notification.sender_id)}/icon`;
           }
 
           const notifOptions: NotificationOptions = {
             icon,
-            data: { chatId: notification.chat_id },
+            tag: `msg-${notification.thread_id ?? notification.chat_id ?? "default"}`,
+            data: {
+              chatId: notification.chat_id,
+              threadId: notification.thread_id,
+            },
           };
 
-          // 暗号文がない場合（ペイロードが大きすぎた場合）
-          if (!notification.encrypted) {
+          // thread_id / message_id がない場合はフォールバック表示
+          if (!notification.thread_id || !notification.message_id) {
             await sw.registration.showNotification(title, {
               ...notifOptions,
               body: "You have a new message",
@@ -92,8 +140,8 @@ sw.addEventListener("push", (ev) => {
             return;
           }
 
-          // IndexedDBから秘密鍵とパスフレーズを取得
-          const keys = await getKey("privateKeys");
+          // IndexedDBからアクティブアカウントの秘密鍵とパスフレーズを取得
+          const keys = await getAccountKey("privateKeys");
           if (!keys) {
             await sw.registration.showNotification(title, {
               ...notifOptions,
@@ -101,7 +149,7 @@ sw.addEventListener("push", (ev) => {
             });
             return;
           }
-          const pass = await getKey("subPassphrase");
+          const pass = await getAccountKey("subPassphrase");
           if (!pass) {
             await sw.registration.showNotification(title, {
               ...notifOptions,
@@ -110,10 +158,31 @@ sw.addEventListener("push", (ev) => {
             return;
           }
 
-          // 復号を試みる
+          // APIからメッセージを取得して復号（WASM初期化失敗時はフォールバック通知）
           try {
+            await wasmReady;
+            const apiUrl = `${sw.location.origin}/api/v1/chat/${notification.chat_id}/${notification.thread_id}/message/${notification.message_id}`;
+            const resp = await authenticatedFetch(apiUrl, keys, pass);
+            if (!resp) {
+              await sw.registration.showNotification(title, {
+                ...notifOptions,
+                body: "You have a new message",
+              });
+              return;
+            }
+
+            const msg = await resp.json();
+            const content = msg.content;
+            if (!content || typeof content !== "string") {
+              await sw.registration.showNotification(title, {
+                ...notifOptions,
+                body: "You have a new message",
+              });
+              return;
+            }
+
             const result = WasmReturnValue.safeParse(
-              decrypt(keys, pass, notification.encrypted),
+              decrypt(keys, pass, content),
             );
             if (!result.success) {
               await sw.registration.showNotification(title, {
@@ -169,7 +238,13 @@ sw.addEventListener("notificationclick", (ev) => {
   ev.notification.close();
 
   const chatId = ev.notification.data?.chatId;
-  const urlPath = chatId ? `/chat/${chatId}` : "/";
+  const threadId = ev.notification.data?.threadId;
+  const urlPath =
+    chatId && threadId
+      ? `/chat/${chatId}/${threadId}`
+      : chatId
+        ? `/chat/${chatId}`
+        : "/";
 
   ev.waitUntil(
     sw.clients

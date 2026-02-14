@@ -19,3 +19,10 @@ export type Account = {
   subPassphrase: string;
   publicKeys?: string;
 };
+
+/** アカウントセレクタ表示用のキャッシュ情報 */
+export type AccountInfo = {
+  userId: string;
+  displayName?: string;
+  iconUrl?: string | null;
+};

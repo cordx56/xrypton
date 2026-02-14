@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: crypton
+      POSTGRES_USER: crypton
+      POSTGRES_PASSWORD: crypton
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["pg_isready", "-U", "crypton", "-d", "crypton"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: api.Dockerfile
+    environment:
+      DATABASE_URL: postgres://crypton:crypton@db:5432/crypton
+      LISTEN_ADDR: 0.0.0.0:8080
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: web.Dockerfile
+      args:
+        BACKEND_BASE_URL: http://api:8080
+        NEXT_PUBLIC_SERVER_HOSTNAME: localhost:3000
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+volumes:
+  db-data:

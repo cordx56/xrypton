@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, ReactNode } from "react";
+import { createContext, useContext, useEffect, ReactNode } from "react";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { translate, detectLocale } from "@/i18n";
 import type { Locale, TranslationKeys } from "@/i18n";
@@ -18,7 +18,15 @@ const I18nContext = createContext<I18nContextType>({
 });
 
 export const I18nProvider = ({ children }: { children: ReactNode }) => {
-  const [locale, setLocale] = useLocalStorage<Locale>("locale", detectLocale());
+  // SSR一致のため静的デフォルトを使用し、マウント後にブラウザ言語を検出
+  const [locale, setLocale] = useLocalStorage<Locale>("locale", "en");
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem("locale");
+    if (!stored) {
+      setLocale(detectLocale());
+    }
+  }, []);
 
   const t = (key: keyof TranslationKeys) => translate(locale, key);
 

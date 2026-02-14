@@ -9,5 +9,5 @@ export default function UserProfilePage({
   params: Promise<{ userId: string }>;
 }) {
   const { userId } = use(params);
-  return <UserProfileView userId={userId} />;
+  return <UserProfileView userId={decodeURIComponent(userId)} />;
 }

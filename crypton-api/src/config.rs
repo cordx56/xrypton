@@ -11,6 +11,10 @@ pub struct AppConfig {
     pub vapid_public_key: Option<String>,
     /// VAPID private key for Web Push (base64url)
     pub vapid_private_key: Option<String>,
+    /// このサーバのホスト名（連合で自サーバを識別するために使用）
+    pub server_hostname: String,
+    /// 連合通信でHTTPフォールバックを許可するか（開発用）
+    pub federation_allow_http: bool,
 }
 
 impl AppConfig {
@@ -24,6 +28,10 @@ impl AppConfig {
             s3_region: env::var("S3_REGION").unwrap_or_else(|_| "auto".into()),
             vapid_public_key: env::var("VAPID_PUBLIC_KEY").ok(),
             vapid_private_key: env::var("VAPID_PRIVATE_KEY").ok(),
+            server_hostname: env::var("SERVER_HOSTNAME").unwrap_or_else(|_| "localhost".into()),
+            federation_allow_http: env::var("FEDERATION_ALLOW_HTTP")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false),
         }
     }
 }

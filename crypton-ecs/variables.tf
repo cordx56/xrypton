@@ -99,3 +99,8 @@ variable "vapid_private_key" {
   sensitive   = true
   default     = ""
 }
+
+variable "server_hostname" {
+  description = "Server hostname for federation (e.g. crypton.example.com)"
+  type        = string
+}

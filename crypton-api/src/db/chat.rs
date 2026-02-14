@@ -123,6 +123,44 @@ pub async fn get_chat_members(
         .await
 }
 
+/// 外部サーバから同期されたチャットの参照を作成する。
+/// server_domain にホームサーバのドメインを設定し、
+/// ローカルメンバーのみ chat_members に追加する。
+#[tracing::instrument(skip(pool), err)]
+pub async fn create_remote_chat_reference(
+    pool: &Db,
+    chat_id: &ChatId,
+    name: &str,
+    server_domain: &str,
+    local_member_ids: &[String],
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    let q = sql(
+        "INSERT INTO chat_groups (id, name, server_domain) VALUES (?, ?, ?) ON CONFLICT (id) DO NOTHING",
+    );
+    sqlx::query(&q)
+        .bind(chat_id.as_str())
+        .bind(name)
+        .bind(server_domain)
+        .execute(&mut *tx)
+        .await?;
+
+    let q = sql(
+        "INSERT INTO chat_members (chat_id, user_id) VALUES (?, ?) ON CONFLICT (chat_id, user_id) DO NOTHING",
+    );
+    for member_id in local_member_ids {
+        sqlx::query(&q)
+            .bind(chat_id.as_str())
+            .bind(member_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
 #[tracing::instrument(skip(pool), err)]
 pub async fn is_member(pool: &Db, chat_id: &ChatId, user_id: &UserId) -> Result<bool, sqlx::Error> {
     let q = sql("SELECT 1 FROM chat_members WHERE chat_id = ? AND user_id = ?");

@@ -3,6 +3,37 @@ use pgp::types::{KeyDetails, PublicKeyTrait};
 
 use crate::error::CryptonError;
 
+/// PGP署名メッセージからSignersUserIDサブパケットの値を抽出する。
+///
+/// 連合フローで署名者のホームサーバを特定するために使用する。
+pub fn extract_signer_user_id(armored: &str) -> Result<String, CryptonError> {
+    use pgp::armor::Dearmor;
+    use pgp::packet::{Packet, PacketParser};
+    use std::io::{BufReader, Read};
+
+    let mut dearmor = Dearmor::new(BufReader::new(armored.as_bytes()));
+    let mut bytes = Vec::new();
+    dearmor
+        .read_to_end(&mut bytes)
+        .map_err(|e| CryptonError::Verification(format!("dearmor failed: {e}")))?;
+
+    let parser = PacketParser::new(BufReader::new(&bytes[..]));
+
+    for result in parser.flatten() {
+        if let Packet::Signature(ref sig) = result
+            && let Some(uid) = sig.signers_userid()
+        {
+            return String::from_utf8(uid.to_vec()).map_err(|e| {
+                CryptonError::Verification(format!("invalid UTF-8 in SignersUserID: {e}"))
+            });
+        }
+    }
+
+    Err(CryptonError::Verification(
+        "no SignersUserID subpacket found in message".into(),
+    ))
+}
+
 /// PGP署名メッセージから署名者の鍵IDを検証なしで抽出する。
 ///
 /// OnePassSignature パケットまたは Signature パケットの issuer 情報を使用する。
@@ -18,6 +49,34 @@ pub fn extract_issuer_key_id(armored: &str) -> Result<String, CryptonError> {
         .map_err(|e| CryptonError::Verification(format!("dearmor failed: {e}")))?;
 
     let parser = PacketParser::new(BufReader::new(&bytes[..]));
+
+    for result in parser.flatten() {
+        match result {
+            Packet::OnePassSignature(ref ops) => {
+                if let OpsVersionSpecific::V3 { key_id } = ops.version_specific() {
+                    return Ok(key_id.to_string());
+                }
+            }
+            Packet::Signature(ref sig) => {
+                if let Some(key_id) = sig.issuer().first() {
+                    return Ok(key_id.to_string());
+                }
+            }
+            _ => continue,
+        }
+    }
+
+    Err(CryptonError::Verification(
+        "no issuer key ID found in message".into(),
+    ))
+}
+
+/// raw PGP バイト列から署名者の鍵IDを検証なしで抽出する。
+pub fn extract_issuer_key_id_from_bytes(data: &[u8]) -> Result<String, CryptonError> {
+    use pgp::packet::{OpsVersionSpecific, Packet, PacketParser};
+    use std::io::BufReader;
+
+    let parser = PacketParser::new(BufReader::new(data));
 
     for result in parser.flatten() {
         match result {
@@ -77,6 +136,19 @@ impl PublicKeys {
         msg.verify_read(signing_key)
             .map_err(|e| CryptonError::Verification(e.to_string()))?;
         Ok(data)
+    }
+
+    /// raw PGP バイト列の署名を検証してペイロードを取り出す。
+    pub fn verify_and_extract_from_bytes(&self, data: &[u8]) -> Result<Vec<u8>, CryptonError> {
+        let mut msg = Message::from_bytes(std::io::Cursor::new(data))
+            .map_err(|e| CryptonError::Verification(e.to_string()))?;
+        let signing_key = self.signing_public()?;
+        let payload = msg
+            .as_data_vec()
+            .map_err(|e| CryptonError::Verification(e.to_string()))?;
+        msg.verify_read(signing_key)
+            .map_err(|e| CryptonError::Verification(e.to_string()))?;
+        Ok(payload)
     }
 
     /// Verifies a PGP signed message without extracting data.

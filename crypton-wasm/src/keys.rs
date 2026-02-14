@@ -1,10 +1,15 @@
 use crate::*;
+use chrono::Timelike;
 use pgp::{
     composed::*,
     crypto,
+    packet::{Subpacket, SubpacketData},
     types::{KeyDetails, *},
 };
 use rand::rngs::OsRng;
+
+/// (plaintext, detached_signature, issuer_key_ids)
+pub type DecryptResult = (Vec<u8>, Option<String>, Vec<String>);
 
 #[derive(Debug)]
 pub struct PrivateKeys {
@@ -15,9 +20,17 @@ impl PrivateKeys {
         self.keys
             .secret_subkeys
             .iter()
-            .filter(|k| k.signed_public_key().key.is_signing_key())
-            .next()
+            .find(|k| k.signed_public_key().key.is_signing_key())
             .unwrap()
+    }
+    pub fn get_user_ids(&self) -> Vec<String> {
+        self.keys
+            .signed_public_key()
+            .details
+            .users
+            .iter()
+            .filter_map(|v| v.id.as_str().map(str::to_owned))
+            .collect()
     }
     pub fn public_keys(&self) -> String {
         self.keys
@@ -26,17 +39,59 @@ impl PrivateKeys {
             .unwrap()
     }
 
+    /// SignersUserIDサブパケットを含む署名用SubpacketConfigを生成する。
+    fn sign_subpacket_config(&self) -> Result<SubpacketConfig, Error> {
+        // UserId::to_string()はデバッグ用フォーマット("User ID: ...")を返すため、
+        // as_str()で生のユーザID文字列を取得する
+        let user_id = self
+            .keys
+            .signed_public_key()
+            .details
+            .users
+            .first()
+            .and_then(|u| u.id.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        let signing_key = &self.signing_secret().key;
+        let hashed = vec![
+            Subpacket::regular(SubpacketData::IssuerFingerprint(signing_key.fingerprint()))
+                .map_err(|e| Error::SigningError(e.to_string()))?,
+            Subpacket::regular(SubpacketData::SignatureCreationTime(
+                chrono::Utc::now().with_nanosecond(0).unwrap(),
+            ))
+            .map_err(|e| Error::SigningError(e.to_string()))?,
+            Subpacket::regular(SubpacketData::SignersUserID(user_id.into()))
+                .map_err(|e| Error::SigningError(e.to_string()))?,
+        ];
+        let unhashed = vec![
+            Subpacket::regular(SubpacketData::Issuer(signing_key.key_id()))
+                .map_err(|e| Error::SigningError(e.to_string()))?,
+        ];
+        Ok(SubpacketConfig::UserDefined { hashed, unhashed })
+    }
+
     /// returns (data, signature, issuers)
     #[tracing::instrument]
-    pub fn decrypt(
-        &self,
-        passphrase: &str,
-        armor: &str,
-    ) -> Result<(Vec<u8>, Option<String>, Vec<String>), Error> {
+    pub fn decrypt(&self, passphrase: &str, armor: &str) -> Result<DecryptResult, Error> {
         let (msg, _) =
             Message::from_string(armor).map_err(|e| Error::DecryptionError(e.to_string()))?;
+        Self::decrypt_message(msg, passphrase, &self.keys)
+    }
+
+    /// raw PGP bytes から復号する。
+    #[tracing::instrument]
+    pub fn decrypt_from_bytes(&self, passphrase: &str, raw: &[u8]) -> Result<DecryptResult, Error> {
+        let msg = Message::from_bytes(std::io::Cursor::new(raw))
+            .map_err(|e| Error::DecryptionError(e.to_string()))?;
+        Self::decrypt_message(msg, passphrase, &self.keys)
+    }
+
+    fn decrypt_message(
+        msg: Message,
+        passphrase: &str,
+        keys: &SignedSecretKey,
+    ) -> Result<DecryptResult, Error> {
         let mut decrypted = msg
-            .decrypt(&Password::from(passphrase), &self.keys)
+            .decrypt(&Password::from(passphrase), keys)
             .map_err(|e| Error::DecryptionError(e.to_string()))?;
         let data = decrypted
             .as_data_vec()
@@ -58,17 +113,35 @@ impl PrivateKeys {
         Ok((data, signature, issuers))
     }
 
-    #[tracing::instrument]
-    pub fn sign(&self, passphrase: &str, data: Vec<u8>) -> Result<String, Error> {
+    /// 署名済みメッセージビルダーを構築し、`finish` で出力形式を決定する。
+    fn build_sign<T>(
+        &self,
+        passphrase: &str,
+        data: Vec<u8>,
+        finish: impl FnOnce(MessageBuilder<'_>) -> Result<T, pgp::errors::Error>,
+    ) -> Result<T, Error> {
         let mut builder = MessageBuilder::from_bytes("", data);
-        builder.sign(
+        builder.sign_with_subpackets(
             &self.signing_secret().key,
             Password::from(passphrase),
             crypto::hash::HashAlgorithm::Sha512,
+            self.sign_subpacket_config()?,
         );
-        builder
-            .to_armored_string(OsRng, ArmorOptions::default())
-            .map_err(|e| Error::SigningError(e.to_string()))
+        finish(builder).map_err(|e| Error::SigningError(e.to_string()))
+    }
+
+    /// armored テキストで署名する。
+    #[tracing::instrument]
+    pub fn sign(&self, passphrase: &str, data: Vec<u8>) -> Result<String, Error> {
+        self.build_sign(passphrase, data, |b| {
+            b.to_armored_string(OsRng, ArmorOptions::default())
+        })
+    }
+
+    /// raw PGP バイト列で署名する。
+    #[tracing::instrument]
+    pub fn sign_bytes(&self, passphrase: &str, data: Vec<u8>) -> Result<Vec<u8>, Error> {
+        self.build_sign(passphrase, data, |b| b.to_vec(OsRng))
     }
     /// 主鍵のパスフレーズを検証する。
     pub fn validate_main_passphrase(&self, passphrase: &str) -> Result<(), Error> {
@@ -86,30 +159,66 @@ impl PrivateKeys {
             .map_err(|e: pgp::errors::Error| Error::KeyFormatError(e.to_string()))
     }
 
-    /// 複数受信者の公開鍵宛に署名+暗号化する。
-    /// 各受信者は自分の秘密鍵で復号できる。
+    /// `Signed(Encrypted(Signed(Data)))` の外側署名済みメッセージビルダーを構築し、
+    /// `finish` クロージャで最終出力形式を決定する。
+    fn build_sign_encrypt_sign<T>(
+        &self,
+        passphrase: &str,
+        recipients: &[&PublicKeys],
+        data: Vec<u8>,
+        finish: impl FnOnce(MessageBuilder<'_>) -> Result<T, pgp::errors::Error>,
+    ) -> Result<T, Error> {
+        // inner: sign + encrypt → raw PGP bytes
+        let mut inner = MessageBuilder::from_bytes("", data)
+            .seipd_v1(OsRng, crypto::sym::SymmetricKeyAlgorithm::AES256);
+        inner.sign_with_subpackets(
+            &self.signing_secret().key,
+            Password::from(passphrase),
+            crypto::hash::HashAlgorithm::Sha512,
+            self.sign_subpacket_config()?,
+        );
+        for recipient in recipients {
+            inner
+                .encrypt_to_key(OsRng, recipient.encryption_public())
+                .map_err(|e| Error::EncryptionError(e.to_string()))?;
+        }
+        let inner_bytes = inner
+            .to_vec(OsRng)
+            .map_err(|e| Error::EncryptionError(e.to_string()))?;
+
+        // outer: sign（サーバが検証可能）
+        let mut outer = MessageBuilder::from_bytes("", inner_bytes);
+        outer.sign_with_subpackets(
+            &self.signing_secret().key,
+            Password::from(passphrase),
+            crypto::hash::HashAlgorithm::Sha512,
+            self.sign_subpacket_config()?,
+        );
+        finish(outer).map_err(|e| Error::SigningError(e.to_string()))
+    }
+
+    /// `Signed(Encrypted(Signed(Data)))` 構造を armored テキストで返す。
     #[tracing::instrument]
-    pub fn sign_and_encrypt(
+    pub fn sign_encrypt_sign(
         &self,
         passphrase: &str,
         recipients: &[&PublicKeys],
         data: Vec<u8>,
     ) -> Result<String, Error> {
-        let mut builder = MessageBuilder::from_bytes("", data)
-            .seipd_v1(OsRng::default(), crypto::sym::SymmetricKeyAlgorithm::AES256);
-        builder.sign(
-            &self.signing_secret().key,
-            Password::from(passphrase),
-            crypto::hash::HashAlgorithm::Sha512,
-        );
-        for recipient in recipients {
-            builder
-                .encrypt_to_key(OsRng::default(), recipient.encryption_public())
-                .map_err(|e| Error::SigningError(e.to_string()))?;
-        }
-        builder
-            .to_armored_string(OsRng::default(), ArmorOptions::default())
-            .map_err(|e| Error::SigningError(e.to_string()))
+        self.build_sign_encrypt_sign(passphrase, recipients, data, |b| {
+            b.to_armored_string(OsRng, ArmorOptions::default())
+        })
+    }
+
+    /// `Signed(Encrypted(Signed(Data)))` 構造を raw PGP バイト列で返す。
+    #[tracing::instrument]
+    pub fn sign_encrypt_sign_bin(
+        &self,
+        passphrase: &str,
+        recipients: &[&PublicKeys],
+        data: Vec<u8>,
+    ) -> Result<Vec<u8>, Error> {
+        self.build_sign_encrypt_sign(passphrase, recipients, data, |b| b.to_vec(OsRng))
     }
 }
 impl TryFrom<&str> for PrivateKeys {
@@ -118,14 +227,8 @@ impl TryFrom<&str> for PrivateKeys {
         let (keys, _) = SignedSecretKey::from_string(value)
             .map_err(|e| Error::KeyFormatError(e.to_string()))?;
         let subkeys = &keys.secret_subkeys;
-        if subkeys
-            .iter()
-            .find(|k| k.public_key().is_signing_key())
-            .is_none()
-            || subkeys
-                .iter()
-                .find(|k| k.public_key().is_encryption_key())
-                .is_none()
+        if !subkeys.iter().any(|k| k.public_key().is_signing_key())
+            || !subkeys.iter().any(|k| k.public_key().is_encryption_key())
         {
             Err(Error::KeyFormatError(
                 "both of signing sub key and encryption sub key required".to_string(),
@@ -145,16 +248,14 @@ impl PublicKeys {
         self.keys
             .public_subkeys
             .iter()
-            .filter(|k| k.key.is_encryption_key())
-            .next()
+            .find(|k| k.key.is_encryption_key())
             .unwrap()
     }
     pub fn signing_public(&self) -> &SignedPublicSubKey {
         self.keys
             .public_subkeys
             .iter()
-            .filter(|k| k.key.is_signing_key())
-            .next()
+            .find(|k| k.key.is_signing_key())
             .unwrap()
     }
 
@@ -166,7 +267,7 @@ impl PublicKeys {
             .details
             .users
             .iter()
-            .map(|v| v.id.to_string())
+            .filter_map(|v| v.id.as_str().map(str::to_owned))
             .collect()
     }
 
@@ -192,8 +293,8 @@ impl TryFrom<&str> for PublicKeys {
         let (keys, _) = SignedPublicKey::from_string(value)
             .map_err(|e| Error::KeyFormatError(e.to_string()))?;
         let subkeys = &keys.public_subkeys;
-        if subkeys.iter().find(|k| k.is_signing_key()).is_none()
-            || subkeys.iter().find(|k| k.is_encryption_key()).is_none()
+        if !subkeys.iter().any(|k| k.is_signing_key())
+            || !subkeys.iter().any(|k| k.is_encryption_key())
         {
             Err(Error::KeyFormatError(
                 "both of signing sub key and encryption sub key required".to_string(),
@@ -243,10 +344,10 @@ pub fn generate_keys(
         .map_err(|e| Error::KeyGenerationError(e.to_string()))?;
 
     let keys = params
-        .generate(OsRng::default())
+        .generate(OsRng)
         .map_err(|e| Error::KeyGenerationError(e.to_string()))?;
     let signed = keys
-        .sign(OsRng::default(), &main_passphrase.into())
+        .sign(OsRng, &main_passphrase.into())
         .map_err(|e| Error::KeyGenerationError(e.to_string()))?;
     let main = signed
         .to_armored_string(ArmorOptions::default())

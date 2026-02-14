@@ -33,6 +33,32 @@ export default function RootLayout({
           name="viewport"
           content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
         />
+        <meta
+          name="description"
+          content="Secure messaging with end-to-end encryption"
+        />
+        {/* OGP */}
+        <meta property="og:title" content="Crypton" />
+        <meta
+          property="og:description"
+          content="Secure messaging with end-to-end encryption"
+        />
+        <meta property="og:type" content="website" />
+        <meta
+          property="og:image"
+          content={`https://${process.env.NEXT_PUBLIC_SERVER_HOSTNAME ?? ""}/crypton.png`}
+        />
+        {/* Twitter Card */}
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content="Crypton" />
+        <meta
+          name="twitter:description"
+          content="Secure messaging with end-to-end encryption"
+        />
+        <meta
+          name="twitter:image"
+          content={`https://${process.env.NEXT_PUBLIC_SERVER_HOSTNAME ?? ""}/crypton.png`}
+        />
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#6c8ebf" />
         <link rel="icon" href="/crypton.svg" type="image/svg+xml" />

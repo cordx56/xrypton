@@ -1,6 +1,13 @@
 "use client";
 
-import { createContext, useContext, useState, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+  type ReactNode,
+} from "react";
 import type { ChatGroup, Thread, Message } from "@/types/chat";
 
 type ChatContextType = {
@@ -9,7 +16,7 @@ type ChatContextType = {
   threads: Thread[];
   setThreads: (threads: Thread[]) => void;
   messages: Message[];
-  setMessages: (messages: Message[]) => void;
+  setMessages: Dispatch<SetStateAction<Message[]>>;
   /** メッセージ総数（ページネーション用） */
   totalMessages: number;
   setTotalMessages: (n: number) => void;

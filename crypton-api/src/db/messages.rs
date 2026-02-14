@@ -1,6 +1,18 @@
 use super::models::MessageRow;
 use super::{Db, sql};
-use crate::types::{MessageId, ThreadId, UserId};
+use crate::types::{FileId, MessageId, ThreadId, UserId};
+
+#[tracing::instrument(skip(pool), err)]
+pub async fn get_message_by_id(
+    pool: &Db,
+    id: &MessageId,
+) -> Result<Option<MessageRow>, sqlx::Error> {
+    let q = sql("SELECT * FROM messages WHERE id = ?");
+    sqlx::query_as::<_, MessageRow>(&q)
+        .bind(id.as_str())
+        .fetch_optional(pool)
+        .await
+}
 
 #[tracing::instrument(skip(pool, content), err)]
 pub async fn create_message(
@@ -9,13 +21,17 @@ pub async fn create_message(
     thread_id: &ThreadId,
     sender_id: &UserId,
     content: &str,
+    file_id: Option<&FileId>,
 ) -> Result<(), sqlx::Error> {
-    let q = sql("INSERT INTO messages (id, thread_id, sender_id, content) VALUES (?, ?, ?, ?)");
+    let q = sql(
+        "INSERT INTO messages (id, thread_id, sender_id, content, file_id) VALUES (?, ?, ?, ?, ?)",
+    );
     sqlx::query(&q)
         .bind(id.as_str())
         .bind(thread_id.as_str())
         .bind(sender_id.as_str())
         .bind(content)
+        .bind(file_id.map(FileId::as_str))
         .execute(pool)
         .await?;
     Ok(())

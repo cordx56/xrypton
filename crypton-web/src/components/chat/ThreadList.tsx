@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useChat } from "@/contexts/ChatContext";
 import { useI18n } from "@/contexts/I18nContext";
+import { formatDateTime } from "@/utils/date";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faAngleLeft,
   faPlus,
   faBoxArchive,
   faBoxOpen,
+  faClock,
 } from "@fortawesome/free-solid-svg-icons";
 import type { Thread } from "@/types/chat";
 
@@ -32,6 +34,25 @@ const ThreadList = ({
   const { threads } = useChat();
   const { t } = useI18n();
   const [showArchived, setShowArchived] = useState(false);
+  // Date.now()はSSRとクライアントで値が異なるため、マウント後にのみ計算する
+  const [now, setNow] = useState<number | null>(null);
+
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // temp sessionの残り時間を表示用にフォーマット
+  const formatExpiry = (expiresAt: string): string => {
+    if (now === null) return "";
+    const diff = new Date(expiresAt).getTime() - now;
+    if (diff <= 0) return t("chat.session_expired");
+    const hours = Math.floor(diff / 3600000);
+    const minutes = Math.floor((diff % 3600000) / 60000);
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+  };
 
   const displayThreads = showArchived ? archivedThreads : threads;
 
@@ -41,7 +62,7 @@ const ThreadList = ({
         <button
           type="button"
           onClick={onBack}
-          className="px-2 py-1 hover:bg-accent/20 rounded md:hidden"
+          className="px-2 py-1 hover:bg-accent/20 rounded lg:hidden"
         >
           <FontAwesomeIcon icon={faAngleLeft} className="text-xl" />
         </button>
@@ -72,41 +93,58 @@ const ThreadList = ({
               : t("chat.no_threads")}
           </p>
         ) : (
-          displayThreads.map((thread) => (
-            <button
-              key={thread.id}
-              type="button"
-              onClick={() => onSelect(thread)}
-              className="w-full text-left px-4 py-3 border-b border-accent/10 hover:bg-accent/10 transition-colors flex items-center gap-2"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="font-medium truncate">
-                  {thread.name || thread.id}
-                </div>
-                <div className="text-xs text-muted">{thread.created_at}</div>
-              </div>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (showArchived) {
-                    onUnarchive(thread);
-                  } else {
-                    onArchive(thread);
+          <ul>
+            {displayThreads.map((thread) => (
+              <li
+                key={thread.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => onSelect(thread)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelect(thread);
                   }
                 }}
-                className="text-muted hover:text-fg px-2 py-1 rounded hover:bg-accent/20 flex-shrink-0"
-                title={
-                  showArchived ? t("chat.unarchive") : t("chat.archive")
-                }
+                className="w-full text-left px-4 py-3 border-b border-accent/10 hover:bg-accent/10 transition-colors flex items-center gap-2 cursor-pointer"
               >
-                <FontAwesomeIcon
-                  icon={showArchived ? faBoxOpen : faBoxArchive}
-                  className="text-sm"
-                />
-              </button>
-            </button>
-          ))
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium truncate flex items-center gap-1">
+                    {thread.expires_at && (
+                      <FontAwesomeIcon
+                        icon={faClock}
+                        className="text-xs text-accent flex-shrink-0"
+                      />
+                    )}
+                    {thread.name || thread.id}
+                  </div>
+                  <div className="text-xs text-muted">
+                    {thread.expires_at
+                      ? formatExpiry(thread.expires_at)
+                      : formatDateTime(thread.created_at)}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (showArchived) {
+                      onUnarchive(thread);
+                    } else {
+                      onArchive(thread);
+                    }
+                  }}
+                  className="text-muted hover:text-fg px-2 py-1 rounded hover:bg-accent/20 flex-shrink-0"
+                  title={showArchived ? t("chat.unarchive") : t("chat.archive")}
+                >
+                  <FontAwesomeIcon
+                    icon={showArchived ? faBoxOpen : faBoxArchive}
+                    className="text-sm"
+                  />
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     </div>

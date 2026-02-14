@@ -14,7 +14,10 @@ const QrReader = ({ setData }: { setData: (data: string) => void }) => {
     if (videoElem.current) {
       const scanner = new QrScanner(
         videoElem.current,
-        (result) => setData(result.data),
+        (result) => {
+          setData(result.data);
+          setReading(false);
+        },
         {
           calculateScanRegion: (video) => {
             const range = Math.min(video.width, video.height);

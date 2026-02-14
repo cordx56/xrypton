@@ -1,5 +1,7 @@
 mod chat;
 mod contacts;
+mod federation;
+mod file;
 mod message;
 mod notification;
 mod thread;
@@ -18,8 +20,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(thread::routes())
         .merge(message::routes())
         .merge(message::thread_create_routes())
+        .merge(file::routes())
         .merge(contacts::routes())
-        .merge(notification::routes());
+        .merge(notification::routes())
+        .merge(federation::routes());
 
     Router::new()
         .nest("/v1", api)

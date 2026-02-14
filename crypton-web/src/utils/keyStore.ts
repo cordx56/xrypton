@@ -48,6 +48,27 @@ export async function deleteKey(key: string): Promise<void> {
   });
 }
 
+/** 指定プレフィックスで始まるキーをすべて削除する */
+export async function deleteKeysWithPrefix(prefix: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.openCursor();
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (cursor) {
+        if (typeof cursor.key === "string" && cursor.key.startsWith(prefix)) {
+          cursor.delete();
+        }
+        cursor.continue();
+      }
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 /** データベース全体を削除する */
 export function clearAll(): Promise<void> {
   return new Promise((resolve, reject) => {

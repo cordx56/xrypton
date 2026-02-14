@@ -15,6 +15,8 @@ pub enum AppError {
     Forbidden(String),
     #[error("payload too large: {0}")]
     PayloadTooLarge(String),
+    #[error("bad gateway: {0}")]
+    BadGateway(String),
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -35,6 +37,7 @@ impl IntoResponse for AppError {
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
             AppError::PayloadTooLarge(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg.clone()),
+            AppError::BadGateway(msg) => (StatusCode::BAD_GATEWAY, msg.clone()),
             AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
         };
         let body = serde_json::json!({ "error": message });

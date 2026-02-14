@@ -1,11 +1,12 @@
 type Props = {
   name: string;
   iconUrl?: string | null;
-  size?: "sm" | "md" | "lg";
+  size?: "xs" | "sm" | "md" | "lg";
 };
 
 const sizeClasses = {
-  sm: "w-8 h-8 text-xs",
+  xs: "w-7 h-7 text-xs",
+  sm: "w-10 h-10 text-sm",
   md: "w-10 h-10 text-sm",
   lg: "w-16 h-16 text-xl",
 };

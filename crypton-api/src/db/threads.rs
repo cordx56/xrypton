@@ -1,4 +1,4 @@
-use super::models::ThreadRow;
+use super::models::{ThreadRow, Timestamp};
 use super::{Db, sql};
 use crate::types::{ChatId, ThreadId, UserId};
 
@@ -9,13 +9,17 @@ pub async fn create_thread(
     chat_id: &ChatId,
     name: &str,
     created_by: &UserId,
+    expires_at: Option<&Timestamp>,
 ) -> Result<(), sqlx::Error> {
-    let q = sql("INSERT INTO threads (id, chat_id, name, created_by) VALUES (?, ?, ?, ?)");
+    let q = sql(
+        "INSERT INTO threads (id, chat_id, name, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+    );
     sqlx::query(&q)
         .bind(id.as_str())
         .bind(chat_id.as_str())
         .bind(name)
         .bind(created_by.as_str())
+        .bind(expires_at)
         .execute(pool)
         .await?;
     Ok(())

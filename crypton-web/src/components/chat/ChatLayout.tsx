@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useChat } from "@/contexts/ChatContext";
 import { useDialogs, DialogComponent } from "@/contexts/DialogContext";
@@ -14,15 +14,46 @@ import {
   getApiBaseUrl,
   ApiError,
 } from "@/api/client";
+import {
+  decodeBase64Url,
+  encodeToBase64,
+  fromBase64Url,
+  bytesToBase64,
+  base64ToBytes,
+} from "@/utils/base64";
+import {
+  isFileMessage,
+  parseFileMetadata,
+  buildFileMessageContent,
+  isImageType,
+} from "@/utils/fileMessage";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
 import ChatGroupList from "./ChatGroupList";
 import ThreadList from "./ThreadList";
 import ChatViewComponent from "./ChatView";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faXmark } from "@fortawesome/free-solid-svg-icons";
 import Avatar from "@/components/common/Avatar";
 import Dialog from "@/components/common/Dialog";
 import { useNotification } from "@/contexts/NotificationContext";
+import ChannelInfo from "./ChannelInfo";
+import {
+  getTempKeys,
+  setTempKeys,
+  getTempPubKeys,
+  setTempPubKeys,
+  getPendingMessages,
+  setPendingMessages,
+  clearPendingMessages,
+} from "@/utils/tempSessionStore";
+import {
+  getCachedPublicKeys,
+  setCachedPublicKeys,
+} from "@/utils/publicKeyCache";
 import type { ChatGroup, Thread, Message } from "@/types/chat";
 import type { Contact } from "@/types/contact";
+
+const TEMP_SESSION_KEY_PREFIX = "TEMP_SESSION_KEY:";
 
 type Props = {
   chatId?: string;
@@ -102,13 +133,13 @@ const NewGroupDialog: DialogComponent = ({ close, setOnClose }) => {
   return (
     <div className="flex flex-col">
       <div className="flex justify-between border-b border-accent px-2 pb-2 mb-4">
-        <div className="font-medium">{t("chat.new_group")}</div>
+        <div className="font-medium">{t("chat.new_channel")}</div>
         <button
           type="button"
           onClick={close}
           className="text-muted hover:text-fg"
         >
-          X
+          <FontAwesomeIcon icon={faXmark} />
         </button>
       </div>
       <form
@@ -116,8 +147,7 @@ const NewGroupDialog: DialogComponent = ({ close, setOnClose }) => {
         onSubmit={async (e) => {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
-          const name = fd.get("name") as string;
-          if (!name) return;
+          const name = (fd.get("name") as string) ?? "";
 
           const signed = await auth.getSignedMessage();
           if (!signed) return;
@@ -133,13 +163,13 @@ const NewGroupDialog: DialogComponent = ({ close, setOnClose }) => {
             chatCtx.setGroups(groups);
             close();
           } catch {
-            showError(t("error.group_create_failed"));
+            showError(t("error.channel_create_failed"));
           }
         }}
       >
         <input
           name="name"
-          placeholder={t("chat.group_name")}
+          placeholder={t("chat.channel_name")}
           className="w-full border border-accent/30 rounded px-3 py-2 mb-3 bg-transparent"
         />
 
@@ -195,6 +225,8 @@ const NewGroupDialog: DialogComponent = ({ close, setOnClose }) => {
 
 const ChatLayout = ({ chatId, threadId }: Props) => {
   const router = useRouter();
+  const pathname = usePathname();
+  const isInfoRoute = !!chatId && pathname.endsWith("/info");
   const auth = useAuth();
   const chat = useChat();
   const { pushDialog } = useDialogs();
@@ -207,10 +239,25 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const [selectedThreadName, setSelectedThreadName] = useState("");
   const [archivedGroups, setArchivedGroups] = useState<ChatGroup[]>([]);
   const [archivedThreads, setArchivedThreads] = useState<Thread[]>([]);
+  // 復号セッション: スレッド切替やメッセージ全件更新時にインクリメントし、
+  // 進行中の復号をキャンセルする
+  const decryptVersionRef = useRef(0);
+  // fetchGroupDetailの完了を待つためのPromise
+  const groupDetailReady = useRef<Promise<void>>(Promise.resolve());
   // メンバー署名公開鍵のキャッシュ（検証用、グループ選択時に取得）
   const knownPublicKeys = useRef<PublicKeyMap>({});
   // メンバー暗号化公開鍵のキャッシュ（暗号化用、グループ選択時に取得）
   const encryptionPublicKeys = useRef<string[]>([]);
+  // signing_key_id → user_id の逆引きマップ
+  const keyIdToUserId = useRef<Record<string, string>>({});
+  // リトライ済みメッセージの追跡（重複防止）
+  const retryingMessages = useRef<Set<string>>(new Set());
+  // 鍵再取得の重複排除
+  const refreshingUsers = useRef<Map<string, Promise<{ changed: boolean }>>>(
+    new Map(),
+  );
+  // 鍵変更警告の重複排除（セッション中1回だけ表示）
+  const warnedKeyChanges = useRef<Set<string>>(new Set());
   // メンバープロフィールのキャッシュ
   type MemberProfile = { display_name: string; icon_url: string | null };
   const [memberProfiles, setMemberProfiles] = useState<
@@ -224,143 +271,142 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   threadIdRef.current = threadId;
   const memberProfilesRef = useRef(memberProfiles);
   memberProfilesRef.current = memberProfiles;
+  const messagesRef = useRef(chat.messages);
+  messagesRef.current = chat.messages;
 
   // SWからのPush通知イベントをリッスンしてUI更新
-  const handleSwEvent = useCallback(
-    async (data: {
-      type: string;
-      chat_id?: string;
-      name?: string;
-      sender_id?: string;
-      encrypted?: string;
-    }) => {
-      const signed = await auth.getSignedMessage();
-      if (!signed) return;
-      const client = authApiClient(signed.signedMessage);
+  // useServiceWorkerがref経由で最新の関数を呼ぶため、useCallbackは不要
+  const handleSwEvent = async (data: {
+    type: string;
+    chat_id?: string;
+    name?: string;
+    sender_id?: string;
+    encrypted?: string;
+    is_self?: boolean;
+  }) => {
+    const signed = await auth.getSignedMessage();
+    if (!signed) return;
+    const client = authApiClient(signed.signedMessage);
 
-      switch (data.type) {
-        case "message": {
-          // Worker経由で暗号文を復号
-          let body = "New message";
-          if (
-            data.encrypted &&
-            auth.worker &&
-            auth.privateKeys &&
-            auth.subPassphrase
-          ) {
-            try {
-              body = await new Promise<string>((resolve, reject) => {
-                auth.worker!.eventWaiter("decrypt", (result) => {
-                  if (result.success) {
-                    const bytes = Uint8Array.from(
-                      atob(
-                        result.data.payload
-                          .replace(/-/g, "+")
-                          .replace(/_/g, "/"),
-                      ),
-                      (c) => c.charCodeAt(0),
-                    );
-                    resolve(new TextDecoder().decode(bytes));
-                  } else {
-                    reject(new Error(result.message));
-                  }
-                });
-                auth.worker!.postMessage({
-                  call: "decrypt",
-                  passphrase: auth.subPassphrase!,
-                  privateKeys: auth.privateKeys!,
-                  knownPublicKeys: knownPublicKeys.current,
-                  message: data.encrypted!,
-                });
+    switch (data.type) {
+      case "message": {
+        // Worker経由で暗号文を復号
+        let body = "New message";
+        if (
+          data.encrypted &&
+          auth.worker &&
+          auth.privateKeys &&
+          auth.subPassphrase
+        ) {
+          try {
+            body = await new Promise<string>((resolve, reject) => {
+              auth.worker!.eventWaiter("decrypt", (result) => {
+                if (result.success) {
+                  resolve(decodeBase64Url(result.data.payload));
+                } else {
+                  reject(new Error(result.message));
+                }
               });
-            } catch {
-              // 復号失敗時はデフォルトのbodyを使用
-            }
+              auth.worker!.postMessage({
+                call: "decrypt",
+                passphrase: auth.subPassphrase!,
+                privateKeys: auth.privateKeys!,
+                knownPublicKeys: knownPublicKeys.current,
+                message: data.encrypted!,
+              });
+            });
+          } catch {
+            // 復号失敗時はデフォルトのbodyを使用
           }
+        }
 
-          // 送信者プロフィールを取得（キャッシュまたはAPI）
-          const senderId = data.sender_id ?? "unknown";
-          let displayName = senderId;
-          let iconUrl: string | null = null;
-          const cached = memberProfilesRef.current[senderId];
-          if (cached) {
-            displayName = cached.display_name;
-            iconUrl = cached.icon_url;
-          } else {
-            try {
-              const profile = await apiClient().user.getProfile(senderId);
-              displayName = profile.display_name || senderId;
-              iconUrl = profile.icon_url
-                ? `${getApiBaseUrl()}${profile.icon_url}`
-                : null;
-            } catch {
-              // プロフィール取得失敗時はsenderIdを使用
-            }
+        // 送信者プロフィールを取得（キャッシュまたはAPI）
+        const senderId = data.sender_id ?? "unknown";
+        let displayName = senderId;
+        let iconUrl: string | null = null;
+        const cached = memberProfilesRef.current[senderId];
+        if (cached) {
+          displayName = cached.display_name;
+          iconUrl = cached.icon_url;
+        } else {
+          try {
+            const profile = await apiClient().user.getProfile(senderId);
+            displayName = profile.display_name || senderId;
+            iconUrl = profile.icon_url
+              ? `${getApiBaseUrl()}${profile.icon_url}`
+              : null;
+          } catch {
+            // プロフィール取得失敗時はsenderIdを使用
           }
+        }
 
+        // 自己メッセージではアプリ内通知バナーを表示しない
+        if (!data.is_self) {
           showNotification({ displayName, iconUrl, body });
+        }
 
-          // 現在表示中のチャットと一致する場合、メッセージリストを再取得
-          const currentChatId = chatIdRef.current;
-          const currentThreadId = threadIdRef.current;
-          if (
-            currentChatId &&
-            currentThreadId &&
-            data.chat_id &&
-            currentChatId === data.chat_id
-          ) {
-            try {
-              const signed2 = await auth.getSignedMessage();
-              if (!signed2) break;
-              const client2 = authApiClient(signed2.signedMessage);
-              const msgData = await client2.message.list(
+        // 現在表示中のチャットと一致する場合、メッセージリストを再取得
+        const currentChatId = chatIdRef.current;
+        const currentThreadId = threadIdRef.current;
+        if (
+          currentChatId &&
+          currentThreadId &&
+          data.chat_id &&
+          currentChatId === data.chat_id
+        ) {
+          try {
+            const signed2 = await auth.getSignedMessage();
+            if (!signed2) break;
+            const client2 = authApiClient(signed2.signedMessage);
+            const msgData = await client2.message.list(
+              currentChatId,
+              currentThreadId,
+            );
+            const rawMessages: Message[] = msgData.messages ?? [];
+            chat.setTotalMessages(msgData.total ?? 0);
+            const decrypted = await mergeAndDecryptNewMessages(rawMessages);
+
+            // temp session: 新しい鍵交換メッセージがあるか確認し、保留メッセージを送信
+            const thread = chat.threads.find((t) => t.id === currentThreadId);
+            if (thread?.expires_at) {
+              const memberCount =
+                Object.keys(memberProfilesRef.current).length || 1;
+              await collectTempKeysAndFlush(
                 currentChatId,
                 currentThreadId,
+                decrypted,
+                memberCount,
               );
-              const decrypted = await decryptMessages(msgData.messages ?? []);
-              chat.setMessages(decrypted);
-              chat.setTotalMessages(msgData.total ?? 0);
-            } catch {
-              // failed to refresh messages
             }
-          }
-          break;
-        }
-        case "added_to_group": {
-          try {
-            const groups = await client.chat.list();
-            chat.setGroups(groups);
           } catch {
-            // failed to refresh groups
+            // failed to refresh messages
           }
-          break;
         }
-        case "new_thread": {
-          const currentChatId = chatIdRef.current;
-          if (currentChatId && data.chat_id && currentChatId === data.chat_id) {
-            try {
-              const detail = await client.chat.get(data.chat_id);
-              chat.setThreads(detail.threads ?? []);
-            } catch {
-              // failed to refresh threads
-            }
-          }
-          break;
-        }
+        break;
       }
-    },
-    [
-      auth.getSignedMessage,
-      auth.worker,
-      auth.privateKeys,
-      auth.subPassphrase,
-      chat.setGroups,
-      chat.setThreads,
-      chat.setMessages,
-      chat.setTotalMessages,
-      showNotification,
-    ],
-  );
+      case "added_to_group": {
+        try {
+          const groups = await client.chat.list();
+          chat.setGroups(groups);
+        } catch {
+          // failed to refresh groups
+        }
+        break;
+      }
+      case "new_thread": {
+        const currentChatId = chatIdRef.current;
+        if (currentChatId && data.chat_id && currentChatId === data.chat_id) {
+          try {
+            const detail = await client.chat.get(data.chat_id);
+            chat.setThreads(detail.threads ?? []);
+          } catch {
+            // failed to refresh threads
+          }
+        }
+        break;
+      }
+    }
+  };
 
   useServiceWorker(handleSwEvent);
 
@@ -387,9 +433,9 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
             currentChatId,
             currentThreadId,
           );
-          const decrypted = await decryptMessages(msgData.messages ?? []);
-          chat.setMessages(decrypted);
+          const rawMessages: Message[] = msgData.messages ?? [];
           chat.setTotalMessages(msgData.total ?? 0);
+          await mergeAndDecryptNewMessages(rawMessages);
         }
       } catch {
         // failed to refresh on visibility change
@@ -397,7 +443,12 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [auth.getSignedMessage, auth.worker, auth.privateKeys, auth.subPassphrase]);
+  }, [
+    auth.getSignedMessage,
+    auth.worker,
+    auth.privateKeys,
+    auth.subPassphrase,
+  ]);
 
   // 初期化: グループ一覧を取得
   useEffect(() => {
@@ -426,15 +477,39 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
 
       const pubKeys: PublicKeyMap = {};
       const encPubKeys: string[] = [];
+      const keyIdMap: Record<string, string> = {};
       const profiles: Record<string, MemberProfile> = {};
       for (const member of data.members ?? []) {
         try {
-          const keys = await apiClient().user.getKeys(member.user_id);
-          pubKeys[keys.signing_key_id] = {
-            name: member.user_id,
-            publicKeys: keys.signing_public_key,
-          };
-          encPubKeys.push(keys.encryption_public_key);
+          // IndexedDBキャッシュを確認し、ヒットすればAPIコールをスキップ
+          const cached = await getCachedPublicKeys(member.user_id);
+          if (cached) {
+            pubKeys[cached.signing_key_id] = {
+              name: member.user_id,
+              publicKeys: cached.signing_public_key,
+            };
+            encPubKeys.push(cached.encryption_public_key);
+            keyIdMap[cached.signing_key_id] = member.user_id;
+          } else {
+            // 各getKeysリクエストに新しいnonceが必要なため、署名を都度生成する
+            const keySigned = await auth.getSignedMessage();
+            if (!keySigned) continue;
+            const keys = await authApiClient(
+              keySigned.signedMessage,
+            ).user.getKeys(member.user_id);
+            pubKeys[keys.signing_key_id] = {
+              name: member.user_id,
+              publicKeys: keys.signing_public_key,
+            };
+            encPubKeys.push(keys.encryption_public_key);
+            keyIdMap[keys.signing_key_id] = member.user_id;
+            // キャッシュに保存
+            await setCachedPublicKeys(member.user_id, {
+              signing_key_id: keys.signing_key_id,
+              signing_public_key: keys.signing_public_key,
+              encryption_public_key: keys.encryption_public_key,
+            });
+          }
         } catch {
           // 公開鍵を取得できないメンバーはスキップ
         }
@@ -455,24 +530,37 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       }
       knownPublicKeys.current = pubKeys;
       encryptionPublicKeys.current = encPubKeys;
+      keyIdToUserId.current = keyIdMap;
       setMemberProfiles(profiles);
+
+      // 空名グループの場合、メンバー表示名で代替
+      if (!data.group?.name) {
+        const others = Object.entries(profiles)
+          .filter(([id]) => id !== auth.userId)
+          .map(([, p]) => p.display_name);
+        const displayName =
+          others.length > 0
+            ? others.join(", ")
+            : (profiles[auth.userId!]?.display_name ?? groupId);
+        setSelectedGroupName(displayName);
+      }
     },
-    [auth.getSignedMessage, chat],
+    [auth.getSignedMessage, auth.userId, chat],
   );
 
   // chatIdが変わった時にグループ詳細を取得
   useEffect(() => {
     if (!chatId) return;
-    // グループ名を設定
+    warnedKeyChanges.current.clear();
+    // グループ名を仮設定（空名の場合はfetchGroupDetailでメンバー表示名に更新される）
     const group = chat.groups.find((g) => g.id === chatId);
     if (group) setSelectedGroupName(group.name || group.id);
-    fetchGroupDetail(chatId).catch(() => {});
+    groupDetailReady.current = fetchGroupDetail(chatId).catch(() => {});
   }, [chatId]);
 
   // threadIdが変わった時にメッセージを取得
   useEffect(() => {
     if (!chatId || !threadId) return;
-    // スレッド名を設定
     const thread = chat.threads.find((t) => t.id === threadId);
     if (thread) setSelectedThreadName(thread.name || thread.id);
 
@@ -487,8 +575,42 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
         const client = authApiClient(signed.signedMessage);
         const data = await client.message.list(chatId, threadId);
         chat.setTotalMessages(data.total ?? 0);
-        const decrypted = await decryptMessages(data.messages ?? []);
-        chat.setMessages(decrypted);
+
+        // temp session: 鍵がなければ生成して鍵交換メッセージを送信
+        if (thread?.expires_at) {
+          if (!getTempKeys(threadId)) {
+            try {
+              await generateAndSendTempKey(chatId, threadId);
+            } catch {
+              // 鍵生成失敗
+            }
+          }
+        }
+
+        // 暗号化状態のメッセージを即座に表示し、プログレッシブに復号
+        const rawMessages: Message[] = data.messages ?? [];
+        chat.setMessages(rawMessages.map((m) => ({ ...m, encrypted: true })));
+        setLoading(false);
+
+        // メンバー公開鍵の取得完了を待ってから復号を開始
+        await groupDetailReady.current;
+
+        const version = ++decryptVersionRef.current;
+        const decrypted = await decryptMessagesProgressively(
+          rawMessages,
+          version,
+        );
+
+        // temp session: メッセージから鍵交換情報を収集し、保留メッセージを送信
+        if (thread?.expires_at) {
+          const memberCount = Object.keys(memberProfiles).length || 1;
+          await collectTempKeysAndFlush(
+            chatId,
+            threadId,
+            decrypted,
+            memberCount,
+          );
+        }
       } catch {
         showError(t("error.message_load_failed"));
       } finally {
@@ -532,11 +654,12 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       const signed = await auth.getSignedMessage();
       if (!signed) return;
       try {
-        const client = authApiClient(signed.signedMessage);
-        await client.chat.unarchive(group.id);
+        await authApiClient(signed.signedMessage).chat.unarchive(group.id);
         setArchivedGroups((prev) => prev.filter((g) => g.id !== group.id));
-        // アクティブなグループ一覧をリフレッシュ
-        const groups = await client.chat.list();
+        // アクティブなグループ一覧をリフレッシュ（新しいnonceが必要）
+        const signed2 = await auth.getSignedMessage();
+        if (!signed2) return;
+        const groups = await authApiClient(signed2.signedMessage).chat.list();
         chat.setGroups(groups);
       } catch {
         showError(t("error.archive_failed"));
@@ -555,7 +678,10 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
         const client = authApiClient(signed.signedMessage);
         await client.thread.archive(chatId, thread.id);
         chat.setThreads(chat.threads.filter((t) => t.id !== thread.id));
-        setArchivedThreads((prev) => [...prev, { ...thread, archived_at: new Date().toISOString() }]);
+        setArchivedThreads((prev) => [
+          ...prev,
+          { ...thread, archived_at: new Date().toISOString() },
+        ]);
       } catch {
         showError(t("error.archive_failed"));
       }
@@ -570,11 +696,17 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       const signed = await auth.getSignedMessage();
       if (!signed) return;
       try {
-        const client = authApiClient(signed.signedMessage);
-        await client.thread.unarchive(chatId, thread.id);
+        await authApiClient(signed.signedMessage).thread.unarchive(
+          chatId,
+          thread.id,
+        );
         setArchivedThreads((prev) => prev.filter((t) => t.id !== thread.id));
-        // アクティブなスレッド一覧をリフレッシュ
-        const detail = await client.chat.get(chatId);
+        // アクティブなスレッド一覧をリフレッシュ（新しいnonceが必要）
+        const signed2 = await auth.getSignedMessage();
+        if (!signed2) return;
+        const detail = await authApiClient(signed2.signedMessage).chat.get(
+          chatId,
+        );
         chat.setThreads(detail.threads ?? []);
       } catch {
         showError(t("error.archive_failed"));
@@ -602,92 +734,612 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     [chatId, router],
   );
 
-  // メッセージ復号ヘルパー（Worker経由）
-  const decryptMessages = async (messages: Message[]): Promise<Message[]> => {
+  // 現在のスレッドがtemp sessionかどうかを判定
+  const isTempSession = (tid?: string): boolean => {
+    if (!tid) return false;
+    const thread = chat.threads.find((t) => t.id === tid);
+    return !!thread?.expires_at;
+  };
+
+  // Worker経由で1件復号するヘルパー
+  const workerDecrypt = (
+    content: string,
+    privateKeys: string,
+    passphrase: string,
+  ): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      auth.worker!.eventWaiter("decrypt", (result) => {
+        if (result.success) {
+          resolve(decodeBase64Url(result.data.payload));
+        } else {
+          reject(new Error(result.message));
+        }
+      });
+      auth.worker!.postMessage({
+        call: "decrypt",
+        passphrase,
+        privateKeys,
+        knownPublicKeys: knownPublicKeys.current,
+        message: content,
+      });
+    });
+
+  // 1件のメッセージを復号し、結果を返す
+  // isKeyExchange=true の場合は鍵交換メッセージなので表示から除外する
+  const decryptOne = async (
+    msg: Message,
+    tempSession: boolean,
+    tempKeys: { privateKey: string; passphrase: string } | null,
+  ): Promise<{
+    content: string;
+    isKeyExchange: boolean;
+    failed: boolean;
+    errorMessage?: string;
+  }> => {
+    try {
+      const decrypted = await workerDecrypt(
+        msg.content,
+        auth.privateKeys!,
+        auth.subPassphrase!,
+      );
+      if (decrypted.startsWith(TEMP_SESSION_KEY_PREFIX)) {
+        return { content: decrypted, isKeyExchange: true, failed: false };
+      }
+      // temp sessionの場合、一時鍵で再復号を試みる
+      if (tempSession && tempKeys) {
+        try {
+          const tempDecrypted = await workerDecrypt(
+            msg.content,
+            tempKeys.privateKey,
+            tempKeys.passphrase,
+          );
+          return {
+            content: tempDecrypted,
+            isKeyExchange: false,
+            failed: false,
+          };
+        } catch {
+          // 一時鍵での復号失敗時は通常の復号結果を使用
+        }
+      }
+      return { content: decrypted, isKeyExchange: false, failed: false };
+    } catch (e) {
+      // 通常の復号にも失敗した場合、temp sessionなら一時鍵で直接試みる
+      if (tempSession && tempKeys) {
+        try {
+          const tempDecrypted = await workerDecrypt(
+            msg.content,
+            tempKeys.privateKey,
+            tempKeys.passphrase,
+          );
+          return {
+            content: tempDecrypted,
+            isKeyExchange: tempDecrypted.startsWith(TEMP_SESSION_KEY_PREFIX),
+            failed: false,
+          };
+        } catch {
+          // 一時鍵でも復号失敗
+        }
+      }
+      const errorMessage = e instanceof Error ? e.message : undefined;
+      return {
+        content: msg.content,
+        isKeyExchange: false,
+        failed: true,
+        errorMessage,
+      };
+    }
+  };
+
+  // 鍵関連エラーかどうかを判定する（リトライ対象）
+  const isKeyRelatedError = (errorMessage?: string): boolean => {
+    if (!errorMessage) return false;
+    const retryable = [
+      "unknown sender",
+      "outer signature verification failed",
+      "inner signature verification failed",
+      "outer signer not found in inner signers",
+    ];
+    return retryable.some((e) => errorMessage.includes(e));
+  };
+
+  // 特定ユーザの鍵をAPIから再取得し、キャッシュと比較する
+  const refreshUserKeys = (userId: string): Promise<{ changed: boolean }> => {
+    const existing = refreshingUsers.current.get(userId);
+    if (existing) return existing;
+
+    const promise = (async (): Promise<{ changed: boolean }> => {
+      try {
+        const keySigned = await auth.getSignedMessage();
+        if (!keySigned) return { changed: false };
+        const keys = await authApiClient(keySigned.signedMessage).user.getKeys(
+          userId,
+        );
+
+        // キャッシュと比較して変更があるか確認
+        const cached = await getCachedPublicKeys(userId);
+        const changed =
+          !cached ||
+          cached.signing_key_id !== keys.signing_key_id ||
+          cached.signing_public_key !== keys.signing_public_key;
+
+        // ref を更新
+        if (cached) {
+          delete knownPublicKeys.current[cached.signing_key_id];
+          delete keyIdToUserId.current[cached.signing_key_id];
+        }
+        knownPublicKeys.current[keys.signing_key_id] = {
+          name: userId,
+          publicKeys: keys.signing_public_key,
+        };
+        keyIdToUserId.current[keys.signing_key_id] = userId;
+        // encryptionPublicKeys は配列なので再構築が必要だが、
+        // 復号時には使わないためここでは更新しない
+
+        // キャッシュを上書き
+        await setCachedPublicKeys(userId, {
+          signing_key_id: keys.signing_key_id,
+          signing_public_key: keys.signing_public_key,
+          encryption_public_key: keys.encryption_public_key,
+        });
+
+        return { changed };
+      } catch {
+        return { changed: false };
+      } finally {
+        refreshingUsers.current.delete(userId);
+      }
+    })();
+
+    refreshingUsers.current.set(userId, promise);
+    return promise;
+  };
+
+  // 鍵変更を警告ダイアログで表示
+  const showKeyChangedWarning = (userIds: string[]) => {
+    const newWarnings = userIds.filter(
+      (id) => !warnedKeyChanges.current.has(id),
+    );
+    if (newWarnings.length === 0) return;
+    for (const id of newWarnings) warnedKeyChanges.current.add(id);
+
+    const displayNames = newWarnings.map((id) => {
+      const profile = memberProfilesRef.current[id];
+      return profile?.display_name ?? id;
+    });
+
+    pushDialog((p) => (
+      <Dialog {...p} title={t("security.key_changed_title")}>
+        <div className="space-y-3">
+          <p className="text-sm">{t("security.key_changed_message")}</p>
+          <ul className="text-sm font-medium list-disc list-inside">
+            {displayNames.map((name) => (
+              <li key={name}>{name}</li>
+            ))}
+          </ul>
+          <p className="text-sm text-muted">
+            {t("security.key_changed_detail")}
+          </p>
+          <button
+            type="button"
+            onClick={p.close}
+            className="px-4 py-2 bg-accent/30 rounded hover:bg-accent/50"
+          >
+            {t("common.ok")}
+          </button>
+        </div>
+      </Dialog>
+    ));
+  };
+
+  // 復号失敗時に鍵を再取得してリトライする
+  const handleKeyRefreshAndRetry = async (
+    msg: Message,
+    errorMessage: string | undefined,
+    tempSession: boolean,
+    tempKeys: { privateKey: string; passphrase: string } | null,
+  ): Promise<{
+    content: string;
+    isKeyExchange: boolean;
+    failed: boolean;
+    errorMessage?: string;
+  } | null> => {
+    if (!isKeyRelatedError(errorMessage)) return null;
+    if (retryingMessages.current.has(msg.id)) return null;
+    retryingMessages.current.add(msg.id);
+
+    try {
+      // sender_id からリフレッシュ対象を特定
+      const targetUserIds: string[] = [];
+      if (msg.sender_id) {
+        targetUserIds.push(msg.sender_id);
+      } else {
+        // sender_id が不明の場合は全メンバーを再取得
+        targetUserIds.push(...Object.keys(memberProfilesRef.current));
+      }
+
+      const changedUserIds: string[] = [];
+      for (const userId of targetUserIds) {
+        const result = await refreshUserKeys(userId);
+        if (result.changed) changedUserIds.push(userId);
+      }
+
+      if (changedUserIds.length > 0) {
+        showKeyChangedWarning(changedUserIds);
+      }
+
+      // 更新された鍵でリトライ
+      return await decryptOne(msg, tempSession, tempKeys);
+    } finally {
+      retryingMessages.current.delete(msg.id);
+    }
+  };
+
+  // メッセージを最新→古い順にプログレッシブに復号し、1件ごとに表示を更新する。
+  // 呼び出し前に encrypted: true のメッセージを setMessages しておくこと。
+  // version が変わった場合（スレッド切替等）は途中で打ち切る。
+  const decryptMessagesProgressively = async (
+    messages: Message[],
+    version: number,
+  ): Promise<Message[]> => {
     if (!auth.worker || !auth.privateKeys || !auth.subPassphrase) {
       return messages;
     }
 
-    const results: Message[] = [];
-    for (const msg of messages) {
-      try {
-        const decrypted = await new Promise<string>((resolve, reject) => {
-          auth.worker!.eventWaiter("decrypt", (result) => {
-            if (result.success) {
-              const bytes = Uint8Array.from(
-                atob(result.data.payload.replace(/-/g, "+").replace(/_/g, "/")),
-                (c) => c.charCodeAt(0),
-              );
-              resolve(new TextDecoder().decode(bytes));
-            } else {
-              reject(new Error(result.message));
-            }
-          });
-          auth.worker!.postMessage({
-            call: "decrypt",
-            passphrase: auth.subPassphrase!,
-            privateKeys: auth.privateKeys!,
-            knownPublicKeys: knownPublicKeys.current,
-            message: msg.content,
-          });
-        });
-        results.push({ ...msg, content: decrypted });
-      } catch {
-        results.push(msg);
+    const currentThreadId = threadId;
+    const tempSession = isTempSession(currentThreadId);
+    const tempKeys = currentThreadId ? getTempKeys(currentThreadId) : null;
+
+    const allDecrypted: Message[] = [];
+
+    // 最新のメッセージから順に復号
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (decryptVersionRef.current !== version) return allDecrypted;
+
+      const msg = messages[i];
+      let result = await decryptOne(msg, tempSession, tempKeys);
+
+      // 鍵関連エラーの場合、鍵を再取得してリトライ
+      if (result.failed && isKeyRelatedError(result.errorMessage)) {
+        const retryResult = await handleKeyRefreshAndRetry(
+          msg,
+          result.errorMessage,
+          tempSession,
+          tempKeys,
+        );
+        if (retryResult) result = retryResult;
+      }
+
+      if (decryptVersionRef.current !== version) return allDecrypted;
+
+      if (result.isKeyExchange) {
+        allDecrypted.push({ ...msg, content: result.content });
+        chat.setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+      } else {
+        const fileMeta = !result.failed
+          ? parseFileMetadata(result.content)
+          : null;
+        const updated: Message = {
+          ...msg,
+          content: result.content,
+          encrypted: undefined,
+          decryptFailed: result.failed || undefined,
+          fileMetadata: fileMeta ?? undefined,
+        };
+        allDecrypted.push(updated);
+        chat.setMessages((prev) =>
+          prev.map((m) => (m.id === msg.id ? updated : m)),
+        );
+        // 画像ファイルの場合は自動ダウンロード
+        if (fileMeta && isImageType(fileMeta.type) && msg.file_id) {
+          loadImagePreview(updated);
+        }
       }
     }
-    return results;
+    return allDecrypted;
+  };
+
+  // 既存の復号済みメッセージを保持したまま、新着メッセージのみを追加・復号する。
+  // 進行中の初期復号をキャンセルせず、新規メッセージだけを独立して復号する。
+  const mergeAndDecryptNewMessages = async (
+    rawMessages: Message[],
+  ): Promise<Message[]> => {
+    // React 18のバッチ更新ではsetMessages内の関数更新が遅延実行されるため、
+    // 差分計算はrefから行い、setMessagesの副作用に依存しない
+    const existingIds = new Set(messagesRef.current.map((m) => m.id));
+    const newRawMessages = rawMessages.filter((m) => !existingIds.has(m.id));
+    if (newRawMessages.length === 0) return [];
+    chat.setMessages((prev) => {
+      const prevIds = new Set(prev.map((m) => m.id));
+      const toAdd = newRawMessages.filter((m) => !prevIds.has(m.id));
+      if (toAdd.length === 0) return prev;
+      return [...prev, ...toAdd.map((m) => ({ ...m, encrypted: true }))];
+    });
+    if (!auth.worker || !auth.privateKeys || !auth.subPassphrase) return [];
+
+    const currentThreadId = threadIdRef.current;
+    const tempSession = isTempSession(currentThreadId);
+    const tempKeys = currentThreadId ? getTempKeys(currentThreadId) : null;
+    const allDecrypted: Message[] = [];
+
+    for (const msg of newRawMessages) {
+      try {
+        let result = await decryptOne(msg, tempSession, tempKeys);
+
+        // 鍵関連エラーの場合、鍵を再取得してリトライ
+        if (result.failed && isKeyRelatedError(result.errorMessage)) {
+          const retryResult = await handleKeyRefreshAndRetry(
+            msg,
+            result.errorMessage,
+            tempSession,
+            tempKeys,
+          );
+          if (retryResult) result = retryResult;
+        }
+
+        if (result.isKeyExchange) {
+          allDecrypted.push({ ...msg, content: result.content });
+          chat.setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+        } else {
+          const fileMeta = !result.failed
+            ? parseFileMetadata(result.content)
+            : null;
+          const updated: Message = {
+            ...msg,
+            content: result.content,
+            encrypted: undefined,
+            decryptFailed: result.failed || undefined,
+            fileMetadata: fileMeta ?? undefined,
+          };
+          allDecrypted.push(updated);
+          chat.setMessages((prev) =>
+            prev.map((m) => (m.id === msg.id ? updated : m)),
+          );
+          // 画像ファイルの場合は自動ダウンロード
+          if (fileMeta && isImageType(fileMeta.type) && msg.file_id) {
+            loadImagePreview(updated);
+          }
+        }
+      } catch {
+        chat.setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msg.id
+              ? { ...msg, encrypted: undefined, decryptFailed: true }
+              : m,
+          ),
+        );
+      }
+    }
+    return allDecrypted;
   };
 
   const handleNewGroup = () => {
     pushDialog(NewGroupDialog);
   };
 
-  const handleNewThread = () => {
-    pushDialog((p) => (
-      <Dialog {...p} title={t("chat.new_thread")}>
-        <form
-          onSubmit={async (e) => {
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            const name = fd.get("name") as string;
-            if (!name || !chatId) return;
+  // temp session用: PGP鍵を生成して鍵交換メッセージを送信
+  const generateAndSendTempKey = async (
+    targetChatId: string,
+    targetThreadId: string,
+  ) => {
+    if (!auth.worker) return;
+    const signed = await auth.getSignedMessage();
+    if (!signed) return;
 
-            const signed = await auth.getSignedMessage();
-            if (!signed) return;
-            try {
-              const client = authApiClient(signed.signedMessage);
-              const result = await client.chat.createThread(chatId, name);
-              chat.setThreads([
-                ...chat.threads,
-                {
+    const passphrase = crypto.randomUUID();
+    const userId = signed.userId;
+
+    // Worker経由でPGP鍵を生成
+    const keys = await new Promise<string>((resolve, reject) => {
+      auth.worker!.eventWaiter("generate", (result) => {
+        if (result.success) resolve(result.data.keys);
+        else reject(new Error(result.message));
+      });
+      auth.worker!.postMessage({
+        call: "generate",
+        userId,
+        mainPassphrase: passphrase,
+        subPassphrase: passphrase,
+      });
+    });
+
+    // 公開鍵をエクスポート
+    const publicKey = await new Promise<string>((resolve, reject) => {
+      auth.worker!.eventWaiter("export_public_keys", (result) => {
+        if (result.success) resolve(result.data.keys);
+        else reject(new Error(result.message));
+      });
+      auth.worker!.postMessage({
+        call: "export_public_keys",
+        keys,
+      });
+    });
+
+    // sessionStorageに保存
+    setTempKeys(targetThreadId, { privateKey: keys, passphrase });
+
+    // 鍵交換メッセージを送信（通常の暗号化で）
+    const client = authApiClient(signed.signedMessage);
+    const keyMsg = `${TEMP_SESSION_KEY_PREFIX}${publicKey}`;
+
+    if (
+      auth.privateKeys &&
+      auth.subPassphrase &&
+      encryptionPublicKeys.current.length > 0
+    ) {
+      const plainBase64 = encodeToBase64(keyMsg);
+      const encrypted = await new Promise<string>((resolve, reject) => {
+        auth.worker!.eventWaiter("encrypt", (result) => {
+          if (result.success) resolve(result.data.message);
+          else reject(new Error(result.message));
+        });
+        auth.worker!.postMessage({
+          call: "encrypt",
+          passphrase: auth.subPassphrase!,
+          privateKeys: auth.privateKeys!,
+          publicKeys: encryptionPublicKeys.current,
+          payload: plainBase64,
+        });
+      });
+      await client.message.send(targetChatId, targetThreadId, encrypted);
+    }
+  };
+
+  // temp sessionメッセージから鍵交換メッセージを収集し、保留メッセージを送信
+  const collectTempKeysAndFlush = async (
+    targetChatId: string,
+    targetThreadId: string,
+    messages: Message[],
+    memberCount: number,
+  ) => {
+    const pubKeys: Record<string, string> =
+      getTempPubKeys(targetThreadId) ?? {};
+
+    // TEMP_SESSION_KEY:プレフィックスのメッセージから公開鍵を収集
+    for (const msg of messages) {
+      if (msg.content.startsWith(TEMP_SESSION_KEY_PREFIX) && msg.sender_id) {
+        pubKeys[msg.sender_id] = msg.content.slice(
+          TEMP_SESSION_KEY_PREFIX.length,
+        );
+      }
+    }
+
+    setTempPubKeys(targetThreadId, pubKeys);
+
+    // 全メンバーの公開鍵が揃った場合、保留メッセージを送信
+    if (Object.keys(pubKeys).length >= memberCount) {
+      const pending = getPendingMessages(targetThreadId);
+      if (pending.length > 0 && auth.worker) {
+        const tempKeys = getTempKeys(targetThreadId);
+        if (!tempKeys) return;
+
+        const signed = await auth.getSignedMessage();
+        if (!signed) return;
+        const client = authApiClient(signed.signedMessage);
+        const allPubKeys = Object.values(pubKeys);
+
+        for (const text of pending) {
+          try {
+            const plainBase64 = encodeToBase64(text);
+            const encrypted = await new Promise<string>((resolve, reject) => {
+              auth.worker!.eventWaiter("encrypt", (result) => {
+                if (result.success) resolve(result.data.message);
+                else reject(new Error(result.message));
+              });
+              auth.worker!.postMessage({
+                call: "encrypt",
+                passphrase: auth.subPassphrase!,
+                privateKeys: auth.privateKeys!,
+                publicKeys: allPubKeys,
+                payload: plainBase64,
+              });
+            });
+            await client.message.send(targetChatId, targetThreadId, encrypted);
+          } catch {
+            // 送信失敗した保留メッセージはスキップ
+          }
+        }
+        clearPendingMessages(targetThreadId);
+      }
+    }
+  };
+
+  const handleNewThread = () => {
+    pushDialog((p) => {
+      const [isTempSession, setIsTempSession] = useState(false);
+      const [threadName, setThreadName] = useState("");
+      return (
+        <Dialog {...p} title={t("chat.new_thread")}>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const fd = new FormData(e.currentTarget);
+              const name = fd.get("name") as string;
+              if (!name || !chatId) return;
+
+              const expiresAt = isTempSession
+                ? (fd.get("expires_at") as string)
+                : undefined;
+              // temp sessionの場合、終了時刻が必須
+              if (isTempSession && !expiresAt) return;
+
+              // ISO 8601形式に変換（datetime-localはローカル時刻）
+              const expiresAtIso = expiresAt
+                ? new Date(expiresAt).toISOString()
+                : undefined;
+
+              const signed = await auth.getSignedMessage();
+              if (!signed) return;
+              try {
+                const client = authApiClient(signed.signedMessage);
+                const result = await client.chat.createThread(
+                  chatId,
+                  name,
+                  expiresAtIso,
+                );
+                const newThread: Thread = {
                   id: result.id,
                   chat_id: result.chat_id ?? chatId,
                   name,
                   created_by: signed.userId,
                   created_at: new Date().toISOString(),
-                },
-              ]);
-              p.close();
-            } catch {
-              showError(t("error.unknown"));
-            }
-          }}
-        >
-          <input
-            name="name"
-            placeholder={t("chat.thread_name")}
-            className="w-full border border-accent/30 rounded px-3 py-2 mb-3 bg-transparent"
-          />
-          <button
-            type="submit"
-            className="px-4 py-2 bg-accent/30 rounded hover:bg-accent/50"
+                  expires_at: expiresAtIso,
+                };
+                chat.setThreads([...chat.threads, newThread]);
+
+                // temp sessionの場合、PGP鍵を生成して鍵交換メッセージを送信
+                if (isTempSession) {
+                  try {
+                    await generateAndSendTempKey(chatId, result.id);
+                  } catch {
+                    // 鍵生成失敗はスレッド作成自体は成功しているので無視しない
+                  }
+                }
+
+                p.close();
+              } catch {
+                showError(t("error.unknown"));
+              }
+            }}
           >
-            {t("common.ok")}
-          </button>
-        </form>
-      </Dialog>
-    ));
+            <input
+              name="name"
+              placeholder={t("chat.thread_name")}
+              className="w-full border border-accent/30 rounded px-3 py-2 mb-3 bg-transparent"
+              onChange={(e) => setThreadName(e.target.value)}
+            />
+            <label className="flex items-center gap-2 mb-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isTempSession}
+                onChange={(e) => setIsTempSession(e.target.checked)}
+                className="accent-accent"
+              />
+              <span className="text-sm">{t("chat.temporary_session")}</span>
+            </label>
+            {isTempSession && (
+              <div className="mb-3">
+                <label className="block text-sm text-muted mb-1">
+                  {t("chat.expires_at")}
+                </label>
+                <input
+                  name="expires_at"
+                  type="datetime-local"
+                  className="w-full border border-accent/30 rounded px-3 py-2 bg-transparent"
+                />
+              </div>
+            )}
+            <button
+              type="submit"
+              disabled={!threadName.trim()}
+              className="px-4 py-2 bg-accent/30 rounded hover:bg-accent/50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {t("common.ok")}
+            </button>
+          </form>
+        </Dialog>
+      );
+    });
   };
 
   const handleSendMessage = async (text: string) => {
@@ -698,14 +1350,75 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       return;
     }
 
+    // temp sessionの場合の分岐
+    if (isTempSession(threadId)) {
+      const tempKeys = getTempKeys(threadId);
+      if (!tempKeys) return;
+
+      const pubKeys = getTempPubKeys(threadId);
+      const memberCount = Object.keys(memberProfiles).length || 1;
+
+      // 全メンバーの公開鍵が揃っていない場合は保留
+      if (!pubKeys || Object.keys(pubKeys).length < memberCount) {
+        const pending = getPendingMessages(threadId);
+        setPendingMessages(threadId, [...pending, text]);
+        // 保留中であることをローカルに表示
+        chat.setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            thread_id: threadId,
+            sender_id: signed.userId,
+            content: `[${t("chat.pending_messages")}] ${text}`,
+            created_at: new Date().toISOString(),
+          },
+        ]);
+        return;
+      }
+
+      // main keys で署名+暗号化して送信（外側署名はサーバが検証する）
+      try {
+        const plainBase64 = encodeToBase64(text);
+        const allPubKeys = Object.values(pubKeys);
+        const encrypted = await new Promise<string>((resolve, reject) => {
+          auth.worker!.eventWaiter("encrypt", (result) => {
+            if (result.success) resolve(result.data.message);
+            else reject(new Error(result.message));
+          });
+          auth.worker!.postMessage({
+            call: "encrypt",
+            passphrase: auth.subPassphrase!,
+            privateKeys: auth.privateKeys!,
+            publicKeys: allPubKeys,
+            payload: plainBase64,
+          });
+        });
+
+        const client = authApiClient(signed.signedMessage);
+        const result = await client.message.send(chatId, threadId, encrypted);
+        chat.setMessages((prev) => [
+          ...prev,
+          {
+            id: result.id ?? crypto.randomUUID(),
+            thread_id: threadId,
+            sender_id: signed.userId,
+            content: text,
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      } catch {
+        showError(t("error.message_send_failed"));
+      }
+      return;
+    }
+
+    // 通常のメッセージ送信
     if (encryptionPublicKeys.current.length === 0) {
       return;
     }
 
     try {
-      const plainBase64 = btoa(
-        String.fromCharCode(...new TextEncoder().encode(text)),
-      );
+      const plainBase64 = encodeToBase64(text);
 
       const encrypted = await new Promise<string>((resolve, reject) => {
         auth.worker!.eventWaiter("encrypt", (result) => {
@@ -727,8 +1440,8 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       const client = authApiClient(signed.signedMessage);
       const result = await client.message.send(chatId, threadId, encrypted);
 
-      chat.setMessages([
-        ...chat.messages,
+      chat.setMessages((prev) => [
+        ...prev,
         {
           id: result.id ?? crypto.randomUUID(),
           thread_id: threadId,
@@ -739,6 +1452,225 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       ]);
     } catch {
       showError(t("error.message_send_failed"));
+    }
+  };
+
+  // Worker経由で暗号化するヘルパー（armored出力）
+  const workerEncrypt = (
+    payload: string,
+    publicKeys: string[],
+  ): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      auth.worker!.eventWaiter("encrypt", (result) => {
+        if (result.success) resolve(result.data.message);
+        else reject(new Error(result.message));
+      });
+      auth.worker!.postMessage({
+        call: "encrypt",
+        passphrase: auth.subPassphrase!,
+        privateKeys: auth.privateKeys!,
+        publicKeys,
+        payload,
+      });
+    });
+
+  // Worker経由でバイナリ暗号化するヘルパー（raw PGP bytes → base64で返却）
+  const workerEncryptBin = (
+    payload: string,
+    publicKeys: string[],
+  ): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      auth.worker!.eventWaiter("encrypt_bin", (result) => {
+        if (result.success) resolve(result.data.data);
+        else reject(new Error(result.message));
+      });
+      auth.worker!.postMessage({
+        call: "encrypt_bin",
+        passphrase: auth.subPassphrase!,
+        privateKeys: auth.privateKeys!,
+        publicKeys,
+        payload,
+      });
+    });
+
+  // Worker経由でバイナリ復号するヘルパー（完全な Signed(Encrypted(Signed(Data))) を復号）
+  const workerDecryptBin = (
+    data: string,
+    privateKeys: string,
+    passphrase: string,
+  ): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      auth.worker!.eventWaiter("decrypt_bin", (result) => {
+        if (result.success) {
+          resolve(result.data.payload);
+        } else {
+          reject(new Error(result.message));
+        }
+      });
+      auth.worker!.postMessage({
+        call: "decrypt_bin",
+        passphrase,
+        privateKeys,
+        knownPublicKeys: knownPublicKeys.current,
+        data,
+      });
+    });
+
+  const handleSendFile = async (file: File) => {
+    if (!chatId || !threadId) return;
+
+    // ファイルサイズ制限: 10MB
+    const MAX_FILE_SIZE = 10 * 1024 * 1024;
+    if (file.size > MAX_FILE_SIZE) {
+      showError(t("error.file_too_large"));
+      return;
+    }
+
+    const signed = await auth.getSignedMessage();
+    if (!signed || !auth.worker || !auth.privateKeys || !auth.subPassphrase) {
+      return;
+    }
+    if (encryptionPublicKeys.current.length === 0) return;
+
+    try {
+      // メタデータを暗号化（armored: サーバが外側署名を検証する）
+      const metaContent = buildFileMessageContent({
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        size: file.size,
+      });
+      const metaBase64 = encodeToBase64(metaContent);
+      const encryptedMeta = await workerEncrypt(
+        metaBase64,
+        encryptionPublicKeys.current,
+      );
+
+      // ファイルバイトをバイナリのまま暗号化（raw PGP bytes）
+      const fileBytes = new Uint8Array(await file.arrayBuffer());
+      const fileBase64 = bytesToBase64(fileBytes);
+      const encryptedBase64 = await workerEncryptBin(
+        fileBase64,
+        encryptionPublicKeys.current,
+      );
+
+      // base64 → バイナリに戻してアップロード
+      const encryptedBytes = base64ToBytes(encryptedBase64);
+
+      // multipartでアップロード
+      const client = authApiClient(signed.signedMessage);
+      const fileBlob = new Blob([encryptedBytes.buffer as ArrayBuffer], {
+        type: "application/octet-stream",
+      });
+      const result = await client.file.upload(
+        chatId,
+        threadId,
+        encryptedMeta,
+        fileBlob,
+      );
+
+      // ローカルメッセージリストに楽観的追加
+      const fileMetadata = {
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        size: file.size,
+      };
+      const fileBlobUrl = isImageType(fileMetadata.type)
+        ? URL.createObjectURL(file)
+        : undefined;
+      chat.setMessages((prev) => [
+        ...prev,
+        {
+          id: result.id ?? crypto.randomUUID(),
+          thread_id: threadId,
+          sender_id: signed.userId,
+          content: metaContent,
+          file_id: result.file_id,
+          created_at: new Date().toISOString(),
+          fileMetadata,
+          fileBlobUrl,
+        },
+      ]);
+    } catch {
+      showError(t("error.file_upload_failed"));
+    }
+  };
+
+  // ファイルをダウンロード・復号して Blob を返す共通ヘルパー
+  const decryptFileToBlob = async (message: Message): Promise<Blob | null> => {
+    if (!message.file_id || !message.fileMetadata) return null;
+    if (!auth.worker || !auth.privateKeys || !auth.subPassphrase) return null;
+
+    const signed = await auth.getSignedMessage();
+    if (!signed) return null;
+
+    const client = authApiClient(signed.signedMessage);
+    const encryptedBuffer = await client.file.download(message.file_id);
+
+    // raw PGP bytes を base64 にエンコードして Worker へ渡す
+    const encryptedBytes = new Uint8Array(encryptedBuffer);
+    const encryptedBase64 = bytesToBase64(encryptedBytes);
+
+    // バイナリ復号（外側署名検証 + 復号 + 内側署名検証）
+    const decryptedBase64Url = await workerDecryptBin(
+      encryptedBase64,
+      auth.privateKeys,
+      auth.subPassphrase,
+    );
+
+    // base64url からバイナリに変換
+    const bytes = fromBase64Url(decryptedBase64Url);
+
+    return new Blob([bytes.buffer as ArrayBuffer], {
+      type: message.fileMetadata.type,
+    });
+  };
+
+  // 画像のインライン表示用: 復号してblob URLを生成しメッセージを更新する
+  const loadImagePreview = async (message: Message) => {
+    try {
+      const blob = await decryptFileToBlob(message);
+      if (!blob) return;
+      const blobUrl = URL.createObjectURL(blob);
+      chat.setMessages((prev) =>
+        prev.map((m) =>
+          m.id === message.id ? { ...m, fileBlobUrl: blobUrl } : m,
+        ),
+      );
+    } catch {
+      // 画像プレビュー読み込み失敗は静かに無視
+    }
+  };
+
+  // ユーザ操作によるファイル保存: 復号してブラウザダウンロードをトリガーする
+  const handleDownloadFile = async (message: Message) => {
+    if (!message.fileMetadata) return;
+    try {
+      // 既にblob URLがある画像は再ダウンロード不要
+      if (message.fileBlobUrl) {
+        const resp = await fetch(message.fileBlobUrl);
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = message.fileMetadata.name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        return;
+      }
+      const blob = await decryptFileToBlob(message);
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = message.fileMetadata.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      showError(t("error.file_download_failed"));
     }
   };
 
@@ -753,11 +1685,22 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       const client = authApiClient(signed.signedMessage);
 
       const loaded = chat.messages.length;
-      const from = -(loaded + 50);
+      const from = -(loaded + 20);
       const until = -loaded;
       const data = await client.message.list(chatId, threadId, from, until);
-      const decrypted = await decryptMessages(data.messages ?? []);
-      chat.setMessages([...decrypted, ...chat.messages]);
+      const rawMessages: Message[] = data.messages ?? [];
+      const existingIds = new Set(chat.messages.map((m) => m.id));
+      const newMessages = rawMessages.filter((m) => !existingIds.has(m.id));
+
+      // 暗号化状態で先頭に追加し、プログレッシブに復号
+      chat.setMessages((prev) => [
+        ...newMessages.map((m) => ({ ...m, encrypted: true })),
+        ...prev,
+      ]);
+      setLoading(false);
+
+      const version = decryptVersionRef.current;
+      await decryptMessagesProgressively(newMessages, version);
     } catch {
       showError(t("error.message_load_failed"));
     } finally {
@@ -767,8 +1710,14 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
 
   const currentUserId = auth.userId ?? "me";
 
+  // SSR/初回マウント時はレイアウト未確定なので何も描画しない
+  if (isMobile === undefined) return null;
+
   // モバイル: スタック表示（URLに基づいて表示を切り替え）
   if (isMobile) {
+    if (isInfoRoute) {
+      return <ChannelInfo chatId={chatId!} />;
+    }
     if (chatId && threadId) {
       return (
         <ChatViewComponent
@@ -777,6 +1726,8 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           memberProfiles={memberProfiles}
           loading={loading}
           onSend={handleSendMessage}
+          onSendFile={handleSendFile}
+          onDownloadFile={handleDownloadFile}
           onLoadMore={handleLoadMore}
           onBack={() => router.push(`/chat/${chatId}`)}
         />
@@ -809,8 +1760,8 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
 
   // PC: 3カラムレイアウト
   return (
-    <div className="flex h-full">
-      <div className="w-64 border-r border-accent/30 flex-shrink-0">
+    <div className="flex h-full max-w-[1400px] mx-auto w-full">
+      <div className="w-80 border-r border-accent/30 flex-shrink-0">
         <ChatGroupList
           onSelect={selectGroup}
           onNew={handleNewGroup}
@@ -820,8 +1771,10 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           onShowArchived={fetchArchivedGroups}
         />
       </div>
-      <div className="w-64 border-r border-accent/30 flex-shrink-0">
-        {chatId ? (
+      <div className="w-80 border-r border-accent/30 flex-shrink-0">
+        {isInfoRoute ? (
+          <ChannelInfo chatId={chatId!} />
+        ) : chatId ? (
           <ThreadList
             groupName={selectedGroupName}
             onSelect={selectThread}
@@ -845,6 +1798,8 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
             memberProfiles={memberProfiles}
             loading={loading}
             onSend={handleSendMessage}
+            onSendFile={handleSendFile}
+            onDownloadFile={handleDownloadFile}
             onLoadMore={handleLoadMore}
             onBack={() => router.push(`/chat/${chatId}`)}
           />

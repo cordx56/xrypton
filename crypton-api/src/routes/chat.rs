@@ -31,6 +31,12 @@ async fn create_chat(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let chat_id = ChatId::new_v4();
 
+    // member_idsにuser@domain形式も許容（外部ユーザの存在確認はスキップ）
+    for member_id in &body.member_ids {
+        UserId::validate_full(member_id)
+            .map_err(|e| AppError::BadRequest(format!("invalid member ID: {e}")))?;
+    }
+
     db::chat::create_chat_group(
         &state.pool,
         &chat_id,
@@ -40,7 +46,47 @@ async fn create_chat(
     )
     .await?;
 
-    // メンバー（作成者除く）にPush通知を送信
+    // 外部メンバーのホームサーバにチャット参照を同期
+    let external_members: Vec<&String> = body
+        .member_ids
+        .iter()
+        .filter(|id| id.contains('@'))
+        .collect();
+    if !external_members.is_empty() {
+        let mut domains: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for member_id in &external_members {
+            if let Some((_local, domain)) = member_id.split_once('@') {
+                domains
+                    .entry(domain.to_string())
+                    .or_default()
+                    .push(member_id.to_string());
+            }
+        }
+        let allow_http = state.config.federation_allow_http;
+        let auth_header = auth.raw_auth_header.clone();
+        let sync_chat_id = chat_id.as_str().to_string();
+        let sync_name = body.name.clone();
+        let all_member_ids = body.member_ids.clone();
+        tokio::spawn(async move {
+            for domain in domains.keys() {
+                if let Err(e) = crate::federation::client::sync_chat_to_remote(
+                    domain,
+                    &sync_chat_id,
+                    &sync_name,
+                    &all_member_ids,
+                    &auth_header,
+                    allow_http,
+                )
+                .await
+                {
+                    tracing::warn!("federation chat sync to {domain} failed: {e}");
+                }
+            }
+        });
+    }
+
+    // ローカルメンバー（作成者除く）にPush通知を送信
     let pool = state.pool.clone();
     let config = state.config.clone();
     let creator_id = auth.user_id.clone();
@@ -49,10 +95,9 @@ async fn create_chat(
     let member_ids: Vec<UserId> = body
         .member_ids
         .iter()
-        .filter(|id| id.as_str() != creator_id.as_str())
-        .map(|id| UserId::validate(id))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| AppError::BadRequest(format!("invalid member ID: {e}")))?;
+        .filter(|id| id.as_str() != creator_id.as_str() && !id.contains('@'))
+        .filter_map(|id| UserId::validate(id).ok())
+        .collect();
     tokio::spawn(async move {
         let payload = serde_json::json!({
             "type": "added_to_group",
@@ -91,9 +136,34 @@ async fn get_chat(
         return Err(AppError::Forbidden("not a member of this chat".into()));
     }
 
+    // server_domainが設定されている場合、ホームサーバにプロキシ
     let group = db::chat::get_chat_group(&state.pool, &chat_id)
         .await?
         .ok_or_else(|| AppError::NotFound("chat group not found".into()))?;
+
+    if let Some(ref server_domain) = group.server_domain {
+        let base =
+            crate::federation::client::base_url(server_domain, state.config.federation_allow_http);
+        let url = format!("{base}/v1/chat/{}", chat_id.as_str());
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(&url)
+            .header("Authorization", &auth.raw_auth_header)
+            .send()
+            .await
+            .map_err(|e| AppError::BadGateway(format!("proxy request failed: {e}")))?;
+        let mut body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| AppError::BadGateway(format!("invalid proxy response: {e}")))?;
+
+        // ホームサーバのローカルユーザIDにドメインを付与して、
+        // リモート側のフロントエンドが鍵を正しく取得できるようにする
+        qualify_user_ids_in_chat_response(&mut body, server_domain);
+
+        return Ok(Json(body));
+    }
+
     let members = db::chat::get_chat_members(&state.pool, &chat_id).await?;
     let threads = db::threads::get_threads_by_chat(&state.pool, &chat_id).await?;
     let archived_threads = db::threads::get_archived_threads_by_chat(&state.pool, &chat_id).await?;
@@ -142,4 +212,37 @@ async fn unarchive_chat(
 
     db::chat::unarchive_chat_group(&state.pool, &chat_id).await?;
     Ok(Json(serde_json::json!({ "unarchived": true })))
+}
+
+/// プロキシ応答内のベアユーザIDに `@domain` を付与する。
+/// ホームサーバのローカルユーザIDはドメインなしで保存されているため、
+/// リモートクライアントが鍵取得できるよう完全修飾IDに変換する。
+fn qualify_user_ids_in_chat_response(body: &mut serde_json::Value, server_domain: &str) {
+    fn qualify(id: &str, domain: &str) -> String {
+        if id.contains('@') {
+            id.to_string()
+        } else {
+            format!("{id}@{domain}")
+        }
+    }
+
+    // members[].user_id
+    if let Some(members) = body.get_mut("members").and_then(|v| v.as_array_mut()) {
+        for member in members {
+            if let Some(uid) = member.get("user_id").and_then(|v| v.as_str()) {
+                let qualified = qualify(uid, server_domain);
+                member["user_id"] = serde_json::Value::String(qualified);
+            }
+        }
+    }
+
+    // group.created_by
+    if let Some(created_by) = body
+        .get("group")
+        .and_then(|g| g.get("created_by"))
+        .and_then(|v| v.as_str())
+    {
+        let qualified = qualify(created_by, server_domain);
+        body["group"]["created_by"] = serde_json::Value::String(qualified);
+    }
 }

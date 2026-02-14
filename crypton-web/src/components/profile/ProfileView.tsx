@@ -1,23 +1,26 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
-import { useDialogs } from "@/contexts/DialogContext";
 import { useI18n } from "@/contexts/I18nContext";
-import { ApiError, apiClient, authApiClient, getApiBaseUrl } from "@/api/client";
+import {
+  ApiError,
+  apiClient,
+  authApiClient,
+  getApiBaseUrl,
+} from "@/api/client";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faAddressCard } from "@fortawesome/free-regular-svg-icons";
 import Avatar from "@/components/common/Avatar";
-import Dialog from "@/components/common/Dialog";
-import Code from "@/components/Code";
-import QrDisplay from "@/components/QrDisplay";
+import { setCachedProfile } from "@/utils/accountStore";
 
-const ProfileView = () => {
+/** プロフィール編集画面 */
+const ProfileEditView = () => {
   const auth = useAuth();
-  const { pushDialog } = useDialogs();
+  const router = useRouter();
   const { t } = useI18n();
   const { showError } = useErrorToast();
+
   const [displayName, setDisplayName] = useState("");
   const [status, setStatus] = useState("");
   const [bio, setBio] = useState("");
@@ -25,7 +28,6 @@ const ProfileView = () => {
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // プロフィール読み込み
   useEffect(() => {
     if (!auth.userId) return;
     (async () => {
@@ -34,9 +36,10 @@ const ProfileView = () => {
         setDisplayName(profile.display_name ?? "");
         setStatus(profile.status ?? "");
         setBio(profile.bio ?? "");
-        if (profile.icon_url) {
-          setIconUrl(`${getApiBaseUrl()}${profile.icon_url}`);
-        }
+        const resolvedIconUrl = profile.icon_url
+          ? `${getApiBaseUrl()}${profile.icon_url}`
+          : undefined;
+        if (resolvedIconUrl) setIconUrl(resolvedIconUrl);
       } catch {
         showError(t("error.unknown"));
       }
@@ -56,6 +59,13 @@ const ProfileView = () => {
         status,
         bio,
       });
+      await setCachedProfile(auth.userId, {
+        userId: auth.userId,
+        displayName: displayName || undefined,
+        iconUrl: iconUrl ?? null,
+      });
+      window.dispatchEvent(new Event("profile-updated"));
+      router.push("/profile");
     } catch {
       showError(t("error.profile_save_failed"));
     } finally {
@@ -71,16 +81,23 @@ const ProfileView = () => {
     const file = e.target.files?.[0];
     if (!file || !auth.userId) return;
 
-    // プレビュー表示
     const previewUrl = URL.createObjectURL(file);
     setIconUrl(previewUrl);
 
-    // アップロード
     const signed = await auth.getSignedMessage();
     if (!signed) return;
     try {
       const client = authApiClient(signed.signedMessage);
       await client.user.uploadIcon(auth.userId, file);
+      // キャッシュバスター付きのサーバURLで保存し、ヘッダーに通知
+      const serverIconUrl = `${getApiBaseUrl()}/v1/user/${encodeURIComponent(auth.userId)}/icon?t=${Date.now()}`;
+      setIconUrl(serverIconUrl);
+      await setCachedProfile(auth.userId, {
+        userId: auth.userId,
+        displayName: displayName || undefined,
+        iconUrl: serverIconUrl,
+      });
+      window.dispatchEvent(new Event("profile-updated"));
     } catch (e) {
       if (e instanceof ApiError && e.status === 413) {
         showError(t("error.icon_too_large"));
@@ -90,22 +107,10 @@ const ProfileView = () => {
     }
   };
 
-  const showPublicKeys = () => {
-    if (!auth.publicKeys) return;
-    pushDialog((p) => (
-      <Dialog {...p} title={t("profile.public_keys")}>
-        <QrDisplay data={auth.publicKeys!} />
-        <Code code={auth.publicKeys!} />
-      </Dialog>
-    ));
-  };
-
   return (
     <div className="max-w-lg mx-auto p-4 space-y-6">
-      <h2 className="text-lg font-semibold">
-        <FontAwesomeIcon icon={faAddressCard} className="mr-2" />
-        {t("tab.profile")}
-      </h2>
+      <h2 className="text-lg font-semibold">{t("profile.edit")}</h2>
+
       <div className="flex flex-col items-center mb-6">
         <button
           type="button"
@@ -129,13 +134,6 @@ const ProfileView = () => {
           onChange={handleIconChange}
           className="hidden"
         />
-        <h2 className="mt-3 text-lg font-semibold">
-          {displayName || "No Name"}
-        </h2>
-        {auth.userId && (
-          <p className="text-xs text-muted/50 select-all">{auth.userId}</p>
-        )}
-        {status && <p className="text-sm text-muted">{status}</p>}
       </div>
 
       <div className="space-y-4">
@@ -171,26 +169,26 @@ const ProfileView = () => {
           />
         </div>
 
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          className="w-full py-2 rounded bg-accent/20 hover:bg-accent/30 disabled:opacity-50"
-        >
-          {saving ? "..." : t("profile.save")}
-        </button>
-
-        <button
-          type="button"
-          onClick={showPublicKeys}
-          disabled={!auth.publicKeys}
-          className="w-full py-2 rounded border border-accent/30 hover:bg-accent/10 disabled:opacity-50"
-        >
-          {t("profile.public_keys")}
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 py-2 rounded bg-accent/20 hover:bg-accent/30 disabled:opacity-50"
+          >
+            {saving ? "..." : t("profile.save")}
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/profile")}
+            className="flex-1 py-2 rounded border border-accent/30 hover:bg-accent/10"
+          >
+            {t("common.cancel")}
+          </button>
+        </div>
       </div>
     </div>
   );
 };
 
-export default ProfileView;
+export default ProfileEditView;

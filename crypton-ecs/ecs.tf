@@ -29,6 +29,7 @@ resource "aws_ecs_task_definition" "api" {
       { name = "S3_BUCKET", value = aws_s3_bucket.storage.id },
       { name = "S3_REGION", value = var.aws_region },
       { name = "VAPID_PUBLIC_KEY", value = var.vapid_public_key },
+      { name = "SERVER_HOSTNAME", value = var.server_hostname },
       { name = "RUST_LOG", value = "crypton_api=info,tower_http=info" },
     ]
     secrets = concat(

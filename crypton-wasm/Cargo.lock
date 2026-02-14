@@ -370,10 +370,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "crypton-common"
+version = "0.1.0"
+dependencies = [
+ "pgp",
+ "thiserror 2.0.17",
+]
+
+[[package]]
 name = "crypton-wasm"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "bytes",
+ "chrono",
+ "crypton-common",
  "gloo",
  "pgp",
  "rand",

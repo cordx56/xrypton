@@ -5,7 +5,7 @@ use web_push::{
 
 use crate::config::AppConfig;
 use crate::db;
-use crate::types::{ChatId, UserId};
+use crate::types::{ChatId, MessageId, ThreadId, UserId};
 
 /// 1ユーザの全サブスクリプションにPush通知を送信する内部ヘルパー。
 async fn send_push_to_user(
@@ -69,14 +69,16 @@ async fn send_push_to_user(
     }
 }
 
-/// チャットグループの全メンバー（送信者除く）にPush通知を送信する。
-/// ペイロードはJSON形式: {"type":"message","sender_id":"...","sender_name":"...","chat_id":"...","encrypted":"..."}
+/// チャットグループの全メンバーにPush通知を送信する。
+/// 送信者自身にも送信し、ペイロードに `is_self: true` を付与する（他デバイス同期用）。
+/// ペイロードはJSON形式: {"type":"message","sender_id":"...","sender_name":"...","chat_id":"...","thread_id":"...","message_id":"...","is_self":bool}
 pub async fn send_to_members(
     pool: &db::Db,
     config: &AppConfig,
     chat_id: &ChatId,
     sender_id: &UserId,
-    encrypted_content: &str,
+    thread_id: &ThreadId,
+    message_id: &MessageId,
 ) -> Result<(), String> {
     let vapid_private = match config.vapid_private_key.as_ref() {
         Some(key) => key,
@@ -89,39 +91,54 @@ pub async fn send_to_members(
 
     let client = IsahcWebPushClient::new().map_err(|e| e.to_string())?;
 
-    // 送信者の表示名を取得（取得失敗時はuser_idをフォールバックに使う）
+    // sender_idに@が含まれない場合はserver_hostnameを付与して完全修飾IDにする
+    let qualified_sender_id = if sender_id.0.contains('@') {
+        sender_id.0.clone()
+    } else {
+        format!("{}@{}", sender_id.0, config.server_hostname)
+    };
+
+    // 送信者の表示名を取得（空文字や取得失敗時はuser_idをフォールバックに使う）
     let sender_name = db::users::get_profile(pool, sender_id)
         .await
         .ok()
         .flatten()
         .map(|p| p.display_name)
-        .unwrap_or_else(|| sender_id.0.clone());
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| qualified_sender_id.clone());
 
-    // Web Pushペイロードは約4KBまで。暗号文が大きすぎる場合はencryptedなしで送信
-    let payload = if encrypted_content.len() <= 3500 {
-        serde_json::json!({
-            "type": "message",
-            "sender_id": sender_id.0,
-            "sender_name": sender_name,
-            "chat_id": chat_id.0,
-            "encrypted": encrypted_content,
-        })
-    } else {
-        serde_json::json!({
-            "type": "message",
-            "sender_id": sender_id.0,
-            "sender_name": sender_name,
-            "chat_id": chat_id.0,
-        })
-    }
+    let payload = serde_json::json!({
+        "type": "message",
+        "sender_id": qualified_sender_id,
+        "sender_name": sender_name,
+        "chat_id": chat_id.0,
+        "thread_id": thread_id.0,
+        "message_id": message_id.0,
+    })
     .to_string();
 
+    let self_payload = serde_json::json!({
+        "type": "message",
+        "sender_id": qualified_sender_id,
+        "sender_name": sender_name,
+        "chat_id": chat_id.0,
+        "thread_id": thread_id.0,
+        "message_id": message_id.0,
+        "is_self": true,
+    })
+    .to_string();
+
+    // 両方を完全修飾IDに正規化して比較（ドメイン違いの同名ユーザを区別する）
     for member in &members {
-        if member.user_id == sender_id.as_str() {
-            continue;
-        }
+        let qualified_member = if member.user_id.contains('@') {
+            member.user_id.clone()
+        } else {
+            format!("{}@{}", member.user_id, config.server_hostname)
+        };
+        let is_sender = qualified_member == qualified_sender_id;
         let member_user_id = UserId(member.user_id.clone());
-        send_push_to_user(pool, vapid_private, &client, &member_user_id, &payload).await;
+        let p = if is_sender { &self_payload } else { &payload };
+        send_push_to_user(pool, vapid_private, &client, &member_user_id, p).await;
     }
 
     Ok(())

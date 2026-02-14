@@ -5,6 +5,10 @@ use crypton_api::config::AppConfig;
 use crypton_api::db;
 use crypton_api::routes::build_router;
 use crypton_api::storage::S3Storage;
+use tokio::time::{Duration, sleep};
+
+const NONCE_RETENTION_DAYS: i64 = 30;
+const NONCE_CLEANUP_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[tokio::main]
 async fn main() {
@@ -24,6 +28,33 @@ async fn main() {
         .await
         .expect("failed to connect to database");
     db::migrate(&pool).await.expect("failed to run migrations");
+
+    {
+        let cleanup_pool = pool.clone();
+        tokio::spawn(async move {
+            loop {
+                match db::nonces::delete_nonces_older_than_days(&cleanup_pool, NONCE_RETENTION_DAYS)
+                    .await
+                {
+                    Ok(deleted) => {
+                        tracing::info!(
+                            deleted,
+                            retention_days = NONCE_RETENTION_DAYS,
+                            "nonce cleanup finished"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            retention_days = NONCE_RETENTION_DAYS,
+                            "nonce cleanup failed"
+                        );
+                    }
+                }
+                sleep(NONCE_CLEANUP_INTERVAL).await;
+            }
+        });
+    }
 
     let storage = Arc::new(S3Storage::new(&config).await);
 

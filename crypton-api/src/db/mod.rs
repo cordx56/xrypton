@@ -1,5 +1,6 @@
 pub mod chat;
 pub mod contacts;
+pub mod files;
 pub mod messages;
 pub mod models;
 pub mod nonces;

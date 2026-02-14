@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y pkg-config libssl-dev curl && rm -rf /v
 RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
 WORKDIR /build
+COPY crypton-common/ crypton-common/
 COPY crypton-wasm/ crypton-wasm/
 
 WORKDIR /build/crypton-wasm
@@ -28,6 +29,8 @@ COPY crypton-web/ .
 # NEXT_PUBLIC_* variables must be set at build time
 ARG NEXT_PUBLIC_API_BASE_URL=/api
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+ARG NEXT_PUBLIC_SERVER_HOSTNAME
+ENV NEXT_PUBLIC_SERVER_HOSTNAME=${NEXT_PUBLIC_SERVER_HOSTNAME}
 
 RUN pnpm build
 

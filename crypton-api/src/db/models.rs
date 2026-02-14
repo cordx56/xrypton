@@ -31,9 +31,10 @@ pub struct ProfileRow {
 pub struct ChatGroupRow {
     pub id: String,
     pub name: String,
-    pub created_by: String,
+    pub created_by: Option<String>,
     pub created_at: Timestamp,
     pub archived_at: Option<Timestamp>,
+    pub server_domain: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
@@ -48,17 +49,28 @@ pub struct ThreadRow {
     pub id: String,
     pub chat_id: String,
     pub name: String,
-    pub created_by: String,
+    pub created_by: Option<String>,
     pub created_at: Timestamp,
     pub archived_at: Option<Timestamp>,
+    pub expires_at: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct MessageRow {
     pub id: String,
     pub thread_id: String,
-    pub sender_id: String,
+    pub sender_id: Option<String>,
     pub content: String,
+    pub file_id: Option<String>,
+    pub created_at: Timestamp,
+}
+
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct FileRow {
+    pub id: String,
+    pub chat_id: String,
+    pub s3_key: String,
+    pub size: i32,
     pub created_at: Timestamp,
 }
 

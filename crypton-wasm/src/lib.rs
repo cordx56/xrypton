@@ -1,3 +1,4 @@
+use base64::engine::general_purpose::STANDARD;
 use base64::{Engine, engine::general_purpose::URL_SAFE};
 use wasm_bindgen::prelude::*;
 
@@ -118,7 +119,18 @@ pub fn get_pub_key_user_ids(public_keys: String) -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen]
-pub fn sign_and_encrypt(
+pub fn get_private_key_user_ids(private_keys: String) -> Result<JsValue, JsValue> {
+    let keys = get_private_keys(private_keys)?;
+    let value = keys
+        .get_user_ids()
+        .into_iter()
+        .map(|data| ResultData::String { data })
+        .collect();
+    Ok(ReturnValue::Ok { value }.to_value())
+}
+
+#[wasm_bindgen]
+pub fn sign_encrypt_sign(
     private_key: String,
     public_keys: Vec<String>,
     sub_passphrase: &str,
@@ -137,7 +149,7 @@ pub fn sign_and_encrypt(
         })?;
     let recipient_refs: Vec<&keys::PublicKeys> = recipients.iter().collect();
     let armored = private
-        .sign_and_encrypt(sub_passphrase, &recipient_refs, plain)
+        .sign_encrypt_sign(sub_passphrase, &recipient_refs, plain)
         .map_err(|e| {
             ReturnValue::Error {
                 message: e.to_string(),
@@ -149,6 +161,43 @@ pub fn sign_and_encrypt(
     }
     .to_value())
 }
+/// `sign_encrypt_sign` のバイナリ出力版。
+/// 返り値: [Base64(raw_pgp_bytes)]
+#[wasm_bindgen]
+pub fn sign_encrypt_sign_bin(
+    private_key: String,
+    public_keys: Vec<String>,
+    sub_passphrase: &str,
+    plain: Vec<u8>,
+) -> Result<JsValue, JsValue> {
+    let private = get_private_keys(private_key)?;
+    let recipients: Vec<keys::PublicKeys> = public_keys
+        .iter()
+        .map(|k| keys::PublicKeys::try_from(k.as_str()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
+    let recipient_refs: Vec<&keys::PublicKeys> = recipients.iter().collect();
+    let raw_bytes = private
+        .sign_encrypt_sign_bin(sub_passphrase, &recipient_refs, plain)
+        .map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
+    Ok(ReturnValue::Ok {
+        value: vec![ResultData::Base64 {
+            data: STANDARD.encode(&raw_bytes),
+        }],
+    }
+    .to_value())
+}
+
 #[wasm_bindgen]
 pub fn decrypt(private_key: String, sub_passphrase: &str, data: &str) -> Result<JsValue, JsValue> {
     let private = get_private_keys(private_key)?;
@@ -187,6 +236,25 @@ pub fn sign(keys: String, sub_passphrase: &str, data: Vec<u8>) -> Result<JsValue
     }
     .to_value())
 }
+/// 署名のみ（暗号化なし）を raw PGP バイト列で返す。
+/// 返り値: [Base64(raw_pgp_bytes)]
+#[wasm_bindgen]
+pub fn sign_bytes(keys: String, sub_passphrase: &str, data: Vec<u8>) -> Result<JsValue, JsValue> {
+    let keys = get_private_keys(keys)?;
+    let raw_bytes = keys.sign_bytes(sub_passphrase, data).map_err(|e| {
+        ReturnValue::Error {
+            message: e.to_string(),
+        }
+        .to_value()
+    })?;
+    Ok(ReturnValue::Ok {
+        value: vec![ResultData::Base64 {
+            data: STANDARD.encode(&raw_bytes),
+        }],
+    }
+    .to_value())
+}
+
 #[wasm_bindgen]
 pub fn verify(public_key: String, armored: &str) -> Result<JsValue, JsValue> {
     let keys = get_public_keys(public_key)?;
@@ -236,4 +304,137 @@ pub fn verify_detached_signature(
             .to_value()
         })?;
     Ok(ReturnValue::Ok { value: Vec::new() }.to_value())
+}
+
+/// 外側署名を検証してペイロード（inner encrypted bytes）を取り出す。
+/// 返り値: [Base64(inner_bytes), String(outer_key_id)]
+#[wasm_bindgen]
+pub fn unwrap_outer(public_key: String, outer_armored: &str) -> Result<JsValue, JsValue> {
+    let outer_key_id = crypton_common::keys::extract_issuer_key_id(outer_armored).map_err(|e| {
+        ReturnValue::Error {
+            message: e.to_string(),
+        }
+        .to_value()
+    })?;
+    let common_pk =
+        crypton_common::keys::PublicKeys::try_from(public_key.as_str()).map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
+    let inner_bytes = common_pk.verify_and_extract(outer_armored).map_err(|e| {
+        ReturnValue::Error {
+            message: e.to_string(),
+        }
+        .to_value()
+    })?;
+    Ok(ReturnValue::Ok {
+        value: vec![
+            ResultData::Base64 {
+                data: STANDARD.encode(&inner_bytes),
+            },
+            ResultData::String { data: outer_key_id },
+        ],
+    }
+    .to_value())
+}
+
+/// raw PGP bytes を復号する（decrypt と同じ返り値形式）。
+#[wasm_bindgen]
+pub fn decrypt_bytes(
+    private_key: String,
+    sub_passphrase: &str,
+    data: Vec<u8>,
+) -> Result<JsValue, JsValue> {
+    let private = get_private_keys(private_key)?;
+    let (data, signature, key_ids) =
+        private
+            .decrypt_from_bytes(sub_passphrase, &data)
+            .map_err(|e| {
+                ReturnValue::Error {
+                    message: e.to_string(),
+                }
+                .to_value()
+            })?;
+    let mut result = Vec::with_capacity(1 + key_ids.len());
+    result.push(ResultData::Base64 {
+        data: URL_SAFE.encode(&data),
+    });
+    if let Some(data) = signature {
+        result.push(ResultData::String { data });
+        for key_id in key_ids {
+            result.push(ResultData::String { data: key_id });
+        }
+    }
+    Ok(ReturnValue::Ok { value: result }.to_value())
+}
+
+/// raw PGP バイト列から署名者の鍵IDを抽出する。
+/// 返り値: [String(key_id)]
+#[wasm_bindgen]
+pub fn extract_key_id_bytes(data: Vec<u8>) -> Result<JsValue, JsValue> {
+    let key_id = crypton_common::keys::extract_issuer_key_id_from_bytes(&data).map_err(|e| {
+        ReturnValue::Error {
+            message: e.to_string(),
+        }
+        .to_value()
+    })?;
+    Ok(ReturnValue::Ok {
+        value: vec![ResultData::String { data: key_id }],
+    }
+    .to_value())
+}
+
+/// raw PGP バイト列の外側署名を検証してペイロード（inner encrypted bytes）を取り出す。
+/// 返り値: [Base64(inner_bytes), String(outer_key_id)]
+#[wasm_bindgen]
+pub fn unwrap_outer_bytes(public_key: String, data: Vec<u8>) -> Result<JsValue, JsValue> {
+    let outer_key_id =
+        crypton_common::keys::extract_issuer_key_id_from_bytes(&data).map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
+    let common_pk =
+        crypton_common::keys::PublicKeys::try_from(public_key.as_str()).map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
+    let inner_bytes = common_pk
+        .verify_and_extract_from_bytes(&data)
+        .map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
+    Ok(ReturnValue::Ok {
+        value: vec![
+            ResultData::Base64 {
+                data: STANDARD.encode(&inner_bytes),
+            },
+            ResultData::String { data: outer_key_id },
+        ],
+    }
+    .to_value())
+}
+
+/// armored PGP メッセージから署名者の鍵IDを抽出する。
+/// 返り値: [String(key_id)]
+#[wasm_bindgen]
+pub fn extract_key_id(armored: &str) -> Result<JsValue, JsValue> {
+    let key_id = crypton_common::keys::extract_issuer_key_id(armored).map_err(|e| {
+        ReturnValue::Error {
+            message: e.to_string(),
+        }
+        .to_value()
+    })?;
+    Ok(ReturnValue::Ok {
+        value: vec![ResultData::String { data: key_id }],
+    }
+    .to_value())
 }

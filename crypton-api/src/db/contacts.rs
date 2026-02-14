@@ -27,3 +27,18 @@ pub async fn add_contact(
         .await?;
     Ok(result.rows_affected() > 0)
 }
+
+#[tracing::instrument(skip(pool), err)]
+pub async fn delete_contact(
+    pool: &Db,
+    user_id: &UserId,
+    contact_user_id: &UserId,
+) -> Result<bool, sqlx::Error> {
+    let q = sql("DELETE FROM contacts WHERE user_id = ? AND contact_user_id = ?");
+    let result = sqlx::query(&q)
+        .bind(user_id.as_str())
+        .bind(contact_user_id.as_str())
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}

@@ -4,11 +4,17 @@ export const WorkerResultCallList = {
   generate: "generate",
   export_public_keys: "export_public_keys",
   encrypt: "encrypt",
+  encrypt_bin: "encrypt_bin",
   decrypt: "decrypt",
+  decrypt_bin: "decrypt_bin",
+  unwrap_outer: "unwrap_outer",
+  decrypt_bytes: "decrypt_bytes",
+  extract_key_id: "extract_key_id",
   verify: "verify",
   get_key_id: "get_key_id",
   sign: "sign",
   validate_passphrases: "validate_passphrases",
+  get_private_key_user_ids: "get_private_key_user_ids",
 } as const;
 export type WorkerResultCall =
   (typeof WorkerResultCallList)[keyof typeof WorkerResultCallList];
@@ -30,10 +36,12 @@ export const WasmReturnValue = z.union([
 export const Notification = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("message"),
-    encrypted: z.string().optional(),
     sender_id: z.string().optional(),
     sender_name: z.string().optional(),
     chat_id: z.string().optional(),
+    thread_id: z.string().optional(),
+    message_id: z.string().optional(),
+    is_self: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("added_to_group"),
@@ -49,8 +57,14 @@ export const Notification = z.discriminatedUnion("type", [
 
 // --- User ID validation ---
 
-/** ユーザID: 英数字とアンダースコアのみ */
-export const UserId = z.string().regex(/^[a-zA-Z0-9_]+$/);
+/** ユーザID: 英数字とアンダースコアのみ、4文字以上、@禁止、予約語禁止 */
+export const UserId = z
+  .string()
+  .min(4)
+  .regex(/^[a-zA-Z0-9_]+$/)
+  .refine((s) => !["root", "admin"].includes(s.toLowerCase()), {
+    message: "reserved",
+  });
 
 /** 連絡先検索: ユーザID または ユーザID@ドメイン */
 export const ContactQuery = z.string().regex(/^[a-zA-Z0-9_]+(@.+)?$/);
@@ -95,21 +109,23 @@ export const CreateChatRequest = z.object({
 export const ChatGroup = z.object({
   id: z.string(),
   name: z.string(),
-  created_by: z.string(),
+  created_by: z.string().nullable(),
   created_at: z.string(),
 });
 
 // POST /v1/chat/{chat_id} (create thread)
 export const CreateThreadRequest = z.object({
   name: z.string(),
+  expires_at: z.string().nullish(),
 });
 
 export const Thread = z.object({
   id: z.string(),
   chat_id: z.string(),
   name: z.string(),
-  created_by: z.string(),
+  created_by: z.string().nullable(),
   created_at: z.string(),
+  expires_at: z.string().nullish(),
 });
 
 // POST /v1/chat/{chat_id}/{thread_id}/message
@@ -120,7 +136,7 @@ export const PostMessageRequest = z.object({
 export const Message = z.object({
   id: z.string(),
   thread_id: z.string(),
-  sender_id: z.string(),
+  sender_id: z.string().nullable(),
   content: z.string(),
   created_at: z.string(),
 });
@@ -180,11 +196,40 @@ export const WorkerCallMessage = z.union([
     payload: z.base64(),
   }),
   z.object({
+    call: z.literal(WorkerResultCallList["encrypt_bin"]),
+    passphrase: z.string(),
+    privateKeys: z.string(),
+    publicKeys: z.string().array(),
+    payload: z.base64(),
+  }),
+  z.object({
     call: z.literal(WorkerResultCallList["decrypt"]),
     passphrase: z.string(),
     privateKeys: z.string(),
     knownPublicKeys: Contacts,
     message: z.string(),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["unwrap_outer"]),
+    publicKey: z.string(),
+    outerArmored: z.string(),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["decrypt_bin"]),
+    passphrase: z.string(),
+    privateKeys: z.string(),
+    knownPublicKeys: Contacts,
+    data: z.base64(),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["decrypt_bytes"]),
+    passphrase: z.string(),
+    privateKeys: z.string(),
+    data: z.base64(),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["extract_key_id"]),
+    armored: z.string(),
   }),
   z.object({
     call: z.literal(WorkerResultCallList["verify"]),
@@ -207,6 +252,10 @@ export const WorkerCallMessage = z.union([
     privateKeys: z.string(),
     mainPassphrase: z.string(),
     subPassphrase: z.string(),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["get_private_key_user_ids"]),
+    privateKeys: z.string(),
   }),
 ]);
 
@@ -235,10 +284,36 @@ export const WorkerResultMessage = z.union([
     result: WorkerResult(z.object({ message: z.string() })),
   }),
   z.object({
+    call: z.literal(WorkerResultCallList["encrypt_bin"]),
+    result: WorkerResult(z.object({ data: z.base64() })),
+  }),
+  z.object({
     call: z.literal(WorkerResultCallList["decrypt"]),
     result: WorkerResult(
       z.object({ key_ids: z.string().array(), payload: z.base64url() }),
     ),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["unwrap_outer"]),
+    result: WorkerResult(
+      z.object({ innerBytes: z.base64(), outerKeyId: z.string() }),
+    ),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["decrypt_bin"]),
+    result: WorkerResult(
+      z.object({ key_ids: z.string().array(), payload: z.base64url() }),
+    ),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["decrypt_bytes"]),
+    result: WorkerResult(
+      z.object({ key_ids: z.string().array(), payload: z.base64url() }),
+    ),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["extract_key_id"]),
+    result: WorkerResult(z.object({ key_id: z.string() })),
   }),
   z.object({
     call: z.literal(WorkerResultCallList["get_key_id"]),
@@ -251,5 +326,9 @@ export const WorkerResultMessage = z.union([
   z.object({
     call: z.literal(WorkerResultCallList["validate_passphrases"]),
     result: WorkerResult(z.object({})),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["get_private_key_user_ids"]),
+    result: WorkerResult(z.object({ user_ids: z.string().array() })),
   }),
 ]);

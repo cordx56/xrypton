@@ -1,4 +1,6 @@
 import { useEffect, ReactNode } from "react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faXmark } from "@fortawesome/free-solid-svg-icons";
 import type { DialogComponent } from "@/contexts/DialogContext";
 
 const Dialog: DialogComponent<{
@@ -18,7 +20,7 @@ const Dialog: DialogComponent<{
           onClick={close}
           className="text-muted hover:text-fg"
         >
-          X
+          <FontAwesomeIcon icon={faXmark} />
         </button>
       </div>
       <div className="h-full px-2">{children}</div>

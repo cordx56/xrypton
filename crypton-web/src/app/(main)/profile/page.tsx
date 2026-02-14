@@ -1,7 +1,10 @@
 "use client";
 
-import ProfileView from "@/components/profile/ProfileView";
+import { useAuth } from "@/contexts/AuthContext";
+import UserProfileView from "@/components/contacts/UserProfileView";
 
 export default function ProfilePage() {
-  return <ProfileView />;
+  const auth = useAuth();
+  if (!auth.userId) return null;
+  return <UserProfileView userId={auth.userId} />;
 }

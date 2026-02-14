@@ -71,26 +71,27 @@ async function apiFetch(
 export function apiClient() {
   return {
     user: {
-      getKeys: async (userId: string) => {
-        const resp = await apiFetch(`/v1/user/${userId}/keys`);
-        return resp.json();
-      },
       postKeys: async (
         userId: string,
         encryptionPublicKey: string,
         signingPublicKey: string,
       ) => {
-        const resp = await apiFetch(`/v1/user/${userId}/keys`, {
-          method: "POST",
-          body: JSON.stringify({
-            encryption_public_key: encryptionPublicKey,
-            signing_public_key: signingPublicKey,
-          }),
-        });
+        const resp = await apiFetch(
+          `/v1/user/${encodeURIComponent(userId)}/keys`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              encryption_public_key: encryptionPublicKey,
+              signing_public_key: signingPublicKey,
+            }),
+          },
+        );
         return resp.json();
       },
       getProfile: async (userId: string) => {
-        const resp = await apiFetch(`/v1/user/${userId}/profile`);
+        const resp = await apiFetch(
+          `/v1/user/${encodeURIComponent(userId)}/profile`,
+        );
         return resp.json();
       },
     },
@@ -110,20 +111,46 @@ export function authApiClient(signedMessage: string) {
 
   return {
     user: {
+      getKeys: async (userId: string) => {
+        const resp = await apiFetch(
+          `/v1/user/${encodeURIComponent(userId)}/keys`,
+          {},
+          auth,
+        );
+        return resp.json();
+      },
       updateProfile: async (
         id: string,
         body: { display_name?: string; status?: string; bio?: string },
       ) => {
         const resp = await apiFetch(
-          `/v1/user/${id}/profile`,
+          `/v1/user/${encodeURIComponent(id)}/profile`,
           { method: "POST", body: JSON.stringify(body) },
+          auth,
+        );
+        return resp.json();
+      },
+      updateKeys: async (
+        id: string,
+        encryptionPublicKey: string,
+        signingPublicKey: string,
+      ) => {
+        const resp = await apiFetch(
+          `/v1/user/${encodeURIComponent(id)}/keys`,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              encryption_public_key: encryptionPublicKey,
+              signing_public_key: signingPublicKey,
+            }),
+          },
           auth,
         );
         return resp.json();
       },
       deleteUser: async (id: string) => {
         const resp = await apiFetch(
-          `/v1/user/${id}/keys`,
+          `/v1/user/${encodeURIComponent(id)}/keys`,
           { method: "DELETE" },
           auth,
         );
@@ -134,8 +161,11 @@ export function authApiClient(signedMessage: string) {
         formData.append("icon", file);
         const baseUrl = getApiBaseUrl();
         const url = baseUrl.startsWith("/")
-          ? `${baseUrl}/v1/user/${id}/icon`
-          : new URL(`/v1/user/${id}/icon`, baseUrl).toString();
+          ? `${baseUrl}/v1/user/${encodeURIComponent(id)}/icon`
+          : new URL(
+              `/v1/user/${encodeURIComponent(id)}/icon`,
+              baseUrl,
+            ).toString();
         const headers = new Headers();
         headers.set("Authorization", btoa(auth.signedMessage));
         const resp = await fetch(url, {
@@ -156,7 +186,7 @@ export function authApiClient(signedMessage: string) {
         return resp.json();
       },
       getIconUrl: (id: string) => {
-        return `${getApiBaseUrl()}/v1/user/${id}/icon`;
+        return `${getApiBaseUrl()}/v1/user/${encodeURIComponent(id)}/icon`;
       },
     },
     chat: {
@@ -179,10 +209,16 @@ export function authApiClient(signedMessage: string) {
         const resp = await apiFetch(`/v1/chat/${chatId}`, {}, auth);
         return resp.json();
       },
-      createThread: async (chatId: string, name: string) => {
+      createThread: async (
+        chatId: string,
+        name: string,
+        expiresAt?: string,
+      ) => {
+        const body: Record<string, string> = { name };
+        if (expiresAt) body.expires_at = expiresAt;
         const resp = await apiFetch(
           `/v1/chat/${chatId}`,
-          { method: "POST", body: JSON.stringify({ name }) },
+          { method: "POST", body: JSON.stringify(body) },
           auth,
         );
         return resp.json();
@@ -239,7 +275,15 @@ export function authApiClient(signedMessage: string) {
       },
     },
     message: {
-      list: async (chatId: string, threadId: string, from = -50, until = 0) => {
+      get: async (chatId: string, threadId: string, messageId: string) => {
+        const resp = await apiFetch(
+          `/v1/chat/${chatId}/${threadId}/message/${messageId}`,
+          {},
+          auth,
+        );
+        return resp.json();
+      },
+      list: async (chatId: string, threadId: string, from = -20, until = 0) => {
         const params = new URLSearchParams({
           from: from.toString(),
           until: until.toString(),
@@ -272,6 +316,52 @@ export function authApiClient(signedMessage: string) {
           auth,
         );
         return resp.json();
+      },
+      delete: async (contactUserId: string) => {
+        const resp = await apiFetch(
+          `/v1/contacts/${encodeURIComponent(contactUserId)}`,
+          { method: "DELETE" },
+          auth,
+        );
+        return resp.json();
+      },
+    },
+    file: {
+      upload: async (
+        chatId: string,
+        threadId: string,
+        metadata: string,
+        fileBlob: Blob,
+      ) => {
+        const formData = new FormData();
+        formData.append("metadata", metadata);
+        formData.append("file", fileBlob);
+        const baseUrl = getApiBaseUrl();
+        const url = baseUrl.startsWith("/")
+          ? `${baseUrl}/v1/chat/${chatId}/${threadId}/file`
+          : new URL(`/v1/chat/${chatId}/${threadId}/file`, baseUrl).toString();
+        const headers = new Headers();
+        headers.set("Authorization", btoa(auth.signedMessage));
+        const resp = await fetch(url, {
+          method: "POST",
+          headers,
+          body: formData,
+        });
+        if (!resp.ok) {
+          let errorMessage = "";
+          try {
+            const json = await resp.json();
+            errorMessage = json.error ?? JSON.stringify(json);
+          } catch {
+            errorMessage = await resp.text().catch(() => "");
+          }
+          throw new ApiError(resp.status, errorMessage);
+        }
+        return resp.json();
+      },
+      download: async (fileId: string): Promise<ArrayBuffer> => {
+        const resp = await apiFetch(`/v1/file/${fileId}`, {}, auth);
+        return resp.arrayBuffer();
       },
     },
     notification: {
