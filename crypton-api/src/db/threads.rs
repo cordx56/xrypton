@@ -30,9 +30,10 @@ pub async fn get_threads_by_chat(
     pool: &Db,
     chat_id: &ChatId,
 ) -> Result<Vec<ThreadRow>, sqlx::Error> {
-    let q = sql(
-        "SELECT * FROM threads WHERE chat_id = ? AND archived_at IS NULL ORDER BY created_at DESC",
-    );
+    let q = sql("SELECT t.*, \
+         (SELECT MAX(m.created_at) FROM messages m WHERE m.thread_id = t.id) AS updated_at \
+         FROM threads t WHERE t.chat_id = ? AND t.archived_at IS NULL \
+         ORDER BY t.created_at DESC");
     sqlx::query_as::<_, ThreadRow>(&q)
         .bind(chat_id.as_str())
         .fetch_all(pool)
@@ -44,9 +45,10 @@ pub async fn get_archived_threads_by_chat(
     pool: &Db,
     chat_id: &ChatId,
 ) -> Result<Vec<ThreadRow>, sqlx::Error> {
-    let q = sql(
-        "SELECT * FROM threads WHERE chat_id = ? AND archived_at IS NOT NULL ORDER BY archived_at DESC",
-    );
+    let q = sql("SELECT t.*, \
+         (SELECT MAX(m.created_at) FROM messages m WHERE m.thread_id = t.id) AS updated_at \
+         FROM threads t WHERE t.chat_id = ? AND t.archived_at IS NOT NULL \
+         ORDER BY t.archived_at DESC");
     sqlx::query_as::<_, ThreadRow>(&q)
         .bind(chat_id.as_str())
         .fetch_all(pool)

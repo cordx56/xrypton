@@ -41,6 +41,7 @@ const ChatInput = ({ onSend, onSendFile, disabled }: Props) => {
       await onSend(trimmed);
     } finally {
       setSending(false);
+      requestAnimationFrame(() => textareaRef.current?.focus());
     }
   };
 

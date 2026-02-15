@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useDialogs } from "@/contexts/DialogContext";
 import { useI18n } from "@/contexts/I18nContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -20,6 +20,7 @@ import {
   deleteAccountData,
   getAccountIds,
   setActiveAccountId,
+  getAccountValue,
   setAccountValue,
 } from "@/utils/accountStore";
 
@@ -30,6 +31,14 @@ const SettingsPanel = () => {
   const auth = useAuth();
   const { showError } = useErrorToast();
   const [deleting, setDeleting] = useState(false);
+  const [hideNonContact, setHideNonContact] = useState(false);
+
+  useEffect(() => {
+    if (!auth.userId) return;
+    getAccountValue(auth.userId, "hideNonContactChannels").then((v) => {
+      if (v === "true") setHideNonContact(true);
+    });
+  }, [auth.userId]);
 
   const handleExportPrivateKeys = async () => {
     if (!auth.privateKeys) return;
@@ -148,6 +157,30 @@ const SettingsPanel = () => {
             </button>
           ))}
         </div>
+      </section>
+
+      {/* Channel Filter */}
+      <section>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={hideNonContact}
+            onChange={(e) => {
+              const val = e.target.checked;
+              setHideNonContact(val);
+              if (auth.userId)
+                setAccountValue(
+                  auth.userId,
+                  "hideNonContactChannels",
+                  String(val),
+                );
+            }}
+            className="accent-accent"
+          />
+          <span className="text-sm">
+            {t("settings.hide_non_contact_channels")}
+          </span>
+        </label>
       </section>
 
       {/* Account */}

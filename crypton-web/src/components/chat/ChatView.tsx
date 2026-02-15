@@ -11,7 +11,11 @@ import ChatInput from "./ChatInput";
 import Spinner from "@/components/common/Spinner";
 import type { Message } from "@/types/chat";
 
-type MemberProfile = { display_name: string; icon_url: string | null };
+type MemberProfile = {
+  display_name: string;
+  icon_url: string | null;
+  status: string;
+};
 
 type Props = {
   threadName: string;
@@ -167,6 +171,7 @@ const ChatView = ({
                   profile?.display_name ?? senderId ?? t("chat.deleted_user")
                 }
                 iconUrl={profile?.icon_url ?? null}
+                status={profile?.status ?? ""}
                 onClickUser={
                   senderId
                     ? () => router.push(`/contact/${senderId}`)

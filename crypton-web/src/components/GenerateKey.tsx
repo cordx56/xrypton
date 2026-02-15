@@ -8,6 +8,7 @@ import { useErrorToast } from "@/contexts/ErrorToastContext";
 import { useI18n } from "@/contexts/I18nContext";
 import { useDialogs } from "@/contexts/DialogContext";
 import { apiClient, authApiClient, ApiError } from "@/api/client";
+import { deleteAccountData } from "@/utils/accountStore";
 import Code from "@/components/Code";
 import QrDisplay from "@/components/QrDisplay";
 import QrReader from "@/components/QrReader";
@@ -35,6 +36,10 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
 
   // 登録完了後に表示する秘密鍵（export画面用）
   const [completedKeys, setCompletedKeys] = useState<string | null>(null);
+  // パスフレーズ確認画面用: 生成済み鍵を保持
+  const [pendingKeys, setPendingKeys] = useState<string | null>(null);
+  const [confirmMainPass, setConfirmMainPass] = useState("");
+  const [confirmSubPass, setConfirmSubPass] = useState("");
 
   const isUpdateMode =
     mode === "settings" && !!auth.userId && auth.isRegistered;
@@ -78,11 +83,15 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
     [worker],
   );
 
-  // WebAuthn登録 → サーバ登録を行う共通処理
+  // WebAuthn認証/登録 → サーバ登録を行う共通処理
   const registerAccount = useCallback(
     async (targetUserId: string, publicKeys: string) => {
-      // WebAuthn登録
-      const webauthnOk = await auth.registerWebAuthn(targetUserId);
+      // 既存パスキーがあれば再利用、なければ新規登録
+      const webauthnOk = await auth.ensureRecentReauth(
+        true,
+        targetUserId,
+        true,
+      );
       if (!webauthnOk) {
         throw new Error("webauthn_failed");
       }
@@ -131,92 +140,134 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
         mainPassphrase,
         subPassphrase,
       };
-      worker.eventWaiter("generate", async (data) => {
+      worker.eventWaiter("generate", (data) => {
         if (!data.success) {
           setProcessing(false);
           return;
         }
-
-        const generatedKeys = data.data.keys;
-
-        if (isUpdateMode) {
-          // 鍵更新フロー（既存と同じ）
-          const publicKeys = await exportPublicKeys(generatedKeys);
-          if (!publicKeys) {
-            showError(t("error.unknown"));
-            setProcessing(false);
-            return;
-          }
-          try {
-            await auth.updateKeys(publicKeys);
-          } catch (e) {
-            if (e instanceof ApiError) {
-              if (e.status === 401) showError(t("error.unauthorized"));
-              else if (e.status === 403) showError(t("error.forbidden"));
-              else if (e.status === 404) showError(t("error.not_found"));
-              else showError(t("error.unknown"));
-            } else if (
-              e instanceof Error &&
-              e.message === "WebAuthn verification failed"
-            ) {
-              showError(t("error.webauthn_failed"));
-            } else {
-              showError(t("error.network"));
-            }
-            setProcessing(false);
-            return;
-          }
-          auth.setPrivateKeys(generatedKeys);
-          if (saveSubPass) {
-            auth.setSubPassphrase(subPassphrase);
-          } else {
-            auth.setSubPassphraseSession(subPassphrase);
-          }
-          setCompletedKeys(generatedKeys);
-          setProcessing(false);
-          return;
-        }
-
-        // 新規登録フロー: 保存（リロードなし）→ 公開鍵導出 → WebAuthn → サーバ登録
-        await activateAccount(
-          targetUserId,
-          generatedKeys,
-          saveSubPass ? subPassphrase : undefined,
-          true, // skipReload
-        );
-        if (!saveSubPass) {
-          auth.setSubPassphraseSession(subPassphrase);
-        }
-
-        const publicKeys = await exportPublicKeys(generatedKeys);
-        if (!publicKeys) {
-          showError(t("error.unknown"));
-          setProcessing(false);
-          return;
-        }
-
-        try {
-          await registerAccount(targetUserId, publicKeys);
-        } catch (e) {
-          if (e instanceof Error && e.message === "webauthn_failed") {
-            showError(t("error.webauthn_failed"));
-          } else if (e instanceof Error && e.message === "key_mismatch") {
-            showError(t("auth.key_mismatch"));
-          } else {
-            showError(t("auth.register_error"));
-          }
-          setProcessing(false);
-          return;
-        }
-
-        // markRegistered は handleContinue で呼ぶ（ここで呼ぶと
-        // isRegistered=true で layout が GenerateKey をアンマウントし、
-        // エクスポート画面が表示されない）
-        setCompletedKeys(generatedKeys);
+        // パスフレーズ確認画面へ遷移
+        setPendingKeys(data.data.keys);
+        setMainPassphrase("");
+        setSubPassphraseLocal("");
         setProcessing(false);
       });
       worker.postMessage(message);
     })();
+  };
+
+  // パスフレーズ確認後の登録処理
+  const confirmPassphrases = async () => {
+    if (!worker || !pendingKeys || processing) return;
+    if (
+      confirmMainPass.length < MIN_LENGTH ||
+      confirmSubPass.length < MIN_LENGTH
+    ) {
+      showError(t("error.min_length"));
+      return;
+    }
+    setProcessing(true);
+
+    const validated = await new Promise<boolean>((resolve) => {
+      worker.eventWaiter("validate_passphrases", (data) => {
+        resolve(data.success);
+      });
+      worker.postMessage({
+        call: "validate_passphrases",
+        privateKeys: pendingKeys,
+        mainPassphrase: confirmMainPass,
+        subPassphrase: confirmSubPass,
+      });
+    });
+    if (!validated) {
+      showError(t("auth.confirm_passphrase_mismatch"));
+      setProcessing(false);
+      return;
+    }
+
+    const generatedKeys = pendingKeys;
+    const confirmedSubPass = confirmSubPass;
+
+    if (isUpdateMode) {
+      // 鍵更新フロー
+      const publicKeys = await exportPublicKeys(generatedKeys);
+      if (!publicKeys) {
+        showError(t("error.unknown"));
+        setProcessing(false);
+        return;
+      }
+      try {
+        await auth.updateKeys(publicKeys);
+      } catch (e) {
+        if (e instanceof ApiError) {
+          if (e.status === 401) showError(t("error.unauthorized"));
+          else if (e.status === 403) showError(t("error.forbidden"));
+          else if (e.status === 404) showError(t("error.not_found"));
+          else showError(t("error.unknown"));
+        } else if (
+          e instanceof Error &&
+          e.message === "WebAuthn verification failed"
+        ) {
+          showError(t("error.webauthn_failed"));
+        } else {
+          showError(t("error.network"));
+        }
+        setProcessing(false);
+        return;
+      }
+      auth.setPrivateKeys(generatedKeys);
+      if (saveSubPass) {
+        auth.setSubPassphrase(confirmedSubPass);
+      } else {
+        auth.setSubPassphraseSession(confirmedSubPass);
+      }
+      setPendingKeys(null);
+      setCompletedKeys(generatedKeys);
+      setProcessing(false);
+      return;
+    }
+
+    // 新規登録フロー: 公開鍵導出 → WebAuthn → サーバ登録 → 保存
+    // activateAccountはWebAuthn成功後に呼ぶ（キャンセル時にIDBに鍵が残るのを防ぐ）
+    const targetUserId = userId;
+
+    const publicKeys = await exportPublicKeys(generatedKeys);
+    if (!publicKeys) {
+      showError(t("error.unknown"));
+      setProcessing(false);
+      return;
+    }
+
+    try {
+      await registerAccount(targetUserId, publicKeys);
+    } catch (e) {
+      if (e instanceof Error && e.message === "webauthn_failed") {
+        showError(t("error.webauthn_failed"));
+      } else if (e instanceof Error && e.message === "key_mismatch") {
+        showError(t("auth.key_mismatch"));
+      } else {
+        showError(t("auth.register_error"));
+      }
+      setProcessing(false);
+      return;
+    }
+
+    // WebAuthn+サーバ登録成功後にローカル保存
+    await activateAccount(
+      targetUserId,
+      generatedKeys,
+      saveSubPass ? confirmedSubPass : undefined,
+      true, // skipReload
+    );
+    if (!saveSubPass) {
+      auth.setSubPassphraseSession(confirmedSubPass);
+    }
+
+    // markRegistered は handleContinue で呼ぶ（ここで呼ぶと
+    // isRegistered=true で layout が GenerateKey をアンマウントし、
+    // エクスポート画面が表示されない）
+    setPendingKeys(null);
+    setCompletedKeys(generatedKeys);
+    setProcessing(false);
   };
 
   const importKey = () => {
@@ -290,7 +341,13 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
       }
 
       if (isExistingUser) {
-        // 既存ユーザのキー復元 → サーバ登録不要、そのままリロード
+        // 既存ユーザのキー復元 → 既存パスキーがあれば再利用、なければ新規登録
+        const webauthnOk = await auth.ensureRecentReauth(true, userId, true);
+        if (!webauthnOk) {
+          showError(t("error.webauthn_failed"));
+          setProcessing(false);
+          return;
+        }
         await auth.markRegistered();
         window.location.reload();
         return;
@@ -307,6 +364,8 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
       try {
         await registerAccount(userId, publicKeys);
       } catch (e) {
+        // 登録失敗時はactivateAccountで保存したデータをクリーンアップ
+        await deleteAccountData(userId);
         if (e instanceof Error && e.message === "webauthn_failed") {
           showError(t("error.webauthn_failed"));
         } else if (e instanceof Error && e.message === "key_mismatch") {
@@ -359,6 +418,65 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
         >
           {t("auth.continue")}
         </button>
+      </div>
+    );
+  }
+
+  // パスフレーズ確認画面
+  if (pendingKeys) {
+    return (
+      <div className="flex flex-col items-center gap-6 max-w-lg w-full mx-auto">
+        <h2 className="text-lg font-semibold">
+          {t("auth.confirm_passphrase")}
+        </h2>
+        <p className="text-center text-muted">
+          {t("auth.confirm_passphrase_desc")}
+        </p>
+        <div className="grid grid-cols-3 gap-4 items-center w-full">
+          <div className="col-span-3 sm:col-span-1">
+            {t("auth.main_passphrase")}:
+          </div>
+          <div className="col-span-3 sm:col-span-2">
+            <input
+              className="w-full border border-accent/30 rounded px-3 py-2 bg-transparent"
+              type="password"
+              value={confirmMainPass}
+              onChange={(e) => setConfirmMainPass(e.target.value)}
+            />
+          </div>
+          <div className="col-span-3 sm:col-span-1">
+            {t("auth.sub_passphrase")}:
+          </div>
+          <div className="col-span-3 sm:col-span-2">
+            <input
+              className="w-full border border-accent/30 rounded px-3 py-2 bg-transparent"
+              type="password"
+              value={confirmSubPass}
+              onChange={(e) => setConfirmSubPass(e.target.value)}
+            />
+          </div>
+          <div className="col-span-3 mt-2 flex gap-2">
+            <button
+              className="px-4 py-2 rounded bg-accent/30 hover:bg-accent/50 font-medium"
+              type="button"
+              onClick={confirmPassphrases}
+              disabled={processing}
+            >
+              {t("auth.confirm")}
+            </button>
+            <button
+              className="px-4 py-2 rounded border border-accent/30 hover:bg-accent/10 font-medium"
+              type="button"
+              onClick={() => {
+                setPendingKeys(null);
+                setConfirmMainPass("");
+                setConfirmSubPass("");
+              }}
+            >
+              {t("common.back")}
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

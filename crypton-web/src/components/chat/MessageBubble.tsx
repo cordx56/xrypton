@@ -15,6 +15,7 @@ type Props = {
   isOwn: boolean;
   displayName: string;
   iconUrl: string | null;
+  status?: string;
   onClickUser?: () => void;
   onDownloadFile?: (message: Message) => void;
 };
@@ -142,6 +143,7 @@ const MessageBubble = ({
   isOwn,
   displayName,
   iconUrl,
+  status,
   onClickUser,
   onDownloadFile,
 }: Props) => {
@@ -156,6 +158,7 @@ const MessageBubble = ({
         type="button"
         onClick={onClickUser}
         className="cursor-pointer shrink-0"
+        title={status || undefined}
       >
         <Avatar name={displayName} iconUrl={iconUrl} size="sm" />
       </button>
@@ -165,6 +168,7 @@ const MessageBubble = ({
             type="button"
             onClick={onClickUser}
             className="font-medium text-base truncate cursor-pointer hover:underline"
+            title={status || undefined}
           >
             {displayName}
           </button>

@@ -6,11 +6,18 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useDialogs } from "@/contexts/DialogContext";
 import { useI18n } from "@/contexts/I18nContext";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
-import { apiClient, getApiBaseUrl } from "@/api/client";
+import {
+  ApiError,
+  apiClient,
+  authApiClient,
+  getApiBaseUrl,
+} from "@/api/client";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faArrowLeft,
+  faCheck,
   faPen,
+  faPlus,
   faKey,
   faRepeat,
 } from "@fortawesome/free-solid-svg-icons";
@@ -39,6 +46,8 @@ const UserProfileView = ({ userId }: Props) => {
   const [iconUrl, setIconUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAccounts, setShowAccounts] = useState(false);
+  const [isContact, setIsContact] = useState(false);
+  const [addingContact, setAddingContact] = useState(false);
 
   const isOwnProfile = auth.userId === userId;
 
@@ -80,6 +89,38 @@ const UserProfileView = ({ userId }: Props) => {
     return () => window.removeEventListener("profile-updated", fetchProfile);
   }, [isOwnProfile, fetchProfile]);
 
+  // 他ユーザの場合、連絡先に追加済みか確認
+  useEffect(() => {
+    if (isOwnProfile) return;
+    (async () => {
+      const signed = await auth.getSignedMessage();
+      if (!signed) return;
+      const contacts: { contact_user_id: string }[] = await authApiClient(
+        signed.signedMessage,
+      ).contacts.list();
+      setIsContact(contacts.some((c) => c.contact_user_id === userId));
+    })();
+  }, [userId, isOwnProfile]);
+
+  const handleAddContact = async () => {
+    const signed = await auth.getSignedMessage();
+    if (!signed) return;
+    setAddingContact(true);
+    try {
+      await authApiClient(signed.signedMessage).contacts.add(userId);
+      setIsContact(true);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        if (e.status === 409) setIsContact(true);
+        else showError(t("error.unknown"));
+      } else {
+        showError(t("error.network"));
+      }
+    } finally {
+      setAddingContact(false);
+    }
+  };
+
   const showPublicKeys = () => {
     if (!auth.publicKeys) return;
     pushDialog((p) => (
@@ -105,12 +146,27 @@ const UserProfileView = ({ userId }: Props) => {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => router.push("/contact")}
+            onClick={() => router.back()}
             className="p-2 hover:bg-accent/10 rounded"
           >
             <FontAwesomeIcon icon={faArrowLeft} />
           </button>
-          <h2 className="text-lg font-semibold">{t("tab.profile")}</h2>
+          <h2 className="text-lg font-semibold flex-1">{t("tab.profile")}</h2>
+          {isContact ? (
+            <span className="p-2 text-accent">
+              <FontAwesomeIcon icon={faCheck} />
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={handleAddContact}
+              disabled={addingContact}
+              className="p-2 hover:bg-accent/10 rounded disabled:opacity-50"
+              title={t("contacts.add")}
+            >
+              <FontAwesomeIcon icon={faPlus} />
+            </button>
+          )}
         </div>
       )}
 

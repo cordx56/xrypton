@@ -113,14 +113,13 @@ export const en: TranslationKeys = {
   "landing.feature_e2ee_desc":
     "Messages are encrypted between devices. The server never sees your content.",
   "landing.feature_pgp": "PGP Key Authentication",
-  "landing.feature_pgp_desc":
-    "No passwords needed. Authenticate securely with your PGP key pair.",
+  "landing.feature_pgp_desc": "Authenticate securely with your PGP key pair.",
   "landing.feature_oss": "Open Source",
   "landing.feature_oss_desc":
-    "The code is publicly available. Anyone can verify and audit it.",
+    "The code is publicly available and free for anyone to use.",
   "landing.feature_distributed": "Distributed",
   "landing.feature_distributed_desc":
-    "Federated architecture with no single point of failure. Servers communicate across domains.",
+    "Federated architecture with no central authority. Servers communicate across domains.",
   "account.add": "Add account",
   "account.switch": "Switch account",
   "account.active": "Active",
@@ -130,6 +129,11 @@ export const en: TranslationKeys = {
   "auth.save_keys_warning":
     "Please export and save your private keys in a safe place. You will need them to log in from another device.",
   "auth.continue": "Continue",
+  "auth.confirm_passphrase": "Confirm Passphrases",
+  "auth.confirm_passphrase_desc":
+    "Re-enter your passphrases to verify the generated keys.",
+  "auth.confirm_passphrase_mismatch": "Passphrases do not match.",
+  "auth.confirm": "Confirm",
   "error.reserved_user_id": "This user ID is reserved and cannot be used.",
   "chat.decrypt_failed": "Decryption failed",
   "auth.enter_sub_passphrase": "Enter sub passphrase",
@@ -145,4 +149,5 @@ export const en: TranslationKeys = {
     "File is too large. Please select a file under 10 MB.",
   "error.file_upload_failed": "Failed to upload file.",
   "error.file_download_failed": "Failed to download file.",
+  "settings.hide_non_contact_channels": "Hide channels from non-contacts",
 };

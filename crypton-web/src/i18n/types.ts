@@ -127,9 +127,14 @@ export type TranslationKeys = {
   "security.key_changed_title": string;
   "security.key_changed_message": string;
   "security.key_changed_detail": string;
+  "auth.confirm_passphrase": string;
+  "auth.confirm_passphrase_desc": string;
+  "auth.confirm_passphrase_mismatch": string;
+  "auth.confirm": string;
   "error.file_too_large": string;
   "error.file_upload_failed": string;
   "error.file_download_failed": string;
+  "settings.hide_non_contact_channels": string;
 };
 
 export type Locale = "en" | "ja";

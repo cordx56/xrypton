@@ -115,13 +115,13 @@ export const ja: TranslationKeys = {
   "landing.feature_e2ee_desc":
     "メッセージは端末間で暗号化され、サーバが内容を読むことはできません。",
   "landing.feature_pgp": "PGP鍵ベース認証",
-  "landing.feature_pgp_desc": "パスワード不要。PGP鍵ペアで安全に認証します。",
+  "landing.feature_pgp_desc": "PGP鍵ペアで安全に認証します。",
   "landing.feature_oss": "オープンソース",
   "landing.feature_oss_desc":
-    "コードは公開されており、誰でも検証・監査できます。",
+    "コードは公開されており、誰でも自由に利用できます。",
   "landing.feature_distributed": "分散システム",
   "landing.feature_distributed_desc":
-    "単一障害点のない連合型アーキテクチャ。サーバ同士がドメインを越えて通信します。",
+    "特定の運営者に依存しない連合型アーキテクチャ。サーバ同士がドメインを越えて通信します。",
   "account.add": "アカウントを追加",
   "account.switch": "アカウントを切替",
   "account.active": "使用中",
@@ -131,6 +131,11 @@ export const ja: TranslationKeys = {
   "auth.save_keys_warning":
     "秘密鍵を安全な場所にエクスポートして保存してください。他の端末からログインする際に必要になります。",
   "auth.continue": "続ける",
+  "auth.confirm_passphrase": "パスフレーズの確認",
+  "auth.confirm_passphrase_desc":
+    "生成した鍵のパスフレーズを再入力してください。",
+  "auth.confirm_passphrase_mismatch": "パスフレーズが一致しません。",
+  "auth.confirm": "確認",
   "error.reserved_user_id": "このユーザIDは予約されており、使用できません。",
   "chat.decrypt_failed": "復号に失敗しました",
   "auth.enter_sub_passphrase": "サブパスフレーズを入力",
@@ -146,4 +151,6 @@ export const ja: TranslationKeys = {
     "ファイルが大きすぎます。10 MB以下のファイルを選択してください。",
   "error.file_upload_failed": "ファイルのアップロードに失敗しました。",
   "error.file_download_failed": "ファイルのダウンロードに失敗しました。",
+  "settings.hide_non_contact_channels":
+    "連絡先にないユーザのみからの受信を非表示",
 };

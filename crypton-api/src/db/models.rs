@@ -35,6 +35,10 @@ pub struct ChatGroupRow {
     pub created_at: Timestamp,
     pub archived_at: Option<Timestamp>,
     pub server_domain: Option<String>,
+    /// 最終メッセージ日時（リスト取得時のみサブクエリで算出）
+    #[sqlx(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
@@ -53,6 +57,10 @@ pub struct ThreadRow {
     pub created_at: Timestamp,
     pub archived_at: Option<Timestamp>,
     pub expires_at: Option<Timestamp>,
+    /// 最終メッセージ日時（リスト取得時のみサブクエリで算出）
+    #[sqlx(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]

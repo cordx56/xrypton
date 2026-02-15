@@ -261,7 +261,11 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   // 鍵変更警告の重複排除（セッション中1回だけ表示）
   const warnedKeyChanges = useRef<Set<string>>(new Set());
   // メンバープロフィールのキャッシュ
-  type MemberProfile = { display_name: string; icon_url: string | null };
+  type MemberProfile = {
+    display_name: string;
+    icon_url: string | null;
+    status: string;
+  };
   const [memberProfiles, setMemberProfiles] = useState<
     Record<string, MemberProfile>
   >({});
@@ -523,11 +527,13 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
             icon_url: profile.icon_url
               ? `${getApiBaseUrl()}${profile.icon_url}`
               : null,
+            status: profile.status ?? "",
           };
         } catch {
           profiles[member.user_id] = {
             display_name: member.user_id,
             icon_url: null,
+            status: "",
           };
         }
       }

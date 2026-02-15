@@ -60,9 +60,13 @@ pub async fn get_user_chat_groups(
     pool: &Db,
     user_id: &UserId,
 ) -> Result<Vec<ChatGroupRow>, sqlx::Error> {
-    let q = sql("SELECT g.* FROM chat_groups g
-         INNER JOIN chat_members m ON g.id = m.chat_id
-         WHERE m.user_id = ? AND g.archived_at IS NULL
+    let q = sql("SELECT g.*, \
+         (SELECT MAX(msg.created_at) FROM messages msg \
+          INNER JOIN threads t ON msg.thread_id = t.id \
+          WHERE t.chat_id = g.id) AS updated_at \
+         FROM chat_groups g \
+         INNER JOIN chat_members m ON g.id = m.chat_id \
+         WHERE m.user_id = ? AND g.archived_at IS NULL \
          ORDER BY g.created_at DESC");
     sqlx::query_as::<_, ChatGroupRow>(&q)
         .bind(user_id.as_str())
@@ -75,9 +79,13 @@ pub async fn get_user_archived_chat_groups(
     pool: &Db,
     user_id: &UserId,
 ) -> Result<Vec<ChatGroupRow>, sqlx::Error> {
-    let q = sql("SELECT g.* FROM chat_groups g
-         INNER JOIN chat_members m ON g.id = m.chat_id
-         WHERE m.user_id = ? AND g.archived_at IS NOT NULL
+    let q = sql("SELECT g.*, \
+         (SELECT MAX(msg.created_at) FROM messages msg \
+          INNER JOIN threads t ON msg.thread_id = t.id \
+          WHERE t.chat_id = g.id) AS updated_at \
+         FROM chat_groups g \
+         INNER JOIN chat_members m ON g.id = m.chat_id \
+         WHERE m.user_id = ? AND g.archived_at IS NOT NULL \
          ORDER BY g.archived_at DESC");
     sqlx::query_as::<_, ChatGroupRow>(&q)
         .bind(user_id.as_str())

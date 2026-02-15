@@ -5,6 +5,7 @@ import { formatDateTime } from "@/utils/date";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faAngleLeft,
+  faArrowsRotate,
   faPlus,
   faBoxArchive,
   faBoxOpen,
@@ -118,10 +119,15 @@ const ThreadList = ({
                     )}
                     {thread.name || thread.id}
                   </div>
-                  <div className="text-xs text-muted">
-                    {thread.expires_at
-                      ? formatExpiry(thread.expires_at)
-                      : formatDateTime(thread.created_at)}
+                  <div className="text-xs text-muted flex items-center gap-1">
+                    {thread.expires_at ? (
+                      formatExpiry(thread.expires_at)
+                    ) : (
+                      <>
+                        <FontAwesomeIcon icon={faArrowsRotate} />
+                        {formatDateTime(thread.updated_at ?? thread.created_at)}
+                      </>
+                    )}
                   </div>
                 </div>
                 <button

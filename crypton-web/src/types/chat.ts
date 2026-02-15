@@ -3,6 +3,7 @@ export type ChatGroup = {
   name: string;
   created_by: string | null;
   created_at: string;
+  updated_at?: string | null;
   archived_at?: string | null;
 };
 
@@ -18,6 +19,7 @@ export type Thread = {
   name: string;
   created_by: string | null;
   created_at: string;
+  updated_at?: string | null;
   archived_at?: string | null;
   expires_at?: string | null;
 };
