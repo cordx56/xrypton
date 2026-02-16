@@ -19,11 +19,13 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@docs/*": ["../crypton-docs/*"]
     }
   },
   "include": [
     "next-env.d.ts",
+    "mdx-components.tsx",
     "src/**/*.ts",
     "src/**/*.tsx",
     ".next/types/**/*.ts",

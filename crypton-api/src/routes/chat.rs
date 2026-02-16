@@ -30,46 +30,51 @@ async fn create_chat(
     Json(body): Json<CreateChatBody>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let chat_id = ChatId::new_v4();
+    let hostname = &state.config.server_hostname;
 
-    // member_idsにuser@domain形式も許容（外部ユーザの存在確認はスキップ）
-    for member_id in &body.member_ids {
-        UserId::validate_full(member_id)
-            .map_err(|e| AppError::BadRequest(format!("invalid member ID: {e}")))?;
-    }
+    // ベアID → @server_hostname 付与して正規化
+    let resolved_member_ids: Vec<String> = body
+        .member_ids
+        .iter()
+        .map(|id| {
+            UserId::resolve(id, hostname)
+                .map(|uid| uid.as_str().to_string())
+                .map_err(|e| AppError::BadRequest(format!("invalid member ID: {e}")))
+        })
+        .collect::<Result<_, _>>()?;
 
     db::chat::create_chat_group(
         &state.pool,
         &chat_id,
         &body.name,
         &auth.user_id,
-        &body.member_ids,
+        &resolved_member_ids,
     )
     .await?;
 
     // 外部メンバーのホームサーバにチャット参照を同期
-    let external_members: Vec<&String> = body
-        .member_ids
+    let external_domains: std::collections::HashMap<String, Vec<String>> = resolved_member_ids
         .iter()
-        .filter(|id| id.contains('@'))
-        .collect();
-    if !external_members.is_empty() {
-        let mut domains: std::collections::HashMap<String, Vec<String>> =
-            std::collections::HashMap::new();
-        for member_id in &external_members {
-            if let Some((_local, domain)) = member_id.split_once('@') {
-                domains
-                    .entry(domain.to_string())
-                    .or_default()
-                    .push(member_id.to_string());
+        .filter_map(|id| {
+            let (_local, domain) = id.split_once('@')?;
+            if domain != hostname {
+                Some((domain.to_string(), id.clone()))
+            } else {
+                None
             }
-        }
+        })
+        .fold(std::collections::HashMap::new(), |mut acc, (domain, id)| {
+            acc.entry(domain).or_default().push(id);
+            acc
+        });
+    if !external_domains.is_empty() {
         let allow_http = state.config.federation_allow_http;
         let auth_header = auth.raw_auth_header.clone();
         let sync_chat_id = chat_id.as_str().to_string();
         let sync_name = body.name.clone();
-        let all_member_ids = body.member_ids.clone();
+        let all_member_ids = resolved_member_ids.clone();
         tokio::spawn(async move {
-            for domain in domains.keys() {
+            for domain in external_domains.keys() {
                 if let Err(e) = crate::federation::client::sync_chat_to_remote(
                     domain,
                     &sync_chat_id,
@@ -86,17 +91,17 @@ async fn create_chat(
         });
     }
 
-    // ローカルメンバー（作成者除く）にPush通知を送信
+    // メンバー（作成者除く）にPush通知を送信
+    // 外部ユーザにはsubscriptionがないため自動スキップされる
     let pool = state.pool.clone();
     let config = state.config.clone();
     let creator_id = auth.user_id.clone();
     let notify_chat_id = chat_id.clone();
     let name = body.name.clone();
-    let member_ids: Vec<UserId> = body
-        .member_ids
+    let member_ids: Vec<UserId> = resolved_member_ids
         .iter()
-        .filter(|id| id.as_str() != creator_id.as_str() && !id.contains('@'))
-        .filter_map(|id| UserId::validate(id).ok())
+        .filter(|id| id.as_str() != creator_id.as_str())
+        .filter_map(|id| UserId::validate_full(id).ok())
         .collect();
     tokio::spawn(async move {
         let payload = serde_json::json!({

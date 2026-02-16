@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useChat } from "@/contexts/ChatContext";
 import { useI18n } from "@/contexts/I18nContext";
 import { authApiClient, apiClient } from "@/api/client";
+import { usePublicKeyResolver } from "@/hooks/usePublicKeyResolver";
 import { getAccountValue } from "@/utils/accountStore";
 import { formatDateTime } from "@/utils/date";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -36,8 +37,9 @@ const ChatGroupList = ({
 }: Props) => {
   const router = useRouter();
   const auth = useAuth();
-  const { groups } = useChat();
+  const { groups, unreadGroupIds } = useChat();
   const { t } = useI18n();
+  const { resolveDisplayName } = usePublicKeyResolver();
   const [showArchived, setShowArchived] = useState(false);
   const [resolvedNames, setResolvedNames] = useState<Record<string, string>>(
     {},
@@ -88,10 +90,11 @@ const ChatGroupList = ({
               memberList.map(async (m) => {
                 try {
                   const profile = await apiClient().user.getProfile(m.user_id);
-                  return {
-                    userId: m.user_id,
-                    displayName: profile.display_name || m.user_id,
-                  };
+                  const name = await resolveDisplayName(
+                    m.user_id,
+                    profile.display_name || m.user_id,
+                  );
+                  return { userId: m.user_id, displayName: name };
                 } catch {
                   return { userId: m.user_id, displayName: m.user_id };
                 }
@@ -194,10 +197,12 @@ const ChatGroupList = ({
                     onSelect(g);
                   }
                 }}
-                className="w-full text-left px-4 py-3 border-b border-accent/10 hover:bg-accent/10 transition-colors flex items-center gap-2 cursor-pointer"
+                className={`w-full text-left px-4 py-3 border-b border-accent/10 hover:bg-accent/10 transition-colors flex items-center gap-2 cursor-pointer ${unreadGroupIds.has(g.id) ? "bg-accent/10" : ""}`}
               >
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate">
+                  <div
+                    className={`truncate ${unreadGroupIds.has(g.id) ? "font-bold" : "font-medium"}`}
+                  >
                     {g.name || resolvedNames[g.id] || g.id}
                   </div>
                   <div className="text-xs text-muted flex items-center gap-1">

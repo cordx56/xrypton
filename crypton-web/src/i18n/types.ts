@@ -24,6 +24,8 @@ export type TranslationKeys = {
   "profile.save": string;
   "profile.public_keys": string;
   "profile.export_private_keys": string;
+  "profile.verified": string;
+  "profile.unverified": string;
   "settings.theme": string;
   "settings.language": string;
   "settings.api_server": string;
@@ -103,6 +105,7 @@ export type TranslationKeys = {
   "chat.pending_messages": string;
   "landing.tagline": string;
   "landing.get_started": string;
+  "landing.docs": string;
   "landing.feature_e2ee": string;
   "landing.feature_e2ee_desc": string;
   "landing.feature_pgp": string;
@@ -115,6 +118,8 @@ export type TranslationKeys = {
   "account.switch": string;
   "account.active": string;
   "account.logged_in": string;
+  "account.logout": string;
+  "account.logout_confirm": string;
   "error.min_length": string;
   "auth.registration_complete": string;
   "auth.save_keys_warning": string;
@@ -127,6 +132,9 @@ export type TranslationKeys = {
   "security.key_changed_title": string;
   "security.key_changed_message": string;
   "security.key_changed_detail": string;
+  "security.signature_failed_title": string;
+  "security.signature_failed_message": string;
+  "security.signature_failed_detail": string;
   "auth.confirm_passphrase": string;
   "auth.confirm_passphrase_desc": string;
   "auth.confirm_passphrase_mismatch": string;

@@ -90,6 +90,49 @@ sw.addEventListener("activate", (event) => {
   event.waitUntil(sw.clients.claim());
 });
 
+/** 連絡先外の送信者からの通知を抑制すべきか判定する。
+ *  recipient_idが指定されていればそのアカウントのみ、なければ全アカウントを確認する。
+ *  - 設定が無効なアカウントがあれば → 通知を表示（false）
+ *  - 設定が有効で送信者が連絡先にいるアカウントがあれば → 通知を表示（false）
+ *  - 対象アカウントで設定が有効かつ連絡先にいなければ → 抑制（true） */
+const shouldSuppressNonContact = async (
+  senderId: string,
+  recipientId?: string,
+): Promise<boolean> => {
+  let accountIds: string[];
+
+  if (recipientId) {
+    // recipient_id指定時はそのアカウントのみ確認
+    accountIds = [recipientId];
+  } else {
+    // フォールバック: 全アカウントを確認
+    const idsRaw = await getKey("accountIds");
+    if (!idsRaw) return false;
+    try {
+      accountIds = JSON.parse(idsRaw);
+    } catch {
+      return false;
+    }
+    if (accountIds.length === 0) return false;
+  }
+
+  for (const acctId of accountIds) {
+    const hide = await getKey(`account:${acctId}:hideNonContactChannels`);
+    if (hide !== "true") return false; // このアカウントはフィルタ無効 → 表示
+
+    const contactsRaw = await getKey(`account:${acctId}:contactIds`);
+    if (!contactsRaw) continue; // キャッシュなし → 判定不能、次のアカウントへ
+    try {
+      const contactIds: string[] = JSON.parse(contactsRaw);
+      if (contactIds.includes(senderId)) return false; // 連絡先にいる → 表示
+    } catch {
+      continue;
+    }
+  }
+
+  return true; // 対象アカウントが抑制に同意
+};
+
 sw.addEventListener("push", (ev) => {
   const data = Notification.safeParse(ev.data?.json());
   if (!data.success) {
@@ -107,6 +150,15 @@ sw.addEventListener("push", (ev) => {
 
           // 自己メッセージはデータ同期のみでブラウザ通知を表示しない
           if (notification.is_self) return;
+
+          // 連絡先外を非表示にする設定: recipient_idで対象アカウントを特定して判定
+          if (notification.sender_id) {
+            const shouldSuppress = await shouldSuppressNonContact(
+              notification.sender_id,
+              notification.recipient_id,
+            );
+            if (shouldSuppress) return;
+          }
 
           // 可視クライアントがいればブラウザ通知をスキップ
           // iOS Safariではclients.matchAll()が空を返す場合があるが、

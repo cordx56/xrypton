@@ -12,6 +12,7 @@ import {
   authApiClient,
   getApiBaseUrl,
 } from "@/api/client";
+import { displayUserId } from "@/utils/schema";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faArrowLeft,
@@ -20,6 +21,7 @@ import {
   faPlus,
   faKey,
   faRepeat,
+  faShieldHalved,
 } from "@fortawesome/free-solid-svg-icons";
 import Avatar from "@/components/common/Avatar";
 import Spinner from "@/components/common/Spinner";
@@ -29,10 +31,17 @@ import QrDisplay from "@/components/QrDisplay";
 import AccountList from "@/components/layout/AccountList";
 import { setCachedProfile } from "@/utils/accountStore";
 import { linkify } from "@/utils/linkify";
+import {
+  useSignatureVerifier,
+  isSignedMessage,
+} from "@/hooks/useSignatureVerifier";
+import { usePublicKeyResolver } from "@/hooks/usePublicKeyResolver";
 
 type Props = {
   userId: string;
 };
+
+type VerificationState = "pending" | "verified" | "unverified";
 
 const UserProfileView = ({ userId }: Props) => {
   const auth = useAuth();
@@ -40,6 +49,8 @@ const UserProfileView = ({ userId }: Props) => {
   const { pushDialog } = useDialogs();
   const { t } = useI18n();
   const { showError } = useErrorToast();
+  const { verifyExtract, showWarning } = useSignatureVerifier();
+  const { withKeyRetry } = usePublicKeyResolver();
   const [displayName, setDisplayName] = useState("");
   const [status, setStatus] = useState("");
   const [bio, setBio] = useState("");
@@ -48,26 +59,139 @@ const UserProfileView = ({ userId }: Props) => {
   const [showAccounts, setShowAccounts] = useState(false);
   const [isContact, setIsContact] = useState(false);
   const [addingContact, setAddingContact] = useState(false);
+  const [verificationState, setVerificationState] =
+    useState<VerificationState>("pending");
 
   const isOwnProfile = auth.userId === userId;
+
+  // 署名済みフィールドから平文を抽出し検証状態を判定する
+  const verifyField = useCallback(
+    async (
+      publicKey: string,
+      value: string,
+    ): Promise<{ text: string; verified: boolean }> => {
+      if (!value) return { text: "", verified: true };
+      if (!isSignedMessage(value)) {
+        // 未署名データ（レガシー）
+        return { text: value, verified: false };
+      }
+      const plaintext = await verifyExtract(publicKey, value);
+      if (plaintext !== null) {
+        return { text: plaintext, verified: true };
+      }
+      // 検証失敗 — armored データをそのまま表示はしない
+      return { text: value, verified: false };
+    },
+    [verifyExtract],
+  );
+
+  // 全フィールドを検証し、1つでも失敗なら throw
+  const verifyAllFields = useCallback(
+    async (
+      signingKey: string,
+      rawDn: string,
+      rawSt: string,
+      rawBi: string,
+    ): Promise<{
+      dnResult: { text: string; verified: boolean };
+      stResult: { text: string; verified: boolean };
+      biResult: { text: string; verified: boolean };
+    }> => {
+      const [dnResult, stResult, biResult] = await Promise.all([
+        verifyField(signingKey, rawDn),
+        verifyField(signingKey, rawSt),
+        verifyField(signingKey, rawBi),
+      ]);
+      const allVerified =
+        dnResult.verified && stResult.verified && biResult.verified;
+      if (!allVerified) {
+        throw new Error("verification failed");
+      }
+      return { dnResult, stResult, biResult };
+    },
+    [verifyField],
+  );
 
   const fetchProfile = useCallback(async () => {
     setLoading(true);
     try {
       const profile = await apiClient().user.getProfile(userId);
-      setDisplayName(profile.display_name ?? "");
-      setStatus(profile.status ?? "");
-      setBio(profile.bio ?? "");
-      // キャッシュバスター付きでアイコンURLを生成
+      const rawDn = profile.display_name ?? "";
+      const rawSt = profile.status ?? "";
+      const rawBi = profile.bio ?? "";
+
+      // 署名済みフィールドがあるか判定
+      const hasSigned =
+        isSignedMessage(rawDn) ||
+        isSignedMessage(rawSt) ||
+        isSignedMessage(rawBi);
+
+      if (!hasSigned) {
+        // 未署名データ（レガシー）
+        setDisplayName(rawDn);
+        setStatus(rawSt);
+        setBio(rawBi);
+        setVerificationState("pending");
+      } else if (isOwnProfile) {
+        // 自分のプロフィール: auth.publicKeys で検証
+        const signingKey = auth.publicKeys ?? null;
+        if (signingKey) {
+          const [dnResult, stResult, biResult] = await Promise.all([
+            verifyField(signingKey, rawDn),
+            verifyField(signingKey, rawSt),
+            verifyField(signingKey, rawBi),
+          ]);
+          setDisplayName(dnResult.text);
+          setStatus(stResult.text);
+          setBio(biResult.text);
+          const allVerified =
+            dnResult.verified && stResult.verified && biResult.verified;
+          setVerificationState(allVerified ? "verified" : "unverified");
+          if (!allVerified) showWarning();
+        } else {
+          setDisplayName(rawDn);
+          setStatus(rawSt);
+          setBio(rawBi);
+          setVerificationState("unverified");
+          showWarning();
+        }
+      } else {
+        // 他ユーザ: withKeyRetry で IDB キャッシュ + リトライ
+        const result = await withKeyRetry(
+          userId,
+          (signingKey) => verifyAllFields(signingKey, rawDn, rawSt, rawBi),
+          () => {
+            showWarning();
+          },
+        );
+        if (result) {
+          setDisplayName(result.dnResult.text);
+          setStatus(result.stResult.text);
+          setBio(result.biResult.text);
+          setVerificationState("verified");
+        } else {
+          // リトライ失敗 or 鍵取得失敗
+          setDisplayName(rawDn);
+          setStatus(rawSt);
+          setBio(rawBi);
+          setVerificationState("unverified");
+        }
+      }
+
       const resolvedIconUrl = profile.icon_url
         ? `${getApiBaseUrl()}${profile.icon_url}?t=${Date.now()}`
         : null;
       setIconUrl(resolvedIconUrl);
-      // 自分のプロフィールの場合、アカウントセレクタ表示用にキャッシュ
+      // 自分のプロフィールの場合、アカウントセレクタ表示用にキャッシュ（平文を保存）
       if (isOwnProfile) {
+        let resolvedDn = rawDn;
+        if (hasSigned && auth.publicKeys) {
+          const dnParsed = await verifyField(auth.publicKeys, rawDn);
+          resolvedDn = dnParsed.text;
+        }
         await setCachedProfile(userId, {
           userId,
-          displayName: profile.display_name || undefined,
+          displayName: resolvedDn || undefined,
           iconUrl: resolvedIconUrl,
         });
       }
@@ -76,7 +200,17 @@ const UserProfileView = ({ userId }: Props) => {
     } finally {
       setLoading(false);
     }
-  }, [userId, isOwnProfile, showError, t]);
+  }, [
+    userId,
+    isOwnProfile,
+    showError,
+    t,
+    auth.publicKeys,
+    verifyField,
+    verifyAllFields,
+    showWarning,
+    withKeyRetry,
+  ]);
 
   useEffect(() => {
     fetchProfile();
@@ -180,9 +314,34 @@ const UserProfileView = ({ userId }: Props) => {
         ) : (
           <Avatar name={displayName || userId} size="lg" />
         )}
-        <h2 className="mt-3 text-lg font-semibold">{displayName || userId}</h2>
-        <p className="text-xs text-muted/50 select-all">{userId}</p>
+        <h2 className="mt-3 text-lg font-semibold">
+          {displayName || displayUserId(userId)}
+        </h2>
+        <p className="text-xs text-muted/50 select-all">
+          {displayUserId(userId)}
+        </p>
         {status && <p className="text-sm text-muted mt-1">{status}</p>}
+
+        {/* 署名検証バッジ */}
+        {verificationState !== "pending" && (
+          <span
+            className={`mt-2 inline-flex items-center gap-1 text-xs ${
+              verificationState === "verified"
+                ? "text-green-500"
+                : "text-red-500"
+            }`}
+            title={
+              verificationState === "verified"
+                ? t("profile.verified")
+                : t("profile.unverified")
+            }
+          >
+            <FontAwesomeIcon icon={faShieldHalved} />
+            {verificationState === "verified"
+              ? t("profile.verified")
+              : t("profile.unverified")}
+          </span>
+        )}
       </div>
 
       {bio && (

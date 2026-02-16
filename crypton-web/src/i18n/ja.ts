@@ -26,6 +26,8 @@ export const ja: TranslationKeys = {
   "profile.save": "保存",
   "profile.public_keys": "公開鍵",
   "profile.export_private_keys": "秘密鍵をエクスポート",
+  "profile.verified": "検証済み",
+  "profile.unverified": "未検証",
   "settings.theme": "テーマ",
   "settings.language": "言語",
   "settings.api_server": "APIサーバ",
@@ -85,7 +87,7 @@ export const ja: TranslationKeys = {
   "error.profile_save_failed": "プロフィールの保存に失敗しました。",
   "error.channel_create_failed": "チャンネルの作成に失敗しました。",
   "error.invalid_user_id":
-    "ユーザIDには英数字とアンダースコアのみ使用できます。",
+    "ユーザIDにはメールアドレスのローカルパートとして有効な文字のみ使用できます。",
   "error.invalid_contact_query":
     "ユーザIDまたはユーザID@ドメインの形式で入力してください。",
   "error.invalid_key_format": "鍵の形式が不正です。",
@@ -111,9 +113,10 @@ export const ja: TranslationKeys = {
   "chat.pending_messages": "全メンバーが参加したらメッセージが送信されます",
   "landing.tagline": "エンドツーエンド暗号化によるセキュアなメッセージング",
   "landing.get_started": "はじめる",
+  "landing.docs": "ドキュメント",
   "landing.feature_e2ee": "エンドツーエンド暗号化",
   "landing.feature_e2ee_desc":
-    "メッセージは端末間で暗号化され、サーバが内容を読むことはできません。",
+    "メッセージは端末間で暗号化され、他者が内容を読むことはできません。",
   "landing.feature_pgp": "PGP鍵ベース認証",
   "landing.feature_pgp_desc": "PGP鍵ペアで安全に認証します。",
   "landing.feature_oss": "オープンソース",
@@ -121,11 +124,14 @@ export const ja: TranslationKeys = {
     "コードは公開されており、誰でも自由に利用できます。",
   "landing.feature_distributed": "分散システム",
   "landing.feature_distributed_desc":
-    "特定の運営者に依存しない連合型アーキテクチャ。サーバ同士がドメインを越えて通信します。",
+    "特定の運営者に依存しない、分散システム。",
   "account.add": "アカウントを追加",
   "account.switch": "アカウントを切替",
   "account.active": "使用中",
   "account.logged_in": "ログイン済みアカウント",
+  "account.logout": "ログアウト",
+  "account.logout_confirm":
+    "このアカウントをこの端末からログアウトしますか？再度ログインするには秘密鍵のインポートが必要です。",
   "error.min_length": "4文字以上で入力してください。",
   "auth.registration_complete": "登録完了",
   "auth.save_keys_warning":
@@ -147,6 +153,11 @@ export const ja: TranslationKeys = {
     "連絡先の暗号化キーが更新されました。ユーザーが鍵更新を実行した可能性がありますが、セキュリティ上の懸念を示している場合もあります。",
   "security.key_changed_detail":
     "この変更が予期しないものである場合、会話を続ける前に別の手段でユーザーの身元を確認してください。",
+  "security.signature_failed_title": "署名の検証に失敗しました",
+  "security.signature_failed_message":
+    "プロフィールデータを検証できませんでした。改ざんされたか、期待された鍵で署名されていない可能性があります。",
+  "security.signature_failed_detail":
+    "このプロフィール情報を信頼する際は注意してください。",
   "error.file_too_large":
     "ファイルが大きすぎます。10 MB以下のファイルを選択してください。",
   "error.file_upload_failed": "ファイルのアップロードに失敗しました。",

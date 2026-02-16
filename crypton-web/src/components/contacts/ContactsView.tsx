@@ -1,80 +1,60 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDialogs } from "@/contexts/DialogContext";
 import { useI18n } from "@/contexts/I18nContext";
-import {
-  authApiClient,
-  apiClient,
-  getApiBaseUrl,
-  ApiError,
-} from "@/api/client";
-import { ContactQuery } from "@/utils/schema";
+import { authApiClient, ApiError } from "@/api/client";
+import { ContactQuery, displayUserId } from "@/utils/schema";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faAddressBook } from "@fortawesome/free-regular-svg-icons";
 import { faPlus, faTrash } from "@fortawesome/free-solid-svg-icons";
 import Avatar from "@/components/common/Avatar";
 import Dialog from "@/components/common/Dialog";
+import { setCachedContactIds } from "@/utils/accountStore";
+import { useResolvedProfiles } from "@/hooks/useResolvedProfiles";
 import type { Contact } from "@/types/contact";
-
-type ContactWithProfile = Contact & {
-  display_name: string;
-  icon_url: string | null;
-};
 
 const ContactsView = () => {
   const auth = useAuth();
   const { pushDialog } = useDialogs();
   const { t } = useI18n();
   const { showError } = useErrorToast();
-  const [contacts, setContacts] = useState<ContactWithProfile[]>([]);
-  const [loading, setLoading] = useState(true);
-  // 連絡先一覧を取得し、各contactのdisplay_nameを解決
-  const loadContacts = async () => {
+  const [contactIds, setContactIds] = useState<string[]>([]);
+  const [fetching, setFetching] = useState(true);
+  const { profiles, loading: resolvingProfiles } =
+    useResolvedProfiles(contactIds);
+
+  // 連絡先 ID 一覧を取得
+  const loadContactIds = useCallback(async () => {
     const signed = await auth.getSignedMessage();
     if (!signed) {
-      setLoading(false);
+      setFetching(false);
       return;
     }
 
     try {
-      setLoading(true);
+      setFetching(true);
       const client = authApiClient(signed.signedMessage);
       const rawContacts: Contact[] = await client.contacts.list();
-
-      const resolved = await Promise.all(
-        rawContacts.map(async (c) => {
-          try {
-            const profile = await apiClient().user.getProfile(
-              c.contact_user_id,
-            );
-            const iconUrl = profile.icon_url
-              ? `${getApiBaseUrl()}${profile.icon_url}`
-              : null;
-            return {
-              ...c,
-              display_name: profile.display_name || c.contact_user_id,
-              icon_url: iconUrl,
-            };
-          } catch {
-            return { ...c, display_name: c.contact_user_id, icon_url: null };
-          }
-        }),
-      );
-      setContacts(resolved);
+      const ids = rawContacts.map((c) => c.contact_user_id);
+      setContactIds(ids);
+      // Service Worker通知フィルタ用にキャッシュ
+      if (auth.userId) {
+        setCachedContactIds(auth.userId, ids);
+      }
     } catch {
       showError(t("error.unknown"));
     } finally {
-      setLoading(false);
+      setFetching(false);
     }
-  };
+  }, [auth.getSignedMessage, auth.userId, showError, t]);
 
   // Worker初期化完了後にも再実行されるようpublicKeysを依存に含める
   useEffect(() => {
-    loadContacts();
+    loadContactIds();
   }, [auth.userId, auth.publicKeys]);
 
   const handleDelete = async (contactUserId: string) => {
@@ -84,7 +64,7 @@ const ContactsView = () => {
     try {
       const client = authApiClient(signed.signedMessage);
       await client.contacts.delete(contactUserId);
-      await loadContacts();
+      await loadContactIds();
     } catch {
       showError(t("error.unknown"));
     }
@@ -110,7 +90,7 @@ const ContactsView = () => {
               const client = authApiClient(signed.signedMessage);
               await client.contacts.add(userId);
               p.close();
-              await loadContacts();
+              await loadContactIds();
             } catch (e) {
               if (e instanceof ApiError) {
                 if (e.status === 404) showError(t("error.contact_not_found"));
@@ -141,6 +121,8 @@ const ContactsView = () => {
     ));
   };
 
+  const loading = fetching || resolvingProfiles;
+
   return (
     <div className="flex flex-col h-full max-w-lg mx-auto w-full">
       <div className="flex items-center justify-between p-4 border-b border-accent/30">
@@ -159,29 +141,25 @@ const ContactsView = () => {
       <div className="flex-1 overflow-y-auto">
         {loading ? (
           <p className="text-center text-muted p-8">{t("common.loading")}</p>
-        ) : contacts.length === 0 ? (
+        ) : profiles.length === 0 ? (
           <p className="text-center text-muted p-8">
             {t("contacts.no_contacts")}
           </p>
         ) : (
-          contacts.map((c) => {
-            // 同一ドメインのユーザは@domain部分を省略して表示
-            const hostname = window.location.host;
-            const displayId = c.contact_user_id.endsWith(`@${hostname}`)
-              ? c.contact_user_id.replace(`@${hostname}`, "")
-              : c.contact_user_id;
+          profiles.map((c) => {
+            const displayId = displayUserId(c.userId);
             return (
               <div
-                key={c.contact_user_id}
+                key={c.userId}
                 className="flex items-center gap-3 px-4 py-3 border-b border-accent/10 hover:bg-accent/5 transition-colors"
               >
                 <Link
-                  href={`/contact/${c.contact_user_id}`}
+                  href={`/contact/${c.userId}`}
                   className="flex items-center gap-3 min-w-0 flex-1"
                 >
-                  <Avatar name={c.display_name} iconUrl={c.icon_url} />
+                  <Avatar name={c.displayName} iconUrl={c.iconUrl} />
                   <div className="min-w-0 flex-1">
-                    <div className="font-medium truncate">{c.display_name}</div>
+                    <div className="font-medium truncate">{c.displayName}</div>
                     <div className="text-xs text-muted truncate">
                       {displayId}
                     </div>
@@ -189,7 +167,7 @@ const ContactsView = () => {
                 </Link>
                 <button
                   type="button"
-                  onClick={() => handleDelete(c.contact_user_id)}
+                  onClick={() => handleDelete(c.userId)}
                   className="text-muted hover:text-fg px-2 py-1 rounded hover:bg-accent/20 flex-shrink-0"
                   title={t("common.delete")}
                 >

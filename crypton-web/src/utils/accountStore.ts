@@ -3,7 +3,13 @@
  * keyStore の getKey/setKey をラップし、アカウントごとのプレフィックス付きキーを管理する。
  */
 
-import { getKey, setKey, deleteKey, deleteKeysWithPrefix } from "./keyStore";
+import {
+  getKey,
+  setKey,
+  deleteKey,
+  deleteKeysWithPrefix,
+  getEntriesWithPrefix,
+} from "./keyStore";
 import type { AccountInfo } from "@/types/user";
 
 const ACCOUNT_IDS_KEY = "accountIds";
@@ -83,10 +89,55 @@ export async function deleteAccountValue(
   await deleteKey(accountKey(userId, key));
 }
 
+/** アカウントIDを変更する（ドメイン付与マイグレーション用）。
+ *  `account:{oldId}:*` のキーを `account:{newId}:*` にコピーし、旧キーを削除。
+ *  `accountIds` と `activeAccountId` も更新する。 */
+export async function renameAccount(
+  oldId: string,
+  newId: string,
+): Promise<void> {
+  if (oldId === newId) return;
+
+  // 旧プレフィックスのエントリを読み取り、新プレフィックスにコピー
+  const oldPrefix = `account:${oldId}:`;
+  const newPrefix = `account:${newId}:`;
+  const entries = await getEntriesWithPrefix(oldPrefix);
+  await Promise.all(
+    entries.map(([key, value]) => {
+      const suffix = key.slice(oldPrefix.length);
+      return setKey(`${newPrefix}${suffix}`, value);
+    }),
+  );
+
+  // 旧キーを削除
+  await deleteKeysWithPrefix(oldPrefix);
+
+  // accountIds を更新
+  const ids = await getAccountIds();
+  const newIds = ids.map((id) => (id === oldId ? newId : id));
+  await setAccountIds(newIds);
+
+  // activeAccountId を更新
+  const activeId = await getActiveAccountId();
+  if (activeId === oldId) {
+    await setActiveAccountId(newId);
+  }
+}
+
 /** アカウントに紐づく全データを削除する */
 export async function deleteAccountData(userId: string): Promise<void> {
   await deleteKeysWithPrefix(`account:${userId}:`);
   await removeAccountId(userId);
+}
+
+// --- 連絡先IDキャッシュ（Service Worker通知フィルタ用） ---
+
+/** 連絡先ユーザIDの一覧をキャッシュする */
+export async function setCachedContactIds(
+  userId: string,
+  contactIds: string[],
+): Promise<void> {
+  await setAccountValue(userId, "contactIds", JSON.stringify(contactIds));
 }
 
 // --- プロフィールキャッシュ（アカウントセレクタ表示用） ---

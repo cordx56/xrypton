@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useState,
+  useCallback,
   type Dispatch,
   type SetStateAction,
   type ReactNode,
@@ -20,6 +21,16 @@ type ChatContextType = {
   /** メッセージ総数（ページネーション用） */
   totalMessages: number;
   setTotalMessages: (n: number) => void;
+  /** 未読チャンネルID */
+  unreadGroupIds: Set<string>;
+  /** 未読スレッドID */
+  unreadThreadIds: Set<string>;
+  /** チャンネル・スレッドを未読にする */
+  markUnread: (groupId: string, threadId?: string) => void;
+  /** チャンネルの未読を解除する */
+  markGroupRead: (groupId: string) => void;
+  /** スレッドの未読を解除する */
+  markThreadRead: (threadId: string) => void;
 };
 
 const ChatContext = createContext<ChatContextType>({
@@ -31,6 +42,11 @@ const ChatContext = createContext<ChatContextType>({
   setMessages: () => {},
   totalMessages: 0,
   setTotalMessages: () => {},
+  unreadGroupIds: new Set(),
+  unreadThreadIds: new Set(),
+  markUnread: () => {},
+  markGroupRead: () => {},
+  markThreadRead: () => {},
 });
 
 export const ChatProvider = ({ children }: { children: ReactNode }) => {
@@ -38,6 +54,45 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [totalMessages, setTotalMessages] = useState(0);
+  const [unreadGroupIds, setUnreadGroupIds] = useState<Set<string>>(new Set());
+  const [unreadThreadIds, setUnreadThreadIds] = useState<Set<string>>(
+    new Set(),
+  );
+
+  const markUnread = useCallback((groupId: string, threadId?: string) => {
+    setUnreadGroupIds((prev) => {
+      if (prev.has(groupId)) return prev;
+      const next = new Set(prev);
+      next.add(groupId);
+      return next;
+    });
+    if (threadId) {
+      setUnreadThreadIds((prev) => {
+        if (prev.has(threadId)) return prev;
+        const next = new Set(prev);
+        next.add(threadId);
+        return next;
+      });
+    }
+  }, []);
+
+  const markGroupRead = useCallback((groupId: string) => {
+    setUnreadGroupIds((prev) => {
+      if (!prev.has(groupId)) return prev;
+      const next = new Set(prev);
+      next.delete(groupId);
+      return next;
+    });
+  }, []);
+
+  const markThreadRead = useCallback((threadId: string) => {
+    setUnreadThreadIds((prev) => {
+      if (!prev.has(threadId)) return prev;
+      const next = new Set(prev);
+      next.delete(threadId);
+      return next;
+    });
+  }, []);
 
   return (
     <ChatContext.Provider
@@ -50,6 +105,11 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
         setMessages,
         totalMessages,
         setTotalMessages,
+        unreadGroupIds,
+        unreadThreadIds,
+        markUnread,
+        markGroupRead,
+        markThreadRead,
       }}
     >
       {children}

@@ -32,7 +32,7 @@ const ThreadList = ({
   onUnarchive,
   archivedThreads,
 }: Props) => {
-  const { threads } = useChat();
+  const { threads, unreadThreadIds } = useChat();
   const { t } = useI18n();
   const [showArchived, setShowArchived] = useState(false);
   // Date.now()はSSRとクライアントで値が異なるため、マウント後にのみ計算する
@@ -107,10 +107,12 @@ const ThreadList = ({
                     onSelect(thread);
                   }
                 }}
-                className="w-full text-left px-4 py-3 border-b border-accent/10 hover:bg-accent/10 transition-colors flex items-center gap-2 cursor-pointer"
+                className={`w-full text-left px-4 py-3 border-b border-accent/10 hover:bg-accent/10 transition-colors flex items-center gap-2 cursor-pointer ${unreadThreadIds.has(thread.id) ? "bg-accent/10" : ""}`}
               >
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate flex items-center gap-1">
+                  <div
+                    className={`truncate flex items-center gap-1 ${unreadThreadIds.has(thread.id) ? "font-bold" : "font-medium"}`}
+                  >
                     {thread.expires_at && (
                       <FontAwesomeIcon
                         icon={faClock}

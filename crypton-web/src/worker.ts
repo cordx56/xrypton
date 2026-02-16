@@ -14,6 +14,7 @@ import init, {
   extract_key_id,
   extract_key_id_bytes,
   verify_detached_signature,
+  verify_extract_string,
   validate_passphrases,
 } from "crypton-wasm";
 import {
@@ -736,6 +737,44 @@ worker.addEventListener("message", async ({ data }) => {
         result: {
           success: false,
           message: e instanceof Error ? e.message : "get user ids error",
+        },
+      });
+    }
+  } else if (parsed.data.call === "verify_extract_string") {
+    try {
+      const result = WasmReturnValue.safeParse(
+        verify_extract_string(parsed.data.publicKey, parsed.data.armored),
+      );
+      if (
+        result.success &&
+        result.data.result === "ok" &&
+        result.data.value[0]?.type === "string"
+      ) {
+        post({
+          call: "verify_extract_string",
+          result: {
+            success: true,
+            data: { plaintext: result.data.value[0].data },
+          },
+        });
+      } else {
+        post({
+          call: "verify_extract_string",
+          result: {
+            success: false,
+            message:
+              result.data?.result === "error"
+                ? result.data.message
+                : "verify extract error",
+          },
+        });
+      }
+    } catch (e) {
+      post({
+        call: "verify_extract_string",
+        result: {
+          success: false,
+          message: e instanceof Error ? e.message : "verify extract error",
         },
       });
     }

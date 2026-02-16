@@ -33,22 +33,39 @@ macro_rules! newtype_id {
 newtype_id!(UserId);
 newtype_id!(ChatId);
 
+/// メールアドレスのローカルパートとして有効かを検証する。
+/// 許可文字: 英数字, `_`, `.`, `+`, `-`
+/// 先頭・末尾のドット、連続ドット、予約語は禁止。
+fn validate_local_part(s: &str) -> Result<(), String> {
+    if s.is_empty() {
+        return Err("user ID must not be empty".into());
+    }
+    if !s
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '+' | '-'))
+    {
+        return Err("user ID contains invalid characters".into());
+    }
+    if s.starts_with('.') || s.ends_with('.') {
+        return Err("user ID must not start or end with a dot".into());
+    }
+    if s.contains("..") {
+        return Err("user ID must not contain consecutive dots".into());
+    }
+    let lower = s.to_ascii_lowercase();
+    if lower == "root" || lower == "admin" {
+        return Err("this user ID is reserved".into());
+    }
+    Ok(())
+}
+
 impl UserId {
-    /// ローカルユーザIDの形式を検証（英数字とアンダースコアのみ、@禁止、予約語禁止）
+    /// ローカルユーザIDの形式を検証（メールローカルパートとして有効な文字、@禁止、予約語禁止）
     pub fn validate_local(s: &str) -> Result<Self, String> {
-        if s.is_empty() {
-            return Err("user ID must not be empty".into());
-        }
         if s.contains('@') {
             return Err("local user ID must not contain '@'".into());
         }
-        if !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            return Err("user ID must contain only alphanumeric characters and underscores".into());
-        }
-        let lower = s.to_ascii_lowercase();
-        if lower == "root" || lower == "admin" {
-            return Err("this user ID is reserved".into());
-        }
+        validate_local_part(s)?;
         Ok(Self(s.to_string()))
     }
 
@@ -58,22 +75,20 @@ impl UserId {
             return Err("user ID must not be empty".into());
         }
         let local = s.split('@').next().unwrap();
-        if local.is_empty() {
-            return Err("user ID local part must not be empty".into());
-        }
-        if !local.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            return Err("user ID must contain only alphanumeric characters and underscores".into());
-        }
-        let lower = local.to_ascii_lowercase();
-        if lower == "root" || lower == "admin" {
-            return Err("this user ID is reserved".into());
-        }
+        validate_local_part(local)?;
         Ok(Self(s.to_string()))
     }
 
     /// 既存の`validate`互換（`validate_local`と同じ）
     pub fn validate(s: &str) -> Result<Self, String> {
         Self::validate_local(s)
+    }
+
+    /// ローカルパートとドメインからドメイン付きUserIdを生成する。
+    /// ローカルパートのバリデーションを行い、`"{local}@{domain}"` 形式で返す。
+    pub fn new_local(local: &str, domain: &str) -> Result<Self, String> {
+        validate_local_part(local)?;
+        Ok(Self(format!("{local}@{domain}")))
     }
 
     /// `@`以前のローカル部分を返す
@@ -101,31 +116,26 @@ impl UserId {
         UserId(self.local_part().to_string())
     }
 
-    /// パスパラメータからローカルUserIdを抽出する。
-    /// `user@domain` 形式の場合、ドメインが自サーバと一致すればローカル部分のみ返す。
-    /// 異なるドメインの場合はエラー。
+    /// パスパラメータからローカルUserIdを解決する。
+    /// ドメインなし → `@server_hostname` を付与。
+    /// ドメインあり → そのまま返す（ドメイン一致の検証は呼び出し側で行う）。
     pub fn resolve_local(id: &str, server_hostname: &str) -> Result<Self, String> {
-        if let Some((local_part, domain)) = id.split_once('@') {
-            if domain != server_hostname {
-                return Err("domain does not match this server".into());
-            }
-            Self::validate_local(local_part)
+        if let Some((local_part, _domain)) = id.split_once('@') {
+            validate_local_part(local_part)?;
+            Ok(Self(id.to_string()))
         } else {
-            Self::validate_local(id)
+            Self::new_local(id, server_hostname)
         }
     }
 
     /// パスパラメータからUserIdを解決する。
-    /// 自サーバのドメインならローカル部分のみ、外部ドメインならフルIDを返す。
+    /// ドメインなし → `@server_hostname` を付与。
+    /// ドメインあり → そのまま返す。
     pub fn resolve(id: &str, server_hostname: &str) -> Result<Self, String> {
-        if let Some((local_part, domain)) = id.split_once('@') {
-            if domain == server_hostname {
-                Self::validate_local(local_part)
-            } else {
-                Self::validate_full(id)
-            }
+        if id.contains('@') {
+            Self::validate_full(id)
         } else {
-            Self::validate_local(id)
+            Self::new_local(id, server_hostname)
         }
     }
 }

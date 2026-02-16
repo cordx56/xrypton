@@ -8,12 +8,8 @@ import { useDialogs, DialogComponent } from "@/contexts/DialogContext";
 import { useI18n } from "@/contexts/I18nContext";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useServiceWorker } from "@/hooks/useServiceWorker";
-import {
-  authApiClient,
-  apiClient,
-  getApiBaseUrl,
-  ApiError,
-} from "@/api/client";
+import { authApiClient, apiClient, getApiBaseUrl } from "@/api/client";
+import { displayUserId } from "@/utils/schema";
 import {
   decodeBase64Url,
   encodeToBase64,
@@ -27,6 +23,7 @@ import {
   buildFileMessageContent,
   isImageType,
 } from "@/utils/fileMessage";
+import { setCachedContactIds } from "@/utils/accountStore";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
 import ChatGroupList from "./ChatGroupList";
 import ThreadList from "./ThreadList";
@@ -46,10 +43,7 @@ import {
   setPendingMessages,
   clearPendingMessages,
 } from "@/utils/tempSessionStore";
-import {
-  getCachedPublicKeys,
-  setCachedPublicKeys,
-} from "@/utils/publicKeyCache";
+import { usePublicKeyResolver } from "@/hooks/usePublicKeyResolver";
 import type { ChatGroup, Thread, Message } from "@/types/chat";
 import type { Contact } from "@/types/contact";
 
@@ -74,6 +68,7 @@ const NewGroupDialog: DialogComponent = ({ close, setOnClose }) => {
   const chatCtx = useChat();
   const { t } = useI18n();
   const { showError } = useErrorToast();
+  const { resolveDisplayName: resolveName } = usePublicKeyResolver();
   const [contacts, setContacts] = useState<ContactWithProfile[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loadingContacts, setLoadingContacts] = useState(true);
@@ -102,17 +97,24 @@ const NewGroupDialog: DialogComponent = ({ close, setOnClose }) => {
               const iconUrl = profile.icon_url
                 ? `${getApiBaseUrl()}${profile.icon_url}`
                 : null;
-              return {
-                ...c,
-                display_name: profile.display_name || c.contact_user_id,
-                icon_url: iconUrl,
-              };
+              const name = await resolveName(
+                c.contact_user_id,
+                profile.display_name || c.contact_user_id,
+              );
+              return { ...c, display_name: name, icon_url: iconUrl };
             } catch {
               return { ...c, display_name: c.contact_user_id, icon_url: null };
             }
           }),
         );
         setContacts(resolved);
+        // Service Worker通知フィルタ用にキャッシュ
+        if (auth.userId) {
+          setCachedContactIds(
+            auth.userId,
+            rawContacts.map((c: Contact) => c.contact_user_id),
+          );
+        }
       } catch {
         // failed to load contacts
       } finally {
@@ -203,7 +205,7 @@ const NewGroupDialog: DialogComponent = ({ close, setOnClose }) => {
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm">{c.display_name}</div>
                     <div className="truncate text-xs text-muted">
-                      {c.contact_user_id}
+                      {displayUserId(c.contact_user_id)}
                     </div>
                   </div>
                 </label>
@@ -234,6 +236,8 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const isMobile = useIsMobile();
   const { showNotification } = useNotification();
   const { showError } = useErrorToast();
+  const { resolveKeys, refreshKeys, resolveDisplayName } =
+    usePublicKeyResolver();
   const [loading, setLoading] = useState(false);
   const [selectedGroupName, setSelectedGroupName] = useState("");
   const [selectedThreadName, setSelectedThreadName] = useState("");
@@ -254,12 +258,6 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const keyIdToUserId = useRef<Record<string, string>>({});
   // リトライ済みメッセージの追跡（重複防止）
   const retryingMessages = useRef<Set<string>>(new Set());
-  // 鍵再取得の重複排除
-  const refreshingUsers = useRef<Map<string, Promise<{ changed: boolean }>>>(
-    new Map(),
-  );
-  // 鍵変更警告の重複排除（セッション中1回だけ表示）
-  const warnedKeyChanges = useRef<Set<string>>(new Set());
   // メンバープロフィールのキャッシュ
   type MemberProfile = {
     display_name: string;
@@ -269,6 +267,23 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const [memberProfiles, setMemberProfiles] = useState<
     Record<string, MemberProfile>
   >({});
+
+  // チャンネルとスレッドの updated_at をローカルで更新する
+  const touchTimestamps = (targetChatId: string, targetThreadId?: string) => {
+    const now = new Date().toISOString();
+    chat.setGroups(
+      chat.groups.map((g) =>
+        g.id === targetChatId ? { ...g, updated_at: now } : g,
+      ),
+    );
+    if (targetThreadId) {
+      chat.setThreads(
+        chat.threads.map((t) =>
+          t.id === targetThreadId ? { ...t, updated_at: now } : t,
+        ),
+      );
+    }
+  };
 
   // SWイベントハンドラ用のrefで最新値を参照
   const chatIdRef = useRef(chatId);
@@ -285,8 +300,10 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const handleSwEvent = async (data: {
     type: string;
     chat_id?: string;
+    thread_id?: string;
     name?: string;
     sender_id?: string;
+    sender_name?: string;
     encrypted?: string;
     is_self?: boolean;
   }) => {
@@ -332,16 +349,30 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
 
         // 送信者プロフィールを取得（キャッシュまたはAPI）
         const senderId = data.sender_id ?? "unknown";
-        let displayName = senderId;
+        let displayName = displayUserId(senderId);
         let iconUrl: string | null = null;
         const cached = memberProfilesRef.current[senderId];
         if (cached) {
           displayName = cached.display_name;
           iconUrl = cached.icon_url;
+        } else if (data.sender_name) {
+          // サーバが平文解決済みの sender_name を付与している場合はそれを使う
+          displayName = data.sender_name;
+          try {
+            const profile = await apiClient().user.getProfile(senderId);
+            iconUrl = profile.icon_url
+              ? `${getApiBaseUrl()}${profile.icon_url}`
+              : null;
+          } catch {
+            // アイコン取得失敗は無視
+          }
         } else {
           try {
             const profile = await apiClient().user.getProfile(senderId);
-            displayName = profile.display_name || senderId;
+            displayName = await resolveDisplayName(
+              senderId,
+              profile.display_name || displayUserId(senderId),
+            );
             iconUrl = profile.icon_url
               ? `${getApiBaseUrl()}${profile.icon_url}`
               : null;
@@ -351,6 +382,21 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
         }
 
         showNotification({ displayName, iconUrl, body });
+
+        // チャンネルとスレッドの更新日時を更新
+        if (data.chat_id) {
+          touchTimestamps(data.chat_id, data.thread_id);
+        }
+
+        // 現在閲覧中でないチャンネル/スレッドを未読にする
+        if (data.chat_id) {
+          const viewingThread =
+            chatIdRef.current === data.chat_id &&
+            threadIdRef.current === data.thread_id;
+          if (!viewingThread) {
+            chat.markUnread(data.chat_id, data.thread_id);
+          }
+        }
 
         // 現在表示中のチャットと一致する場合、メッセージリストを再取得
         const currentChatId = chatIdRef.current;
@@ -488,42 +534,26 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       const profiles: Record<string, MemberProfile> = {};
       for (const member of data.members ?? []) {
         try {
-          // IndexedDBキャッシュを確認し、ヒットすればAPIコールをスキップ
-          const cached = await getCachedPublicKeys(member.user_id);
-          if (cached) {
-            pubKeys[cached.signing_key_id] = {
+          const resolved = await resolveKeys(member.user_id);
+          if (resolved) {
+            pubKeys[resolved.signing_key_id] = {
               name: member.user_id,
-              publicKeys: cached.signing_public_key,
+              publicKeys: resolved.signing_public_key,
             };
-            encPubKeys.push(cached.encryption_public_key);
-            keyIdMap[cached.signing_key_id] = member.user_id;
-          } else {
-            // 各getKeysリクエストに新しいnonceが必要なため、署名を都度生成する
-            const keySigned = await auth.getSignedMessage();
-            if (!keySigned) continue;
-            const keys = await authApiClient(
-              keySigned.signedMessage,
-            ).user.getKeys(member.user_id);
-            pubKeys[keys.signing_key_id] = {
-              name: member.user_id,
-              publicKeys: keys.signing_public_key,
-            };
-            encPubKeys.push(keys.encryption_public_key);
-            keyIdMap[keys.signing_key_id] = member.user_id;
-            // キャッシュに保存
-            await setCachedPublicKeys(member.user_id, {
-              signing_key_id: keys.signing_key_id,
-              signing_public_key: keys.signing_public_key,
-              encryption_public_key: keys.encryption_public_key,
-            });
+            encPubKeys.push(resolved.encryption_public_key);
+            keyIdMap[resolved.signing_key_id] = member.user_id;
           }
         } catch {
           // 公開鍵を取得できないメンバーはスキップ
         }
         try {
           const profile = await apiClient().user.getProfile(member.user_id);
+          const resolvedName = await resolveDisplayName(
+            member.user_id,
+            profile.display_name || member.user_id,
+          );
           profiles[member.user_id] = {
-            display_name: profile.display_name || member.user_id,
+            display_name: resolvedName,
             icon_url: profile.icon_url
               ? `${getApiBaseUrl()}${profile.icon_url}`
               : null,
@@ -555,13 +585,12 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
         setSelectedGroupName(displayName);
       }
     },
-    [auth.getSignedMessage, auth.userId, chat],
+    [auth.getSignedMessage, auth.userId, chat, resolveKeys, resolveDisplayName],
   );
 
   // chatIdが変わった時にグループ詳細を取得
   useEffect(() => {
     if (!chatId) return;
-    warnedKeyChanges.current.clear();
     // グループ名を仮設定（空名の場合はfetchGroupDetailでメンバー表示名に更新される）
     const group = chat.groups.find((g) => g.id === chatId);
     if (group)
@@ -734,9 +763,10 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       setSelectedGroupName(
         group.name || resolvedGroupNamesRef.current[group.id] || group.id,
       );
+      chat.markGroupRead(group.id);
       router.push(`/chat/${group.id}`);
     },
-    [router],
+    [router, chat.markGroupRead],
   );
 
   // スレッド選択
@@ -744,9 +774,10 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     (thread: Thread) => {
       if (!chatId) return;
       setSelectedThreadName(thread.name || thread.id);
+      chat.markThreadRead(thread.id);
       router.push(`/chat/${chatId}/${thread.id}`);
     },
-    [chatId, router],
+    [chatId, router, chat.markThreadRead],
   );
 
   // 現在のスレッドがtemp sessionかどうかを判定
@@ -858,93 +889,28 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     return retryable.some((e) => errorMessage.includes(e));
   };
 
-  // 特定ユーザの鍵をAPIから再取得し、キャッシュと比較する
-  const refreshUserKeys = (userId: string): Promise<{ changed: boolean }> => {
-    const existing = refreshingUsers.current.get(userId);
-    if (existing) return existing;
-
-    const promise = (async (): Promise<{ changed: boolean }> => {
-      try {
-        const keySigned = await auth.getSignedMessage();
-        if (!keySigned) return { changed: false };
-        const keys = await authApiClient(keySigned.signedMessage).user.getKeys(
-          userId,
-        );
-
-        // キャッシュと比較して変更があるか確認
-        const cached = await getCachedPublicKeys(userId);
-        const changed =
-          !cached ||
-          cached.signing_key_id !== keys.signing_key_id ||
-          cached.signing_public_key !== keys.signing_public_key;
-
-        // ref を更新
-        if (cached) {
-          delete knownPublicKeys.current[cached.signing_key_id];
-          delete keyIdToUserId.current[cached.signing_key_id];
+  // 特定ユーザの鍵をサーバから再取得し、インメモリ ref を更新する
+  const refreshUserKeysAndUpdateRefs = async (
+    userId: string,
+  ): Promise<{ changed: boolean }> => {
+    const result = await refreshKeys(userId);
+    if (result.status === "changed") {
+      // インメモリ ref を更新（confirmed に関わらず復号リトライ用）
+      // 古い key_id のエントリを削除
+      for (const [keyId, uid] of Object.entries(keyIdToUserId.current)) {
+        if (uid === userId) {
+          delete knownPublicKeys.current[keyId];
+          delete keyIdToUserId.current[keyId];
         }
-        knownPublicKeys.current[keys.signing_key_id] = {
-          name: userId,
-          publicKeys: keys.signing_public_key,
-        };
-        keyIdToUserId.current[keys.signing_key_id] = userId;
-        // encryptionPublicKeys は配列なので再構築が必要だが、
-        // 復号時には使わないためここでは更新しない
-
-        // キャッシュを上書き
-        await setCachedPublicKeys(userId, {
-          signing_key_id: keys.signing_key_id,
-          signing_public_key: keys.signing_public_key,
-          encryption_public_key: keys.encryption_public_key,
-        });
-
-        return { changed };
-      } catch {
-        return { changed: false };
-      } finally {
-        refreshingUsers.current.delete(userId);
       }
-    })();
-
-    refreshingUsers.current.set(userId, promise);
-    return promise;
-  };
-
-  // 鍵変更を警告ダイアログで表示
-  const showKeyChangedWarning = (userIds: string[]) => {
-    const newWarnings = userIds.filter(
-      (id) => !warnedKeyChanges.current.has(id),
-    );
-    if (newWarnings.length === 0) return;
-    for (const id of newWarnings) warnedKeyChanges.current.add(id);
-
-    const displayNames = newWarnings.map((id) => {
-      const profile = memberProfilesRef.current[id];
-      return profile?.display_name ?? id;
-    });
-
-    pushDialog((p) => (
-      <Dialog {...p} title={t("security.key_changed_title")}>
-        <div className="space-y-3">
-          <p className="text-sm">{t("security.key_changed_message")}</p>
-          <ul className="text-sm font-medium list-disc list-inside">
-            {displayNames.map((name) => (
-              <li key={name}>{name}</li>
-            ))}
-          </ul>
-          <p className="text-sm text-muted">
-            {t("security.key_changed_detail")}
-          </p>
-          <button
-            type="button"
-            onClick={p.close}
-            className="px-4 py-2 bg-accent/30 rounded hover:bg-accent/50"
-          >
-            {t("common.ok")}
-          </button>
-        </div>
-      </Dialog>
-    ));
+      knownPublicKeys.current[result.keys.signing_key_id] = {
+        name: userId,
+        publicKeys: result.keys.signing_public_key,
+      };
+      keyIdToUserId.current[result.keys.signing_key_id] = userId;
+      return { changed: true };
+    }
+    return { changed: false };
   };
 
   // 復号失敗時に鍵を再取得してリトライする
@@ -973,14 +939,8 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
         targetUserIds.push(...Object.keys(memberProfilesRef.current));
       }
 
-      const changedUserIds: string[] = [];
-      for (const userId of targetUserIds) {
-        const result = await refreshUserKeys(userId);
-        if (result.changed) changedUserIds.push(userId);
-      }
-
-      if (changedUserIds.length > 0) {
-        showKeyChangedWarning(changedUserIds);
+      for (const uid of targetUserIds) {
+        await refreshUserKeysAndUpdateRefs(uid);
       }
 
       // 更新された鍵でリトライ
@@ -1421,6 +1381,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
             created_at: new Date().toISOString(),
           },
         ]);
+        touchTimestamps(chatId, threadId);
       } catch {
         showError(t("error.message_send_failed"));
       }
@@ -1465,6 +1426,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           created_at: new Date().toISOString(),
         },
       ]);
+      touchTimestamps(chatId, threadId);
     } catch {
       showError(t("error.message_send_failed"));
     }
@@ -1605,6 +1567,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           fileBlobUrl,
         },
       ]);
+      touchTimestamps(chatId, threadId);
     } catch {
       showError(t("error.file_upload_failed"));
     }

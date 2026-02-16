@@ -423,6 +423,35 @@ pub fn unwrap_outer_bytes(public_key: String, data: Vec<u8>) -> Result<JsValue, 
     .to_value())
 }
 
+/// 署名を検証し、ペイロードをUTF-8文字列として取り出す。
+/// 返り値: [String(plaintext)]
+#[wasm_bindgen]
+pub fn verify_extract_string(public_key: String, armored: &str) -> Result<JsValue, JsValue> {
+    let common_pk =
+        crypton_common::keys::PublicKeys::try_from(public_key.as_str()).map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
+    let bytes = common_pk.verify_and_extract(armored).map_err(|e| {
+        ReturnValue::Error {
+            message: e.to_string(),
+        }
+        .to_value()
+    })?;
+    let plaintext = String::from_utf8(bytes).map_err(|e| {
+        ReturnValue::Error {
+            message: e.to_string(),
+        }
+        .to_value()
+    })?;
+    Ok(ReturnValue::Ok {
+        value: vec![ResultData::String { data: plaintext }],
+    }
+    .to_value())
+}
+
 /// armored PGP メッセージから署名者の鍵IDを抽出する。
 /// 返り値: [String(key_id)]
 #[wasm_bindgen]

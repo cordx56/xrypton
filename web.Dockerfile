@@ -25,6 +25,7 @@ COPY --from=wasm-builder /build/crypton-wasm/pkg /build/crypton-wasm/pkg
 RUN pnpm install --frozen-lockfile
 
 COPY crypton-web/ .
+COPY crypton-docs/ /build/crypton-docs/
 
 # NEXT_PUBLIC_* variables must be set at build time
 ARG NEXT_PUBLIC_API_BASE_URL=/api

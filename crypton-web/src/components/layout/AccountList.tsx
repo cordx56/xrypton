@@ -2,13 +2,20 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faCheck, faPlus } from "@fortawesome/free-solid-svg-icons";
+import {
+  faCheck,
+  faPlus,
+  faArrowRightFromBracket,
+} from "@fortawesome/free-solid-svg-icons";
 import Avatar from "@/components/common/Avatar";
 import {
   getCachedProfile,
   setActiveAccountId,
   syncSettingsToLocalStorage,
+  deleteAccountData,
+  getAccountIds,
 } from "@/utils/accountStore";
+import { displayUserId } from "@/utils/schema";
 import { useI18n } from "@/contexts/I18nContext";
 import type { AccountInfo } from "@/types/user";
 
@@ -46,6 +53,29 @@ const AccountList = ({ accountIds, activeId, showAdd = false }: Props) => {
     [activeId],
   );
 
+  const handleLogout = useCallback(
+    async (e: React.MouseEvent, userId: string) => {
+      e.stopPropagation();
+      if (!window.confirm(t("account.logout_confirm"))) return;
+
+      await deleteAccountData(userId);
+
+      // ログアウトしたのがアクティブアカウントなら別のアカウントに切り替え
+      if (userId === activeId) {
+        const remaining = await getAccountIds();
+        if (remaining.length > 0) {
+          await syncSettingsToLocalStorage(remaining[0]);
+          await setActiveAccountId(remaining[0]);
+        } else {
+          await setActiveAccountId(undefined);
+        }
+      }
+
+      window.location.reload();
+    },
+    [activeId, t],
+  );
+
   const handleAdd = useCallback(async () => {
     await setActiveAccountId(undefined);
     window.location.reload();
@@ -67,9 +97,11 @@ const AccountList = ({ accountIds, activeId, showAdd = false }: Props) => {
             <Avatar name={p.displayName || p.userId} iconUrl={p.iconUrl} />
             <div className="min-w-0 flex-1">
               <div className="font-medium truncate">
-                {p.displayName || p.userId}
+                {p.displayName || displayUserId(p.userId)}
               </div>
-              <div className="text-xs text-muted truncate">{p.userId}</div>
+              <div className="text-xs text-muted truncate">
+                {displayUserId(p.userId)}
+              </div>
             </div>
             {isActive && (
               <FontAwesomeIcon
@@ -77,6 +109,24 @@ const AccountList = ({ accountIds, activeId, showAdd = false }: Props) => {
                 className="text-accent text-sm shrink-0"
               />
             )}
+            <span
+              role="button"
+              tabIndex={0}
+              title={t("account.logout")}
+              onClick={(e) => handleLogout(e, p.userId)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleLogout(e as unknown as React.MouseEvent, p.userId);
+                }
+              }}
+              className="text-muted hover:text-red-400 transition-colors p-1 shrink-0"
+            >
+              <FontAwesomeIcon
+                icon={faArrowRightFromBracket}
+                className="text-sm"
+              />
+            </span>
           </button>
         );
       })}

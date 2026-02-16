@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import { useChat } from "@/contexts/ChatContext";
 import { useI18n } from "@/contexts/I18nContext";
 import { formatDate } from "@/utils/date";
+import { displayUserId } from "@/utils/schema";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faAngleLeft } from "@fortawesome/free-solid-svg-icons";
 import MessageBubble from "./MessageBubble";
@@ -168,7 +169,8 @@ const ChatView = ({
                 message={msg}
                 isOwn={senderId != null && senderId === currentUserId}
                 displayName={
-                  profile?.display_name ?? senderId ?? t("chat.deleted_user")
+                  profile?.display_name ??
+                  (senderId ? displayUserId(senderId) : t("chat.deleted_user"))
                 }
                 iconUrl={profile?.icon_url ?? null}
                 status={profile?.status ?? ""}

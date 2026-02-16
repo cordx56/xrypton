@@ -3,12 +3,44 @@ use pgp::types::{KeyDetails, PublicKeyTrait};
 
 use crate::error::CryptonError;
 
-/// PGP署名メッセージからSignersUserIDサブパケットの値を抽出する。
+/// PGPユーザIDから `[ID]@[domain]` 形式のアドレス部分を抽出する。
 ///
+/// 対応形式:
+/// - `user@domain` → `user@domain`
+/// - `Real Name <user@domain>` → `user@domain`
+pub fn extract_address_from_uid(uid: &str) -> Result<&str, CryptonError> {
+    if let Some(start) = uid.find('<') {
+        let end = uid
+            .find('>')
+            .ok_or_else(|| CryptonError::KeyFormat("unclosed '<' in user ID".into()))?;
+        if start >= end {
+            return Err(CryptonError::KeyFormat(
+                "invalid angle bracket position in user ID".into(),
+            ));
+        }
+        let addr = uid[start + 1..end].trim();
+        if !addr.contains('@') {
+            return Err(CryptonError::KeyFormat(
+                "no '@' found in user ID address".into(),
+            ));
+        }
+        return Ok(addr);
+    }
+    if uid.contains('@') {
+        return Ok(uid);
+    }
+    Err(CryptonError::KeyFormat(
+        "no address found in user ID".into(),
+    ))
+}
+
+/// PGP署名メッセージからSignersUserIDサブパケットの値を抽出し、
+/// `[ID]@[domain]` 形式に正規化して返す。
+///
+/// `Real Name <user@domain>` 形式の場合はアドレス部分のみ返す。
 /// 連合フローで署名者のホームサーバを特定するために使用する。
 pub fn extract_signer_user_id(armored: &str) -> Result<String, CryptonError> {
     use pgp::armor::Dearmor;
-    use pgp::packet::{Packet, PacketParser};
     use std::io::{BufReader, Read};
 
     let mut dearmor = Dearmor::new(BufReader::new(armored.as_bytes()));
@@ -17,15 +49,42 @@ pub fn extract_signer_user_id(armored: &str) -> Result<String, CryptonError> {
         .read_to_end(&mut bytes)
         .map_err(|e| CryptonError::Verification(format!("dearmor failed: {e}")))?;
 
-    let parser = PacketParser::new(BufReader::new(&bytes[..]));
+    extract_signer_user_id_from_bytes(&bytes)
+}
+
+/// raw PGP バイト列から SignersUserID を抽出する。
+///
+/// CompressedData パケットがあれば展開してから内部パケットを走査する。
+fn extract_signer_user_id_from_bytes(data: &[u8]) -> Result<String, CryptonError> {
+    use pgp::packet::{Packet, PacketParser};
+    use std::io::{BufReader, Read};
+
+    let parser = PacketParser::new(BufReader::new(data));
 
     for result in parser.flatten() {
-        if let Packet::Signature(ref sig) = result
-            && let Some(uid) = sig.signers_userid()
-        {
-            return String::from_utf8(uid.to_vec()).map_err(|e| {
-                CryptonError::Verification(format!("invalid UTF-8 in SignersUserID: {e}"))
-            });
+        match result {
+            Packet::Signature(ref sig) if sig.signers_userid().is_some() => {
+                let uid = sig.signers_userid().unwrap();
+                let raw = String::from_utf8(uid.to_vec()).map_err(|e| {
+                    CryptonError::Verification(format!("invalid UTF-8 in SignersUserID: {e}"))
+                })?;
+                return extract_address_from_uid(&raw)
+                    .map(str::to_owned)
+                    .map_err(|e| {
+                        CryptonError::Verification(format!("invalid SignersUserID format: {e}"))
+                    });
+            }
+            Packet::CompressedData(ref cd) => {
+                let mut decompressed = Vec::new();
+                cd.decompress()
+                    .map_err(|e| CryptonError::Verification(format!("decompress failed: {e}")))?
+                    .read_to_end(&mut decompressed)
+                    .map_err(|e| {
+                        CryptonError::Verification(format!("decompress read failed: {e}"))
+                    })?;
+                return extract_signer_user_id_from_bytes(&decompressed);
+            }
+            _ => continue,
         }
     }
 
@@ -39,7 +98,6 @@ pub fn extract_signer_user_id(armored: &str) -> Result<String, CryptonError> {
 /// OnePassSignature パケットまたは Signature パケットの issuer 情報を使用する。
 pub fn extract_issuer_key_id(armored: &str) -> Result<String, CryptonError> {
     use pgp::armor::Dearmor;
-    use pgp::packet::{OpsVersionSpecific, Packet, PacketParser};
     use std::io::{BufReader, Read};
 
     let mut dearmor = Dearmor::new(BufReader::new(armored.as_bytes()));
@@ -48,33 +106,15 @@ pub fn extract_issuer_key_id(armored: &str) -> Result<String, CryptonError> {
         .read_to_end(&mut bytes)
         .map_err(|e| CryptonError::Verification(format!("dearmor failed: {e}")))?;
 
-    let parser = PacketParser::new(BufReader::new(&bytes[..]));
-
-    for result in parser.flatten() {
-        match result {
-            Packet::OnePassSignature(ref ops) => {
-                if let OpsVersionSpecific::V3 { key_id } = ops.version_specific() {
-                    return Ok(key_id.to_string());
-                }
-            }
-            Packet::Signature(ref sig) => {
-                if let Some(key_id) = sig.issuer().first() {
-                    return Ok(key_id.to_string());
-                }
-            }
-            _ => continue,
-        }
-    }
-
-    Err(CryptonError::Verification(
-        "no issuer key ID found in message".into(),
-    ))
+    extract_issuer_key_id_from_bytes(&bytes)
 }
 
 /// raw PGP バイト列から署名者の鍵IDを検証なしで抽出する。
+///
+/// CompressedData パケットがあれば展開してから内部パケットを走査する。
 pub fn extract_issuer_key_id_from_bytes(data: &[u8]) -> Result<String, CryptonError> {
     use pgp::packet::{OpsVersionSpecific, Packet, PacketParser};
-    use std::io::BufReader;
+    use std::io::{BufReader, Read};
 
     let parser = PacketParser::new(BufReader::new(data));
 
@@ -89,6 +129,16 @@ pub fn extract_issuer_key_id_from_bytes(data: &[u8]) -> Result<String, CryptonEr
                 if let Some(key_id) = sig.issuer().first() {
                     return Ok(key_id.to_string());
                 }
+            }
+            Packet::CompressedData(ref cd) => {
+                let mut decompressed = Vec::new();
+                cd.decompress()
+                    .map_err(|e| CryptonError::Verification(format!("decompress failed: {e}")))?
+                    .read_to_end(&mut decompressed)
+                    .map_err(|e| {
+                        CryptonError::Verification(format!("decompress read failed: {e}"))
+                    })?;
+                return extract_issuer_key_id_from_bytes(&decompressed);
             }
             _ => continue,
         }
@@ -119,14 +169,29 @@ impl PublicKeys {
         Ok(self.signing_public()?.key_id().to_string())
     }
 
+    /// PGP公開鍵のプライマリユーザIDからアドレス（`user@domain`）を抽出する。
+    pub fn get_primary_user_address(&self) -> Result<String, CryptonError> {
+        let uid_str = self
+            .keys
+            .details
+            .users
+            .first()
+            .and_then(|u| u.id.as_str())
+            .ok_or_else(|| CryptonError::KeyFormat("no user ID in public key".into()))?;
+        extract_address_from_uid(uid_str).map(str::to_owned)
+    }
+
     /// Verifies a PGP signed message and returns the verified plaintext.
     ///
     /// `verify_read()` は内部で `drain()` を呼びストリームを消費するため、
     /// 先にデータを読み出してからでないとペイロードが空になる。
     /// そのため `as_data_vec()` → `verify_read()` の順で呼ぶ。
     pub fn verify_and_extract(&self, armored: &str) -> Result<Vec<u8>, CryptonError> {
-        let (mut msg, _) =
+        let (msg, _) =
             Message::from_string(armored).map_err(|e| CryptonError::Verification(e.to_string()))?;
+        let mut msg = msg
+            .decompress()
+            .map_err(|e| CryptonError::Verification(e.to_string()))?;
         let signing_key = self.signing_public()?;
         // データを先に読み出す（ハッシュ計算もこの段階で行われる）
         let data = msg
@@ -140,7 +205,10 @@ impl PublicKeys {
 
     /// raw PGP バイト列の署名を検証してペイロードを取り出す。
     pub fn verify_and_extract_from_bytes(&self, data: &[u8]) -> Result<Vec<u8>, CryptonError> {
-        let mut msg = Message::from_bytes(std::io::Cursor::new(data))
+        let msg = Message::from_bytes(std::io::Cursor::new(data))
+            .map_err(|e| CryptonError::Verification(e.to_string()))?;
+        let mut msg = msg
+            .decompress()
             .map_err(|e| CryptonError::Verification(e.to_string()))?;
         let signing_key = self.signing_public()?;
         let payload = msg
@@ -153,8 +221,11 @@ impl PublicKeys {
 
     /// Verifies a PGP signed message without extracting data.
     pub fn verify(&self, armored: &str) -> Result<(), CryptonError> {
-        let (mut msg, _) =
+        let (msg, _) =
             Message::from_string(armored).map_err(|e| CryptonError::Verification(e.to_string()))?;
+        let mut msg = msg
+            .decompress()
+            .map_err(|e| CryptonError::Verification(e.to_string()))?;
         let signing_key = self.signing_public()?;
         msg.verify_read(signing_key)
             .map(|_| ())
@@ -184,8 +255,45 @@ mod tests {
     use super::*;
     use pgp::composed::{KeyType, SecretKeyParamsBuilder, SubkeyParamsBuilder};
     use pgp::crypto;
-    use pgp::types::KeyVersion;
+    use pgp::types::{CompressionAlgorithm, KeyVersion};
     use rand::rngs::OsRng;
+
+    // --- extract_address_from_uid ---
+
+    #[test]
+    fn extract_address_bare() {
+        assert_eq!(
+            extract_address_from_uid("user@example.com").unwrap(),
+            "user@example.com"
+        );
+    }
+
+    #[test]
+    fn extract_address_with_name() {
+        assert_eq!(
+            extract_address_from_uid("Real Name <user@example.com>").unwrap(),
+            "user@example.com"
+        );
+    }
+
+    #[test]
+    fn extract_address_with_name_spaces() {
+        // アドレス前後の空白をトリムする
+        assert_eq!(
+            extract_address_from_uid("Name < user@example.com >").unwrap(),
+            "user@example.com"
+        );
+    }
+
+    #[test]
+    fn extract_address_no_at_fails() {
+        assert!(extract_address_from_uid("localonly").is_err());
+    }
+
+    #[test]
+    fn extract_address_unclosed_bracket_fails() {
+        assert!(extract_address_from_uid("Name <user@example.com").is_err());
+    }
 
     /// 鍵ペアを生成し、公開鍵からPublicKeysを構築してsigning key IDを取得できることを確認
     #[test]
@@ -275,6 +383,7 @@ mod tests {
 
         // MessageBuilder で署名メッセージを作成
         let mut builder = MessageBuilder::from_bytes("", b"test payload".to_vec());
+        builder.compression(CompressionAlgorithm::ZLIB);
         builder.sign(
             &signing_subkey.key,
             Password::from("pass"),

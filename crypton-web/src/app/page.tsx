@@ -65,12 +65,20 @@ function LandingPageContent() {
         <p className="text-lg text-muted max-w-lg mb-8">
           {t("landing.tagline")}
         </p>
-        <Link
-          href="/chat"
-          className="px-6 py-3 rounded-lg bg-accent/80 hover:bg-accent text-white font-semibold transition-colors"
-        >
-          {t("landing.get_started")}
-        </Link>
+        <div className="flex gap-3">
+          <Link
+            href="/chat"
+            className="px-6 py-3 rounded-lg bg-accent/80 hover:bg-accent text-white font-semibold transition-colors"
+          >
+            {t("landing.get_started")}
+          </Link>
+          <Link
+            href="/docs"
+            className="px-6 py-3 rounded-lg bg-accent/20 hover:bg-accent/30 text-fg font-semibold transition-colors"
+          >
+            {t("landing.docs")}
+          </Link>
+        </div>
       </section>
 
       {/* Features */}

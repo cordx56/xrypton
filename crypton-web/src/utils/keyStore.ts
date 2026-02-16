@@ -48,6 +48,30 @@ export async function deleteKey(key: string): Promise<void> {
   });
 }
 
+/** 指定プレフィックスで始まるキーと値のペアをすべて返す */
+export async function getEntriesWithPrefix(
+  prefix: string,
+): Promise<[string, string][]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const store = tx.objectStore(STORE_NAME);
+    const entries: [string, string][] = [];
+    const req = store.openCursor();
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (cursor) {
+        if (typeof cursor.key === "string" && cursor.key.startsWith(prefix)) {
+          entries.push([cursor.key, cursor.value as string]);
+        }
+        cursor.continue();
+      }
+    };
+    tx.oncomplete = () => resolve(entries);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 /** 指定プレフィックスで始まるキーをすべて削除する */
 export async function deleteKeysWithPrefix(prefix: string): Promise<void> {
   const db = await openDB();

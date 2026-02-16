@@ -6,17 +6,13 @@ import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useI18n } from "@/contexts/I18nContext";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
-import { authApiClient, apiClient, getApiBaseUrl } from "@/api/client";
+import { authApiClient } from "@/api/client";
+import { displayUserId } from "@/utils/schema";
+import { useResolvedProfiles } from "@/hooks/useResolvedProfiles";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faArrowLeft } from "@fortawesome/free-solid-svg-icons";
 import Avatar from "@/components/common/Avatar";
 import Spinner from "@/components/common/Spinner";
-
-type MemberInfo = {
-  userId: string;
-  displayName: string;
-  iconUrl: string | null;
-};
 
 type Props = {
   chatId: string;
@@ -28,9 +24,12 @@ const ChannelInfo = ({ chatId }: Props) => {
   const { t } = useI18n();
   const { showError } = useErrorToast();
   const [channelName, setChannelName] = useState("");
-  const [members, setMembers] = useState<MemberInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [memberIds, setMemberIds] = useState<string[]>([]);
+  const [fetching, setFetching] = useState(true);
+  const { profiles: members, loading: resolvingProfiles } =
+    useResolvedProfiles(memberIds);
 
+  // グループ詳細からメンバー ID を取得
   useEffect(() => {
     (async () => {
       const signed = await auth.getSignedMessage();
@@ -39,47 +38,31 @@ const ChannelInfo = ({ chatId }: Props) => {
         const client = authApiClient(signed.signedMessage);
         const data = await client.chat.get(chatId);
         setChannelName(data.group?.name || chatId);
-
-        const resolved = await Promise.all(
-          (data.members ?? []).map(async (m: { user_id: string }) => {
-            try {
-              const profile = await apiClient().user.getProfile(m.user_id);
-              const iconUrl = profile.icon_url
-                ? `${getApiBaseUrl()}${profile.icon_url}`
-                : null;
-              return {
-                userId: m.user_id,
-                displayName: profile.display_name || m.user_id,
-                iconUrl,
-              };
-            } catch {
-              return {
-                userId: m.user_id,
-                displayName: m.user_id,
-                iconUrl: null,
-              };
-            }
-          }),
+        const ids = (data.members ?? []).map(
+          (m: { user_id: string }) => m.user_id,
         );
-        setMembers(resolved);
-
-        // 空名の場合、メンバー表示名で代替
-        if (!data.group?.name) {
-          const others = resolved.filter((m) => m.userId !== auth.userId);
-          const displayName =
-            others.length > 0
-              ? others.map((m) => m.displayName).join(", ")
-              : (resolved.find((m) => m.userId === auth.userId)?.displayName ??
-                chatId);
-          setChannelName(displayName);
-        }
+        setMemberIds(ids);
       } catch {
         showError(t("error.unknown"));
       } finally {
-        setLoading(false);
+        setFetching(false);
       }
     })();
   }, [chatId]);
+
+  // プロフィール解決完了後、空名グループの場合メンバー表示名で代替
+  useEffect(() => {
+    if (members.length === 0 || channelName !== chatId) return;
+    const others = members.filter((m) => m.userId !== auth.userId);
+    const name =
+      others.length > 0
+        ? others.map((m) => m.displayName).join(", ")
+        : (members.find((m) => m.userId === auth.userId)?.displayName ??
+          chatId);
+    setChannelName(name);
+  }, [members, auth.userId, chatId]);
+
+  const loading = fetching || resolvingProfiles;
 
   if (loading) {
     return (
@@ -126,7 +109,9 @@ const ChannelInfo = ({ chatId }: Props) => {
                 <Avatar name={m.displayName} iconUrl={m.iconUrl} />
                 <div className="min-w-0 flex-1">
                   <div className="font-medium truncate">{m.displayName}</div>
-                  <div className="text-xs text-muted truncate">{m.userId}</div>
+                  <div className="text-xs text-muted truncate">
+                    {displayUserId(m.userId)}
+                  </div>
                 </div>
               </Link>
             ))}

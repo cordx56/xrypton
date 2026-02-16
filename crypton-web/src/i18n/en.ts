@@ -26,6 +26,8 @@ export const en: TranslationKeys = {
   "profile.save": "Save",
   "profile.public_keys": "Public Keys",
   "profile.export_private_keys": "Export Private Keys",
+  "profile.verified": "Verified",
+  "profile.unverified": "Unverified",
   "settings.theme": "Theme",
   "settings.language": "Language",
   "settings.api_server": "API Server",
@@ -83,8 +85,7 @@ export const en: TranslationKeys = {
   "error.message_load_failed": "Failed to load messages.",
   "error.profile_save_failed": "Failed to save profile.",
   "error.channel_create_failed": "Failed to create channel.",
-  "error.invalid_user_id":
-    "User ID must contain only alphanumeric characters and underscores.",
+  "error.invalid_user_id": "User ID must be a valid email local part.",
   "error.invalid_contact_query": "Enter a User ID or User ID@domain.",
   "error.invalid_key_format": "Invalid key format.",
   "error.passphrase_validation_failed": "Passphrase validation failed.",
@@ -109,9 +110,10 @@ export const en: TranslationKeys = {
   "chat.pending_messages": "Messages will be sent when all members join",
   "landing.tagline": "Secure messaging with end-to-end encryption",
   "landing.get_started": "Get Started",
+  "landing.docs": "Docs",
   "landing.feature_e2ee": "End-to-End Encryption",
   "landing.feature_e2ee_desc":
-    "Messages are encrypted between devices. The server never sees your content.",
+    "Messages are encrypted between devices. Others never see your content.",
   "landing.feature_pgp": "PGP Key Authentication",
   "landing.feature_pgp_desc": "Authenticate securely with your PGP key pair.",
   "landing.feature_oss": "Open Source",
@@ -119,11 +121,14 @@ export const en: TranslationKeys = {
     "The code is publicly available and free for anyone to use.",
   "landing.feature_distributed": "Distributed",
   "landing.feature_distributed_desc":
-    "Federated architecture with no central authority. Servers communicate across domains.",
+    "Distributed system with no central authority.",
   "account.add": "Add account",
   "account.switch": "Switch account",
   "account.active": "Active",
   "account.logged_in": "Logged in accounts",
+  "account.logout": "Log out",
+  "account.logout_confirm":
+    "Log out this account from this device? You will need to import your private key to log in again.",
   "error.min_length": "Must be at least 4 characters.",
   "auth.registration_complete": "Registration Complete",
   "auth.save_keys_warning":
@@ -145,6 +150,11 @@ export const en: TranslationKeys = {
     "The encryption key for one or more contacts has been updated. They may have performed a key update, or it could indicate a security concern.",
   "security.key_changed_detail":
     "If you did not expect this change, verify the user's identity through another channel before continuing.",
+  "security.signature_failed_title": "Signature Verification Failed",
+  "security.signature_failed_message":
+    "The profile data could not be verified. It may have been tampered with or was not signed by the expected key.",
+  "security.signature_failed_detail":
+    "Exercise caution when trusting this profile information.",
   "error.file_too_large":
     "File is too large. Please select a file under 10 MB.",
   "error.file_upload_failed": "Failed to upload file.",

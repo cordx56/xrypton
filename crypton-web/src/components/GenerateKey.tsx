@@ -8,7 +8,7 @@ import { useErrorToast } from "@/contexts/ErrorToastContext";
 import { useI18n } from "@/contexts/I18nContext";
 import { useDialogs } from "@/contexts/DialogContext";
 import { apiClient, authApiClient, ApiError } from "@/api/client";
-import { deleteAccountData } from "@/utils/accountStore";
+import { setAccountValue } from "@/utils/accountStore";
 import Code from "@/components/Code";
 import QrDisplay from "@/components/QrDisplay";
 import QrReader from "@/components/QrReader";
@@ -61,8 +61,11 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
       return;
     worker.eventWaiter("get_private_key_user_ids", (data) => {
       if (!data.success || data.data.user_ids.length === 0) return;
-      // PGP鍵のユーザIDは "user@hostname" 形式なので@以前をローカルIDとして使用
-      setUserId(data.data.user_ids[0].split("@")[0]);
+      // PGP鍵のユーザIDは "user@hostname" または "Real Name <user@hostname>" 形式
+      const uid = data.data.user_ids[0];
+      const bracketMatch = uid.match(/<([^>]+)>/);
+      const address = bracketMatch ? bracketMatch[1] : uid;
+      setUserId(address);
     });
     worker.postMessage({
       call: "get_private_key_user_ids",
@@ -83,29 +86,25 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
     [worker],
   );
 
-  // WebAuthn認証/登録 → サーバ登録を行う共通処理
+  /** サーバ登録し、正規化されたユーザIDを返す。
+   *  "Name <user@domain>" 形式の場合はアドレス部分のみサーバに送る。 */
   const registerAccount = useCallback(
-    async (targetUserId: string, publicKeys: string) => {
-      // 既存パスキーがあれば再利用、なければ新規登録
-      const webauthnOk = await auth.ensureRecentReauth(
-        true,
-        targetUserId,
-        true,
-      );
+    async (rawUserId: string, publicKeys: string): Promise<string> => {
+      const bracketMatch = rawUserId.match(/<([^>]+)>/);
+      const address = bracketMatch ? bracketMatch[1] : rawUserId;
+
+      // 新規登録: WebAuthnクレデンシャルを新規作成
+      const webauthnOk = await auth.registerWebAuthn(address);
       if (!webauthnOk) {
         throw new Error("webauthn_failed");
       }
 
-      // ローカルサーバへの登録はドメインなしのユーザIDを使用
-      try {
-        await apiClient().user.postKeys(targetUserId, publicKeys, publicKeys);
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 409) {
-          // post_keysの409は既存ユーザ検知として十分
-        } else {
-          throw e;
-        }
-      }
+      const resp = await apiClient().user.postKeys(
+        address,
+        publicKeys,
+        publicKeys,
+      );
+      return (resp.id as string) || address;
     },
     [auth],
   );
@@ -113,13 +112,15 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
   const generate = () => {
     if (!worker || processing) return;
     const targetUserId = isUpdateMode ? auth.userId! : userId;
-    if (!UserId.safeParse(targetUserId).success) {
-      showError(t("error.invalid_user_id"));
-      return;
-    }
-    if (targetUserId.includes("@")) {
-      showError(t("error.invalid_user_id"));
-      return;
+    if (!isUpdateMode) {
+      // "Name <user@domain>" 形式からアドレス部分を抽出
+      const bracketMatch = targetUserId.match(/<([^>]+)>/);
+      const address = bracketMatch ? bracketMatch[1] : targetUserId;
+      const localPart = address.includes("@") ? address.split("@")[0] : address;
+      if (!UserId.safeParse(localPart).success) {
+        showError(t("error.invalid_user_id"));
+        return;
+      }
     }
     if (
       mainPassphrase.length < MIN_LENGTH ||
@@ -130,9 +131,13 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
     }
     setProcessing(true);
     (async () => {
-      // 鍵生成時: userId + @hostname でWASM workerに渡す
-      const hostname = window.location.host;
-      const fullUserId = `${targetUserId}@${hostname}`;
+      // 鍵生成時のPGPユーザID構築
+      // "Name <user@domain>" や "user@domain" はそのまま、ベアIDには @hostname を付与
+      const bracketMatch = targetUserId.match(/<([^>]+)>/);
+      const address = bracketMatch ? bracketMatch[1] : targetUserId;
+      const fullUserId = address.includes("@")
+        ? targetUserId
+        : `${targetUserId}@${window.location.host}`;
 
       const message: z.infer<typeof WorkerCallMessage> = {
         call: "generate",
@@ -237,11 +242,16 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
       return;
     }
 
+    let canonicalId: string;
     try {
-      await registerAccount(targetUserId, publicKeys);
+      canonicalId = await registerAccount(targetUserId, publicKeys);
     } catch (e) {
       if (e instanceof Error && e.message === "webauthn_failed") {
         showError(t("error.webauthn_failed"));
+      } else if (e instanceof ApiError && e.status === 409) {
+        showError(t("auth.user_exists"));
+      } else if (e instanceof ApiError && e.status === 400) {
+        showError(e.errorMessage || t("auth.register_error"));
       } else if (e instanceof Error && e.message === "key_mismatch") {
         showError(t("auth.key_mismatch"));
       } else {
@@ -251,9 +261,9 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
       return;
     }
 
-    // WebAuthn+サーバ登録成功後にローカル保存
+    // WebAuthn+サーバ登録成功後にローカル保存（正規IDで）
     await activateAccount(
-      targetUserId,
+      canonicalId,
       generatedKeys,
       saveSubPass ? confirmedSubPass : undefined,
       true, // skipReload
@@ -272,11 +282,11 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
 
   const importKey = () => {
     if (!worker || processing) return;
-    if (!UserId.safeParse(userId).success) {
-      showError(t("error.invalid_user_id"));
-      return;
-    }
-    if (userId.includes("@")) {
+    // "Name <user@domain>" 形式からアドレス部分を抽出
+    const bracketMatch = userId.match(/<([^>]+)>/);
+    const address = bracketMatch ? bracketMatch[1] : userId;
+    const localPart = address.includes("@") ? address.split("@")[0] : address;
+    if (!UserId.safeParse(localPart).success) {
       showError(t("error.invalid_user_id"));
       return;
     }
@@ -312,27 +322,44 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
         return;
       }
 
-      // 保存（リロードなし）
-      await activateAccount(
-        userId,
-        trimmedKey,
-        saveSubPass ? subPassphrase : undefined,
-        true, // skipReload
-      );
-      if (!saveSubPass) {
-        auth.setSubPassphraseSession(subPassphrase);
+      // WebAuthn登録（サーバ通信前に実施）
+      // verifyWebAuthn + registerWebAuthn を連続呼び出しすると、
+      // 最初の認証でtransient activationが失効し create() が失敗するため、
+      // 登録のみ行う
+      const webauthnOk = await auth.registerWebAuthn(address);
+      if (!webauthnOk) {
+        showError(t("error.webauthn_failed"));
+        setProcessing(false);
+        return;
       }
 
-      // 秘密鍵を保有しているため認証付きgetKeysで存在確認
+      // Worker で直接署名（activateAccount前なのでReact stateに依存しない）
+      const signedMessage = await new Promise<string | null>((resolve) => {
+        worker.eventWaiter("sign", (result) => {
+          resolve(result.success ? result.data.signed_message : null);
+        });
+        worker.postMessage({
+          call: "sign",
+          keys: trimmedKey,
+          passphrase: subPassphrase,
+          payload: JSON.stringify({ nonce: new Date().toISOString() }),
+        });
+      });
+
+      // 認証付きgetKeysで存在確認（アドレスで問い合わせ）
       let isExistingUser = false;
-      const signed = await auth.getSignedMessage();
-      if (signed) {
+      let canonicalId: string | undefined;
+      if (signedMessage) {
         try {
-          const client = authApiClient(signed.signedMessage);
-          await client.user.getKeys(userId);
+          const client = authApiClient(signedMessage);
+          const keysResp = await client.user.getKeys(address);
           isExistingUser = true;
+          canonicalId = keysResp.id as string;
         } catch (e) {
-          if (!(e instanceof ApiError && e.status === 404)) {
+          // 404: ユーザ未登録、401: 未登録ユーザの認証失敗（正常）
+          if (
+            !(e instanceof ApiError && (e.status === 404 || e.status === 401))
+          ) {
             showError(t("error.network"));
             setProcessing(false);
             return;
@@ -341,19 +368,25 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
       }
 
       if (isExistingUser) {
-        // 既存ユーザのキー復元 → 既存パスキーがあれば再利用、なければ新規登録
-        const webauthnOk = await auth.ensureRecentReauth(true, userId, true);
-        if (!webauthnOk) {
-          showError(t("error.webauthn_failed"));
-          setProcessing(false);
-          return;
+        // 既存ユーザのキー復元: ローカル保存 → reload
+        const accountId = canonicalId || address;
+        await activateAccount(
+          accountId,
+          trimmedKey,
+          saveSubPass ? subPassphrase : undefined,
+          true,
+        );
+        if (!saveSubPass) {
+          auth.setSubPassphraseSession(subPassphrase);
         }
-        await auth.markRegistered();
+        // activateAccount直後はmarkRegisteredのクロージャが古いuserIdを参照するため、
+        // IndexedDBに直接書き込む
+        await setAccountValue(accountId, "isRegistered", "true");
         window.location.reload();
         return;
       }
 
-      // 新規ユーザ → WebAuthn + サーバ登録
+      // 新規ユーザ → サーバ登録（アドレスで登録）
       const publicKeys = await exportPublicKeys(trimmedKey);
       if (!publicKeys) {
         showError(t("error.unknown"));
@@ -362,12 +395,17 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
       }
 
       try {
-        await registerAccount(userId, publicKeys);
+        const resp = await apiClient().user.postKeys(
+          address,
+          publicKeys,
+          publicKeys,
+        );
+        canonicalId = resp.id as string;
       } catch (e) {
-        // 登録失敗時はactivateAccountで保存したデータをクリーンアップ
-        await deleteAccountData(userId);
-        if (e instanceof Error && e.message === "webauthn_failed") {
-          showError(t("error.webauthn_failed"));
+        if (e instanceof ApiError && e.status === 409) {
+          showError(t("auth.user_exists"));
+        } else if (e instanceof ApiError && e.status === 400) {
+          showError(e.errorMessage || t("auth.register_error"));
         } else if (e instanceof Error && e.message === "key_mismatch") {
           showError(t("auth.key_mismatch"));
         } else {
@@ -375,6 +413,18 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
         }
         setProcessing(false);
         return;
+      }
+
+      // 新規登録成功後にローカル保存（canonical IDで直接保存）
+      const accountId = canonicalId || address;
+      await activateAccount(
+        accountId,
+        trimmedKey,
+        saveSubPass ? subPassphrase : undefined,
+        true,
+      );
+      if (!saveSubPass) {
+        auth.setSubPassphraseSession(subPassphrase);
       }
 
       setCompletedKeys(trimmedKey);
@@ -493,6 +543,9 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
 
   return (
     <div>
+      {!isUpdateMode && (
+        <p className="mb-4 text-center">{t("auth.init_message")}</p>
+      )}
       {/* モード切替 */}
       <div className="flex gap-2 mb-4">
         <button

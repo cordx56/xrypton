@@ -102,7 +102,7 @@ const FileContent = ({
           <img
             src={message.fileBlobUrl}
             alt={meta.name}
-            className="max-w-96 max-h-96 rounded cursor-pointer"
+            className="max-w-full sm:max-w-96 max-h-96 rounded cursor-pointer"
             onClick={() => setLightboxOpen(true)}
           />
           {lightboxOpen && (

@@ -11,12 +11,12 @@ pub async fn upsert_subscription(
     p256dh: &str,
     auth: &str,
 ) -> Result<(), sqlx::Error> {
-    // endpoint が同一なら更新、なければ挿入
+    // endpoint + user_id が同一なら更新、なければ挿入
+    // 同一ブラウザ（同一endpoint）で複数アカウントが購読できるようにする
     let q = sql(
         "INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth)
          VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(endpoint) DO UPDATE SET
-            user_id = excluded.user_id,
+         ON CONFLICT(endpoint, user_id) DO UPDATE SET
             p256dh = excluded.p256dh,
             auth = excluded.auth",
     );

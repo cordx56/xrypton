@@ -26,6 +26,7 @@ import {
   deleteAccountValue,
   addAccountId,
   syncSettingsToLocalStorage,
+  renameAccount,
 } from "@/utils/accountStore";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useI18n } from "@/contexts/I18nContext";
@@ -63,6 +64,8 @@ type AuthContextType = {
     signedMessage: string;
     userId: string;
   } | null>;
+  /** 任意のテキストをPGP署名する */
+  signText: (text: string) => Promise<string | null>;
   /** 新しいアカウントをストアに登録し、アクティブにする（reloadを遅延可能） */
   activateAccount: (
     userId: string,
@@ -72,6 +75,8 @@ type AuthContextType = {
   ) => Promise<void>;
   /** WebAuthn登録を行う */
   registerWebAuthn: (userName?: string) => Promise<boolean>;
+  /** 既存のWebAuthnクレデンシャルで検証を行う */
+  verifyWebAuthn: () => Promise<boolean>;
   /** サーバ登録済みとしてマークする */
   markRegistered: () => Promise<void>;
   /** 登録済みアカウントIDの一覧 */
@@ -105,8 +110,10 @@ const AuthContext = createContext<AuthContextType>({
   ensureRecentReauth: async () => false,
   hasWebAuthnCredential: false,
   getSignedMessage: async () => null,
+  signText: async () => null,
   activateAccount: async () => {},
   registerWebAuthn: async () => false,
+  verifyWebAuthn: async () => false,
   markRegistered: async () => {},
   accountIds: [],
   isAddingAccount: false,
@@ -227,11 +234,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       await migrateToMultiAccount();
 
       // アカウント一覧とアクティブアカウントを読み込み
-      const ids = await getAccountIds();
+      let ids = await getAccountIds();
       setAccountIdsState(ids);
 
-      const activeId = await getActiveAccountId();
+      let activeId = await getActiveAccountId();
       if (activeId && ids.includes(activeId)) {
+        // ドメインなしのアカウントIDをサーバのcanonical IDに移行
+        if (!activeId.includes("@")) {
+          try {
+            const profileResp = await apiClient().user.getProfile(activeId);
+            const canonicalId = profileResp.user_id as string;
+            if (canonicalId && canonicalId !== activeId) {
+              await renameAccount(activeId, canonicalId);
+              activeId = canonicalId;
+              ids = await getAccountIds();
+              setAccountIdsState(ids);
+            }
+          } catch {
+            // 失敗時は無視して次回リトライ
+          }
+        }
+
         // アクティブアカウントのデータを読み込み
         const [pk, sp, reg, policy, cred] = await Promise.all([
           getAccountValue(activeId, "privateKeys"),
@@ -425,12 +448,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const hasCredential = !!(await getWebAuthnKey(WEBAUTHN_CRED_KEY));
       setHasWebAuthnCredential(hasCredential);
       if (!hasCredential) {
-        // ローカルに未登録でも、同期パスキーがあるかもしれないので先に検証を試みる
-        const verified = await verifyWebAuthn();
-        if (verified) return true;
-        // 新規登録が許可されていなければここで失敗
-        if (!allowRegister) return false;
-        return registerWebAuthn(userName);
+        if (allowRegister) {
+          // 新規登録が許可されている場合は直接登録に進む。
+          // verifyWebAuthn → registerWebAuthn と連続呼び出しすると、
+          // 最初の認証でtransient activationが失効しcreate()が失敗するため。
+          return registerWebAuthn(userName);
+        }
+        // ローカルに未登録でも、同期パスキーがあるかもしれないので検証を試みる
+        return verifyWebAuthn();
       }
       return verifyWebAuthn();
     },
@@ -493,8 +518,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           keys: privateKeys,
           passphrase: subPassphrase,
           payload: JSON.stringify({
-            nonce: crypto.randomUUID(),
-            timestamp: new Date().toISOString(),
+            nonce: new Date().toISOString(),
           }),
         });
       });
@@ -574,8 +598,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     const payload = JSON.stringify({
-      nonce: crypto.randomUUID(),
-      timestamp: new Date().toISOString(),
+      nonce: new Date().toISOString(),
     });
 
     return new Promise((resolve) => {
@@ -601,6 +624,36 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     workerCtx.eventWaiter,
     workerCtx.postMessage,
   ]);
+
+  const signText = useCallback(
+    async (text: string): Promise<string | null> => {
+      if (!privateKeys || !subPassphrase || !workerCtx.worker) {
+        return null;
+      }
+      return new Promise((resolve) => {
+        workerCtx.eventWaiter("sign", (result) => {
+          if (result.success) {
+            resolve(result.data.signed_message);
+          } else {
+            resolve(null);
+          }
+        });
+        workerCtx.postMessage({
+          call: "sign",
+          keys: privateKeys,
+          passphrase: subPassphrase,
+          payload: text,
+        });
+      });
+    },
+    [
+      privateKeys,
+      subPassphrase,
+      workerCtx.worker,
+      workerCtx.eventWaiter,
+      workerCtx.postMessage,
+    ],
+  );
 
   const updateKeys = useCallback(
     async (newPublicKeys: string) => {
@@ -703,8 +756,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         ensureRecentReauth,
         hasWebAuthnCredential,
         getSignedMessage: getSignedMessageInternal,
+        signText,
         activateAccount,
         registerWebAuthn,
+        verifyWebAuthn,
         markRegistered,
         accountIds,
         isAddingAccount,

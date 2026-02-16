@@ -13,6 +13,10 @@ import {
 import { useErrorToast } from "@/contexts/ErrorToastContext";
 import Avatar from "@/components/common/Avatar";
 import { setCachedProfile } from "@/utils/accountStore";
+import {
+  useSignatureVerifier,
+  isSignedMessage,
+} from "@/hooks/useSignatureVerifier";
 
 /** プロフィール編集画面 */
 const ProfileEditView = () => {
@@ -20,6 +24,7 @@ const ProfileEditView = () => {
   const router = useRouter();
   const { t } = useI18n();
   const { showError } = useErrorToast();
+  const { verifyExtract } = useSignatureVerifier();
 
   const [displayName, setDisplayName] = useState("");
   const [status, setStatus] = useState("");
@@ -28,14 +33,27 @@ const ProfileEditView = () => {
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 署名済みフィールドから平文を抽出する
+  const extractField = async (value: string): Promise<string> => {
+    if (!value || !isSignedMessage(value) || !auth.publicKeys) return value;
+    const plaintext = await verifyExtract(auth.publicKeys, value);
+    return plaintext ?? value;
+  };
+
   useEffect(() => {
-    if (!auth.userId) return;
+    if (!auth.userId || !auth.publicKeys) return;
     (async () => {
       try {
         const profile = await apiClient().user.getProfile(auth.userId!);
-        setDisplayName(profile.display_name ?? "");
-        setStatus(profile.status ?? "");
-        setBio(profile.bio ?? "");
+        // 署名済みフィールドは検証して平文に戻す
+        const [dn, st, bi] = await Promise.all([
+          extractField(profile.display_name ?? ""),
+          extractField(profile.status ?? ""),
+          extractField(profile.bio ?? ""),
+        ]);
+        setDisplayName(dn);
+        setStatus(st);
+        setBio(bi);
         const resolvedIconUrl = profile.icon_url
           ? `${getApiBaseUrl()}${profile.icon_url}`
           : undefined;
@@ -44,7 +62,7 @@ const ProfileEditView = () => {
         showError(t("error.unknown"));
       }
     })();
-  }, [auth.userId]);
+  }, [auth.userId, auth.publicKeys]);
 
   const handleSave = async () => {
     if (!auth.userId) return;
@@ -53,11 +71,18 @@ const ProfileEditView = () => {
 
     setSaving(true);
     try {
+      // 非空フィールドを個別に署名
+      const [signedDn, signedSt, signedBi] = await Promise.all([
+        displayName ? auth.signText(displayName) : Promise.resolve(""),
+        status ? auth.signText(status) : Promise.resolve(""),
+        bio ? auth.signText(bio) : Promise.resolve(""),
+      ]);
+
       const client = authApiClient(signed.signedMessage);
       await client.user.updateProfile(auth.userId, {
-        display_name: displayName,
-        status,
-        bio,
+        display_name: signedDn || displayName,
+        status: signedSt || status,
+        bio: signedBi || bio,
       });
       await setCachedProfile(auth.userId, {
         userId: auth.userId,

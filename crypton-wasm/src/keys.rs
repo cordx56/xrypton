@@ -4,7 +4,7 @@ use pgp::{
     composed::*,
     crypto,
     packet::{Subpacket, SubpacketData},
-    types::{KeyDetails, *},
+    types::{CompressionAlgorithm, KeyDetails, *},
 };
 use rand::rngs::OsRng;
 
@@ -74,6 +74,9 @@ impl PrivateKeys {
     pub fn decrypt(&self, passphrase: &str, armor: &str) -> Result<DecryptResult, Error> {
         let (msg, _) =
             Message::from_string(armor).map_err(|e| Error::DecryptionError(e.to_string()))?;
+        let msg = msg
+            .decompress()
+            .map_err(|e| Error::DecryptionError(e.to_string()))?;
         Self::decrypt_message(msg, passphrase, &self.keys)
     }
 
@@ -81,6 +84,9 @@ impl PrivateKeys {
     #[tracing::instrument]
     pub fn decrypt_from_bytes(&self, passphrase: &str, raw: &[u8]) -> Result<DecryptResult, Error> {
         let msg = Message::from_bytes(std::io::Cursor::new(raw))
+            .map_err(|e| Error::DecryptionError(e.to_string()))?;
+        let msg = msg
+            .decompress()
             .map_err(|e| Error::DecryptionError(e.to_string()))?;
         Self::decrypt_message(msg, passphrase, &self.keys)
     }
@@ -121,6 +127,7 @@ impl PrivateKeys {
         finish: impl FnOnce(MessageBuilder<'_>) -> Result<T, pgp::errors::Error>,
     ) -> Result<T, Error> {
         let mut builder = MessageBuilder::from_bytes("", data);
+        builder.compression(CompressionAlgorithm::ZLIB);
         builder.sign_with_subpackets(
             &self.signing_secret().key,
             Password::from(passphrase),
@@ -186,8 +193,9 @@ impl PrivateKeys {
             .to_vec(OsRng)
             .map_err(|e| Error::EncryptionError(e.to_string()))?;
 
-        // outer: sign（サーバが検証可能）
+        // outer: sign（サーバが検証可能）— 圧縮は最外層のみ
         let mut outer = MessageBuilder::from_bytes("", inner_bytes);
+        outer.compression(CompressionAlgorithm::ZLIB);
         outer.sign_with_subpackets(
             &self.signing_secret().key,
             Password::from(passphrase),
@@ -273,8 +281,11 @@ impl PublicKeys {
 
     #[tracing::instrument]
     pub fn verify(&self, armored: &str) -> Result<(), Error> {
-        let (mut msg, _) =
+        let (msg, _) =
             Message::from_string(armored).map_err(|e| Error::VerificationError(e.to_string()))?;
+        let mut msg = msg
+            .decompress()
+            .map_err(|e| Error::VerificationError(e.to_string()))?;
         msg.verify_read(self.signing_public())
             .map(|_| ())
             .map_err(|e| Error::VerificationError(e.to_string()))

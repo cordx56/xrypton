@@ -37,13 +37,50 @@ struct PostKeysBody {
 }
 
 /// ユーザ登録（認証不要）
+///
+/// カスタムドメイン対応: `user@custom-domain` 形式のIDが渡された場合、
+/// DNS TXTレコード（`_crypton.custom-domain`）を検証し、解決先が自サーバであれば
+/// ローカルユーザとして登録する。
 async fn post_keys(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<PostKeysBody>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let user_id = UserId::resolve_local(&id, &state.config.server_hostname)
-        .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
+    let user_id = if let Some((local_part, domain)) = id.split_once('@') {
+        // DNS解決を試み、自サーバへの解決を確認する。
+        // DNS Mapped → 元ドメインを保持して保存（カスタムドメイン対応）。
+        // DNS Original → server_hostname を付与して保存。
+        match state.dns_resolver.resolve(domain, local_part).await {
+            crate::federation::dns::ResolvedDomain::Mapped {
+                local_part: resolved_local,
+                domain: resolved_domain,
+            } => {
+                if resolved_domain == state.config.server_hostname {
+                    // 元のドメインを保持: alice@custom.com → alice@custom.com
+                    UserId::new_local(&resolved_local, domain)
+                        .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?
+                } else {
+                    return Err(AppError::BadRequest(
+                        "domain does not resolve to this server".into(),
+                    ));
+                }
+            }
+            // DNSマッピングなし
+            crate::federation::dns::ResolvedDomain::Original => {
+                if domain != state.config.server_hostname {
+                    // カスタムドメインを明示指定しているのにDNSマッピングがない → 拒否
+                    return Err(AppError::BadRequest(
+                        "DNS mapping not found for this domain".into(),
+                    ));
+                }
+                UserId::new_local(local_part, &state.config.server_hostname)
+                    .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?
+            }
+        }
+    } else {
+        UserId::new_local(&id, &state.config.server_hostname)
+            .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?
+    };
 
     // signing key ID を抽出して検証
     let public_keys = crypton_common::keys::PublicKeys::try_from(body.signing_public_key.as_str())
@@ -51,6 +88,17 @@ async fn post_keys(
     let signing_key_id = public_keys
         .get_signing_sub_key_id()
         .map_err(|e| AppError::BadRequest(format!("failed to get signing key id: {e}")))?;
+
+    // PGP公開鍵のユーザIDが登録IDと一致するか検証（ドメインだけでなく名前も確認）
+    let key_address = public_keys
+        .get_primary_user_address()
+        .map_err(|e| AppError::BadRequest(format!("invalid signing key user ID: {e}")))?;
+    if key_address != user_id.as_str() {
+        return Err(AppError::BadRequest(format!(
+            "signing key user ID ({key_address}) does not match registration ID ({})",
+            user_id.as_str()
+        )));
+    }
 
     let existing = db::users::get_user(&state.pool, &user_id).await?;
     if existing.is_some() {
@@ -108,11 +156,9 @@ async fn update_keys(
 /// ローカルユーザの公開鍵をJSON形式で返すヘルパー
 async fn fetch_local_user_keys(
     state: &AppState,
-    id: &str,
+    user_id: &UserId,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let user_id = UserId::validate_local(id)
-        .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
-    let user = db::users::get_user(&state.pool, &user_id)
+    let user = db::users::get_user(&state.pool, user_id)
         .await?
         .ok_or_else(|| AppError::NotFound("user not found".into()))?;
     Ok(Json(serde_json::json!({
@@ -138,36 +184,69 @@ async fn get_keys(
         .and_then(|v| v.to_str().ok())
         .ok_or_else(|| AppError::Unauthorized("missing authorization header".into()))?;
 
-    let result = crate::auth::authenticate(&state.pool, &state.config, auth_header_raw).await?;
+    let result = crate::auth::authenticate(
+        &state.pool,
+        &state.config,
+        &state.dns_resolver,
+        auth_header_raw,
+    )
+    .await?;
     let auth = result.user;
 
     // nonce再利用の場合、連合3ホップ目のコールバックパターンのみ許可:
-    // リクエストIDに@がなく、認証ユーザ自身の鍵を要求している場合。
+    // パスIDを正規化して認証ユーザ自身の鍵を要求している場合。
     // 自身の鍵取得なので新たな情報漏洩はなく、安全。
     if !result.nonce_is_new {
-        if !id.contains('@') && id == auth.user_id.local_part() {
-            return fetch_local_user_keys(&state, &id).await;
+        let normalized = UserId::resolve(&id, &state.config.server_hostname)
+            .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
+        if normalized == auth.user_id {
+            return fetch_local_user_keys(&state, &normalized).await;
         }
         return Err(AppError::Unauthorized("nonce already used".into()));
     }
 
     // CASE A: リクエストIDに@あり
     if let Some((local_part, domain)) = id.split_once('@') {
-        if domain == state.config.server_hostname {
-            // 自サーバのユーザ → ローカル検索
-            return fetch_local_user_keys(&state, local_part).await;
+        // DNS TXTレコードによるドメイン解決
+        let (resolved_local, resolved_domain) =
+            match state.dns_resolver.resolve(domain, local_part).await {
+                crate::federation::dns::ResolvedDomain::Mapped {
+                    local_part: rl,
+                    domain: rd,
+                } => {
+                    tracing::debug!("DNS resolved {local_part}@{domain} -> {rl}@{rd}");
+                    (rl, rd)
+                }
+                crate::federation::dns::ResolvedDomain::Original => {
+                    (local_part.to_string(), domain.to_string())
+                }
+            };
+
+        if resolved_domain == state.config.server_hostname {
+            // DNS解決後のドメインが自サーバ → 元ドメインを保持してローカル検索
+            let user_id = UserId::new_local(&resolved_local, domain)
+                .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
+            return fetch_local_user_keys(&state, &user_id).await;
         }
 
-        // 外部サーバのユーザ → 連合リクエスト
+        // DNS解決がOriginalでも、リクエストIDでDBに存在すればローカルとして返す
+        // （DNS一時障害時のフォールバック）
+        let raw_user_id = UserId::validate_full(&id)
+            .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
+        if let Ok(keys) = fetch_local_user_keys(&state, &raw_user_id).await {
+            return Ok(keys);
+        }
+
+        // 外部サーバのユーザ → 連合リクエスト（DNS解決後のドメインで取得）
         let remote_keys = crate::federation::client::fetch_user_keys(
-            domain,
-            local_part,
+            &resolved_domain,
+            &resolved_local,
             &auth.raw_auth_header,
             state.config.federation_allow_http,
         )
         .await?;
 
-        // キャッシュとしてローカルに保存
+        // キャッシュとしてローカルに保存（元のIDを維持）
         let full_id = format!("{local_part}@{domain}");
         let public_keys =
             crypton_common::keys::PublicKeys::try_from(remote_keys.signing_public_key.as_str())
@@ -192,8 +271,10 @@ async fn get_keys(
         })));
     }
 
-    // CASE B: リクエストIDに@なし → ローカルユーザの鍵を返す
-    fetch_local_user_keys(&state, &id).await
+    // CASE B: リクエストIDに@なし → server_hostname付きでローカル検索
+    let user_id = UserId::new_local(&id, &state.config.server_hostname)
+        .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
+    fetch_local_user_keys(&state, &user_id).await
 }
 
 async fn delete_user(
@@ -217,8 +298,40 @@ async fn get_profile(
     let user_id = UserId::resolve(&id, &state.config.server_hostname)
         .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
 
-    // 外部ユーザの場合、ホームサーバにプロキシ
-    if let Some(domain) = user_id.domain() {
+    // まずDBに存在するか確認（ドメイン付きIDで検索）
+    let profile = db::users::get_profile(&state.pool, &user_id).await?;
+
+    if let Some(profile) = profile {
+        // ローカルユーザ
+        let icon_url = profile
+            .icon_key
+            .as_ref()
+            .map(|_| format!("/v1/user/{}/icon", user_id.as_str()));
+
+        return Ok(Json(serde_json::json!({
+            "user_id": profile.user_id,
+            "display_name": profile.display_name,
+            "status": profile.status,
+            "bio": profile.bio,
+            "icon_url": icon_url,
+        })));
+    }
+
+    // usersテーブルに存在すればローカルユーザ（プロフィール未設定）
+    if db::users::get_user(&state.pool, &user_id).await?.is_some() {
+        return Ok(Json(serde_json::json!({
+            "user_id": user_id.as_str(),
+            "display_name": "",
+            "status": "",
+            "bio": "",
+            "icon_url": null,
+        })));
+    }
+
+    // DBにない場合、ドメインが自サーバ以外ならリモートプロキシ
+    if let Some(domain) = user_id.domain()
+        && domain != state.config.server_hostname
+    {
         let base = crate::federation::client::base_url(domain, state.config.federation_allow_http);
         let url = format!("{base}/v1/user/{}/profile", user_id.local_part());
         let resp = reqwest::Client::new()
@@ -233,23 +346,7 @@ async fn get_profile(
         return Ok(Json(body));
     }
 
-    let profile = db::users::get_profile(&state.pool, &user_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("profile not found".into()))?;
-
-    // アイコンURLの生成（S3キーがある場合）
-    let icon_url = profile
-        .icon_key
-        .as_ref()
-        .map(|_| format!("/v1/user/{}/icon", user_id.as_str()));
-
-    Ok(Json(serde_json::json!({
-        "user_id": profile.user_id,
-        "display_name": profile.display_name,
-        "status": profile.status,
-        "bio": profile.bio,
-        "icon_url": icon_url,
-    })))
+    Err(AppError::NotFound("profile not found".into()))
 }
 
 #[derive(Deserialize)]
@@ -339,24 +436,54 @@ async fn get_icon(
 ) -> Result<Response, AppError> {
     let user_id = UserId::resolve(&id, &state.config.server_hostname)
         .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
-    let profile = db::users::get_profile(&state.pool, &user_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("profile not found".into()))?;
 
-    let s3_key = profile
-        .icon_key
-        .ok_or_else(|| AppError::NotFound("no icon set".into()))?;
+    // まずDBに存在するか確認
+    let profile = db::users::get_profile(&state.pool, &user_id).await?;
 
-    let data = state
-        .storage
-        .get_object(&s3_key)
-        .await
-        .map_err(|e| AppError::Internal(format!("storage error: {e}")))?;
+    if let Some(profile) = profile {
+        let s3_key = profile
+            .icon_key
+            .ok_or_else(|| AppError::NotFound("no icon set".into()))?;
 
-    // Content-Type の推定（S3キーの拡張子が無いため image/png をデフォルトに）
-    Ok(Response::builder()
-        .header(header::CONTENT_TYPE, "image/png")
-        .header(header::CACHE_CONTROL, "public, max-age=3600")
-        .body(Body::from(data))
-        .unwrap())
+        let data = state
+            .storage
+            .get_object(&s3_key)
+            .await
+            .map_err(|e| AppError::Internal(format!("storage error: {e}")))?;
+
+        return Ok(Response::builder()
+            .header(header::CONTENT_TYPE, "image/png")
+            .header(header::CACHE_CONTROL, "public, max-age=3600")
+            .body(Body::from(data))
+            .unwrap());
+    }
+
+    // usersテーブルに存在すればローカルユーザ（アイコン未設定）
+    if db::users::get_user(&state.pool, &user_id).await?.is_some() {
+        return Err(AppError::NotFound("no icon set".into()));
+    }
+
+    // DBにない場合、ドメインが自サーバ以外ならリモートプロキシ
+    if let Some(domain) = user_id.domain()
+        && domain != state.config.server_hostname
+    {
+        let base = crate::federation::client::base_url(domain, state.config.federation_allow_http);
+        let url = format!("{base}/v1/user/{}/icon", user_id.local_part());
+        let resp = reqwest::Client::new()
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| AppError::BadGateway(format!("proxy request failed: {e}")))?;
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| AppError::BadGateway(format!("proxy response failed: {e}")))?;
+        return Ok(Response::builder()
+            .header(header::CONTENT_TYPE, "image/png")
+            .header(header::CACHE_CONTROL, "public, max-age=3600")
+            .body(Body::from(bytes))
+            .unwrap());
+    }
+
+    Err(AppError::NotFound("icon not found".into()))
 }

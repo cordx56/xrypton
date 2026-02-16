@@ -8,12 +8,14 @@ use crate::config::AppConfig;
 use crate::db;
 use crate::db::Db;
 use crate::error::AppError;
+use crate::federation::dns::DnsTxtResolver;
 use crate::types::UserId;
 
 /// Authenticated user extracted from the Authorization header.
 ///
 /// The header must contain a base64-encoded PGP-signed message whose plaintext is
-/// `{"nonce":"<uuid>","timestamp":"<iso8601>"}`.
+/// `{"nonce":"<iso8601>"}`.
+/// サーバーはnonceのタイムスタンプが現在時刻から前後1時間以内であることを検証する。
 /// The server extracts the signing key ID from the PGP message, looks up the user,
 /// verifies the signature against the user's registered signing key,
 /// then checks the nonce has not been used before.
@@ -38,6 +40,7 @@ pub struct AuthResult {
 pub(crate) async fn authenticate(
     pool: &Db,
     config: &AppConfig,
+    dns_resolver: &DnsTxtResolver,
     auth_header_raw: &str,
 ) -> Result<AuthResult, AppError> {
     let auth_decoded = STANDARD
@@ -61,6 +64,7 @@ pub(crate) async fn authenticate(
             Ok(payload_bytes) => {
                 let payload: AuthPayload = serde_json::from_slice(&payload_bytes)
                     .map_err(|e| AppError::Unauthorized(format!("invalid auth payload: {e}")))?;
+                validate_nonce_timestamp(&payload.nonce)?;
 
                 let is_new =
                     db::nonces::try_use_nonce(pool, &payload.nonce, user_id.as_str()).await?;
@@ -85,6 +89,7 @@ pub(crate) async fn authenticate(
     let auth = crate::federation::verify::verify_or_fetch_external_user(
         pool,
         config,
+        dns_resolver,
         auth_header_raw,
         &auth_header,
         &signing_key_id,
@@ -110,7 +115,13 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
             .and_then(|v| v.to_str().ok())
             .ok_or_else(|| AppError::Unauthorized("missing authorization header".into()))?;
 
-        let result = authenticate(&state.pool, &state.config, auth_header_raw).await?;
+        let result = authenticate(
+            &state.pool,
+            &state.config,
+            &state.dns_resolver,
+            auth_header_raw,
+        )
+        .await?;
         if !result.nonce_is_new {
             return Err(AppError::Unauthorized("nonce already used".into()));
         }
@@ -119,8 +130,20 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
 }
 
 #[derive(serde::Deserialize)]
-struct AuthPayload {
-    nonce: String,
-    #[allow(dead_code)]
-    timestamp: String,
+pub(crate) struct AuthPayload {
+    pub(crate) nonce: String,
+}
+
+/// nonceのISO 8601タイムスタンプが現在時刻から前後1時間以内か検証する。
+pub(crate) fn validate_nonce_timestamp(nonce: &str) -> Result<(), AppError> {
+    let client_time: chrono::DateTime<chrono::Utc> = nonce
+        .parse()
+        .map_err(|e| AppError::Unauthorized(format!("invalid nonce timestamp: {e}")))?;
+    let diff = (chrono::Utc::now() - client_time).num_seconds().abs();
+    if diff > 3600 {
+        return Err(AppError::Unauthorized(
+            "nonce timestamp out of range".into(),
+        ));
+    }
+    Ok(())
 }

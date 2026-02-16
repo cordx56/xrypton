@@ -1,16 +1,10 @@
-use crate::auth::AuthenticatedUser;
+use crate::auth::{AuthPayload, AuthenticatedUser, validate_nonce_timestamp};
 use crate::config::AppConfig;
 use crate::db;
 use crate::db::Db;
 use crate::error::AppError;
+use crate::federation::dns::{DnsTxtResolver, ResolvedDomain};
 use crate::types::UserId;
-
-#[derive(serde::Deserialize)]
-struct AuthPayload {
-    nonce: String,
-    #[allow(dead_code)]
-    timestamp: String,
-}
 
 /// 外部ユーザの署名を検証し、AuthenticatedUserを返す。
 ///
@@ -23,6 +17,7 @@ struct AuthPayload {
 pub async fn verify_or_fetch_external_user(
     pool: &Db,
     config: &AppConfig,
+    dns_resolver: &DnsTxtResolver,
     auth_header_raw: &str,
     auth_header_decoded: &str,
     signing_key_id: &str,
@@ -37,6 +32,7 @@ pub async fn verify_or_fetch_external_user(
         if let Ok(payload_bytes) = public_keys.verify_and_extract(auth_header_decoded) {
             let payload: AuthPayload = serde_json::from_slice(&payload_bytes)
                 .map_err(|e| AppError::Unauthorized(format!("invalid auth payload: {e}")))?;
+            validate_nonce_timestamp(&payload.nonce)?;
 
             let user_id = UserId(user.id.clone());
             let is_new = db::nonces::try_use_nonce(pool, &payload.nonce, user_id.as_str()).await?;
@@ -60,28 +56,76 @@ pub async fn verify_or_fetch_external_user(
     tracing::debug!("extracted SignersUserID: {:?}", signer_user_id);
 
     // ドメイン部分を解析
-    let (local_part, domain) = signer_user_id
+    let (orig_local, orig_domain) = signer_user_id
         .split_once('@')
         .ok_or_else(|| AppError::Unauthorized("signer user ID has no domain".into()))?;
 
-    // 自サーバのドメインの場合は拒否（ローカルユーザのはず）
-    if domain == config.server_hostname {
-        return Err(AppError::Unauthorized(
-            "external user claims local domain".into(),
-        ));
+    // DNS TXTレコードによるドメイン解決
+    let (local_part, domain) = match dns_resolver.resolve(orig_domain, orig_local).await {
+        ResolvedDomain::Mapped {
+            local_part: resolved_local,
+            domain: resolved_domain,
+        } => {
+            tracing::debug!(
+                "DNS resolved {orig_local}@{orig_domain} -> {resolved_local}@{resolved_domain}"
+            );
+            (resolved_local, resolved_domain)
+        }
+        ResolvedDomain::Original => (orig_local.to_string(), orig_domain.to_string()),
+    };
+
+    // DNS解決後のドメイン・名前が一致するか検証
+    if local_part != orig_local {
+        return Err(AppError::Unauthorized(format!(
+            "DNS resolved user ID mismatch: expected {orig_local}, got {local_part}"
+        )));
     }
 
-    // 4. リモートサーバから公開鍵を取得
+    // DNS解決後のドメインが自サーバの場合、ローカルユーザとして検証を試行
+    // 元のドメインを保持してDB検索（カスタムドメインユーザは cord@x56.jp 形式で保存されている）
+    if domain == config.server_hostname {
+        let user_id = UserId::new_local(&local_part, orig_domain)
+            .map_err(|e| AppError::Unauthorized(format!("invalid local user ID: {e}")))?;
+        let user = db::users::get_user(pool, &user_id).await?.ok_or_else(|| {
+            AppError::Unauthorized("external user claims local domain but not found".into())
+        })?;
+
+        let public_keys =
+            crypton_common::keys::PublicKeys::try_from(user.signing_public_key.as_str())
+                .map_err(|e| AppError::Unauthorized(format!("invalid signing key: {e}")))?;
+
+        let payload_bytes = public_keys
+            .verify_and_extract(auth_header_decoded)
+            .map_err(|e| AppError::Unauthorized(format!("signature verification failed: {e}")))?;
+
+        let payload: AuthPayload = serde_json::from_slice(&payload_bytes)
+            .map_err(|e| AppError::Unauthorized(format!("invalid auth payload: {e}")))?;
+        validate_nonce_timestamp(&payload.nonce)?;
+
+        let is_new = db::nonces::try_use_nonce(pool, &payload.nonce, user_id.as_str()).await?;
+        if !is_new {
+            return Err(AppError::Unauthorized("nonce already used".into()));
+        }
+
+        return Ok(AuthenticatedUser {
+            user_id,
+            signing_key_id: signing_key_id.to_string(),
+            signing_public_key: user.signing_public_key,
+            raw_auth_header: auth_header_raw.to_string(),
+        });
+    }
+
+    // 4. リモートサーバから公開鍵を取得（DNS解決後のドメインを使用）
     let remote_keys = super::client::fetch_user_keys(
-        domain,
-        local_part,
+        &domain,
+        &local_part,
         auth_header_raw,
         config.federation_allow_http,
     )
     .await?;
 
-    // 5. ローカルDBにupsert
-    let full_id = format!("{local_part}@{domain}");
+    // 5. ローカルDBにupsert（元のIDを保持）
+    let full_id = format!("{orig_local}@{orig_domain}");
     let public_keys =
         crypton_common::keys::PublicKeys::try_from(remote_keys.signing_public_key.as_str())
             .map_err(|e| AppError::Unauthorized(format!("invalid remote signing key: {e}")))?;
@@ -105,6 +149,7 @@ pub async fn verify_or_fetch_external_user(
 
     let payload: AuthPayload = serde_json::from_slice(&payload_bytes)
         .map_err(|e| AppError::Unauthorized(format!("invalid auth payload: {e}")))?;
+    validate_nonce_timestamp(&payload.nonce)?;
 
     let user_id = UserId(full_id);
     let is_new = db::nonces::try_use_nonce(pool, &payload.nonce, user_id.as_str()).await?;

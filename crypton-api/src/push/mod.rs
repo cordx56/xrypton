@@ -6,6 +6,26 @@ use web_push::{
 use crate::config::AppConfig;
 use crate::db;
 use crate::types::{ChatId, MessageId, ThreadId, UserId};
+use crypton_common::keys::PublicKeys;
+
+const PGP_MESSAGE_PREFIX: &str = "-----BEGIN PGP MESSAGE-----";
+
+/// 送信者の表示名を取得する。署名済み(PGP armored)の場合は検証して平文を抽出する。
+async fn resolve_display_name(pool: &db::Db, user_id: &UserId) -> Option<String> {
+    let profile = db::users::get_profile(pool, user_id).await.ok()??;
+    let name = profile.display_name;
+    if name.is_empty() {
+        return None;
+    }
+    if !name.starts_with(PGP_MESSAGE_PREFIX) {
+        return Some(name);
+    }
+    // 署名済み display_name → 公開鍵で検証して平文を抽出
+    let user = db::users::get_user(pool, user_id).await.ok()??;
+    let pub_keys = PublicKeys::try_from(user.signing_public_key.as_str()).ok()?;
+    let plaintext_bytes = pub_keys.verify_and_extract(&name).ok()?;
+    String::from_utf8(plaintext_bytes).ok()
+}
 
 /// 1ユーザの全サブスクリプションにPush通知を送信する内部ヘルパー。
 async fn send_push_to_user(
@@ -98,37 +118,12 @@ pub async fn send_to_members(
         format!("{}@{}", sender_id.0, config.server_hostname)
     };
 
-    // 送信者の表示名を取得（空文字や取得失敗時はuser_idをフォールバックに使う）
-    let sender_name = db::users::get_profile(pool, sender_id)
+    // 送信者の表示名を取得（署名済みの場合は平文を抽出する）
+    let sender_name = resolve_display_name(pool, sender_id)
         .await
-        .ok()
-        .flatten()
-        .map(|p| p.display_name)
-        .filter(|name| !name.is_empty())
         .unwrap_or_else(|| qualified_sender_id.clone());
 
-    let payload = serde_json::json!({
-        "type": "message",
-        "sender_id": qualified_sender_id,
-        "sender_name": sender_name,
-        "chat_id": chat_id.0,
-        "thread_id": thread_id.0,
-        "message_id": message_id.0,
-    })
-    .to_string();
-
-    let self_payload = serde_json::json!({
-        "type": "message",
-        "sender_id": qualified_sender_id,
-        "sender_name": sender_name,
-        "chat_id": chat_id.0,
-        "thread_id": thread_id.0,
-        "message_id": message_id.0,
-        "is_self": true,
-    })
-    .to_string();
-
-    // 両方を完全修飾IDに正規化して比較（ドメイン違いの同名ユーザを区別する）
+    // 各メンバーにrecipient_id付きのペイロードを送信
     for member in &members {
         let qualified_member = if member.user_id.contains('@') {
             member.user_id.clone()
@@ -136,9 +131,26 @@ pub async fn send_to_members(
             format!("{}@{}", member.user_id, config.server_hostname)
         };
         let is_sender = qualified_member == qualified_sender_id;
+        let member_payload = serde_json::json!({
+            "type": "message",
+            "sender_id": qualified_sender_id,
+            "sender_name": sender_name,
+            "chat_id": chat_id.0,
+            "thread_id": thread_id.0,
+            "message_id": message_id.0,
+            "is_self": is_sender,
+            "recipient_id": qualified_member,
+        })
+        .to_string();
         let member_user_id = UserId(member.user_id.clone());
-        let p = if is_sender { &self_payload } else { &payload };
-        send_push_to_user(pool, vapid_private, &client, &member_user_id, p).await;
+        send_push_to_user(
+            pool,
+            vapid_private,
+            &client,
+            &member_user_id,
+            &member_payload,
+        )
+        .await;
     }
 
     Ok(())
@@ -157,10 +169,26 @@ pub async fn send_event_to_users(
     };
 
     let client = IsahcWebPushClient::new().map_err(|e| e.to_string())?;
-    let payload_str = payload.to_string();
 
     for user_id in user_ids {
-        send_push_to_user(pool, vapid_private, &client, user_id, &payload_str).await;
+        // 各ユーザにrecipient_idを付与したペイロードを送信
+        let qualified = if user_id.0.contains('@') {
+            user_id.0.clone()
+        } else {
+            format!("{}@{}", user_id.0, config.server_hostname)
+        };
+        let mut user_payload = payload.clone();
+        if let Some(obj) = user_payload.as_object_mut() {
+            obj.insert("recipient_id".into(), serde_json::Value::String(qualified));
+        }
+        send_push_to_user(
+            pool,
+            vapid_private,
+            &client,
+            user_id,
+            &user_payload.to_string(),
+        )
+        .await;
     }
 
     Ok(())

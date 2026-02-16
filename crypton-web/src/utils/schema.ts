@@ -15,6 +15,7 @@ export const WorkerResultCallList = {
   sign: "sign",
   validate_passphrases: "validate_passphrases",
   get_private_key_user_ids: "get_private_key_user_ids",
+  verify_extract_string: "verify_extract_string",
 } as const;
 export type WorkerResultCall =
   (typeof WorkerResultCallList)[keyof typeof WorkerResultCallList];
@@ -42,32 +43,53 @@ export const Notification = z.discriminatedUnion("type", [
     thread_id: z.string().optional(),
     message_id: z.string().optional(),
     is_self: z.boolean().optional(),
+    recipient_id: z.string().optional(),
   }),
   z.object({
     type: z.literal("added_to_group"),
     chat_id: z.string(),
     name: z.string(),
+    recipient_id: z.string().optional(),
   }),
   z.object({
     type: z.literal("new_thread"),
     chat_id: z.string(),
     name: z.string(),
+    recipient_id: z.string().optional(),
   }),
 ]);
 
 // --- User ID validation ---
 
-/** ユーザID: 英数字とアンダースコアのみ、4文字以上、@禁止、予約語禁止 */
+/** ローカルパートのバリデーション用正規表現。
+ *  許可文字: 英数字, `_`, `.`, `+`, `-`
+ *  先頭・末尾のドットは禁止（正規表現で担保）。連続ドットは refine で検査。 */
+const LOCAL_PART_RE = /^[a-zA-Z0-9_+\-]([a-zA-Z0-9._+\-]*[a-zA-Z0-9_+\-])?$/;
+
+/** ユーザID: メールローカルパートとして有効な文字、@禁止、予約語禁止 */
 export const UserId = z
   .string()
-  .min(4)
-  .regex(/^[a-zA-Z0-9_]+$/)
+  .regex(LOCAL_PART_RE)
+  .refine((s) => !s.includes(".."))
   .refine((s) => !["root", "admin"].includes(s.toLowerCase()), {
     message: "reserved",
   });
 
+/** ユーザIDの表示用変換。ローカルドメインと一致する @domain 部分を省略する。 */
+export function displayUserId(userId: string): string {
+  const host = typeof window !== "undefined" ? window.location.host : "";
+  return userId.endsWith(`@${host}`)
+    ? userId.slice(0, -host.length - 1)
+    : userId;
+}
+
 /** 連絡先検索: ユーザID または ユーザID@ドメイン */
-export const ContactQuery = z.string().regex(/^[a-zA-Z0-9_]+(@.+)?$/);
+export const ContactQuery = z
+  .string()
+  .regex(
+    /^[a-zA-Z0-9_+\-]([a-zA-Z0-9._+\-]*[a-zA-Z0-9_+\-])?(@[a-zA-Z0-9._\-]+)?$/,
+  )
+  .refine((s) => !s.split("@")[0].includes(".."));
 
 // --- API request/response schemas ---
 
@@ -257,6 +279,11 @@ export const WorkerCallMessage = z.union([
     call: z.literal(WorkerResultCallList["get_private_key_user_ids"]),
     privateKeys: z.string(),
   }),
+  z.object({
+    call: z.literal(WorkerResultCallList["verify_extract_string"]),
+    publicKey: z.string(),
+    armored: z.string(),
+  }),
 ]);
 
 export const WorkerResult = <T>(schema: T) =>
@@ -330,5 +357,9 @@ export const WorkerResultMessage = z.union([
   z.object({
     call: z.literal(WorkerResultCallList["get_private_key_user_ids"]),
     result: WorkerResult(z.object({ user_ids: z.string().array() })),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["verify_extract_string"]),
+    result: WorkerResult(z.object({ plaintext: z.string() })),
   }),
 ]);

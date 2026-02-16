@@ -11,6 +11,7 @@ pub mod types;
 use std::sync::Arc;
 
 use config::AppConfig;
+use federation::dns::DnsTxtResolver;
 use storage::S3Storage;
 
 /// Application state shared across all handlers.
@@ -19,4 +20,5 @@ pub struct AppState {
     pub pool: db::Db,
     pub config: AppConfig,
     pub storage: Arc<S3Storage>,
+    pub dns_resolver: DnsTxtResolver,
 }

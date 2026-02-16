@@ -67,21 +67,20 @@ async fn receive_chat_sync(
 
     let chat_id = ChatId(body.chat_id);
 
-    // member_idsからローカルユーザを抽出
-    // `user@自サーバ` → ローカル部分のみ、`@`なし → そのまま、外部ドメイン → 除外
+    // member_idsからローカルユーザを抽出（ドメイン付きIDを保持）
+    // `user@自サーバ` → `user@自サーバ`、外部ドメイン → 除外
     let hostname = &state.config.server_hostname;
     let local_member_ids: Vec<String> = body
         .member_ids
         .iter()
         .filter_map(|id| {
-            if let Some((local, domain)) = id.split_once('@') {
+            if let Some((_local, domain)) = id.split_once('@') {
                 if domain == hostname {
-                    Some(local.to_string())
+                    Some(id.clone())
                 } else {
                     None
                 }
             } else {
-                // @なしはホームサーバからの内部ユーザ（chat_membersにはフルIDで保存不要）
                 None
             }
         })
@@ -102,7 +101,10 @@ async fn receive_chat_sync(
     let config = state.config.clone();
     let notify_chat_id = chat_id.clone();
     let name = body.name.clone();
-    let member_ids: Vec<UserId> = local_member_ids.into_iter().map(UserId).collect();
+    let member_ids: Vec<UserId> = local_member_ids
+        .iter()
+        .filter_map(|id| UserId::validate_full(id).ok())
+        .collect();
     tokio::spawn(async move {
         let payload = serde_json::json!({
             "type": "added_to_group",

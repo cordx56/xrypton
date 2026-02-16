@@ -33,8 +33,8 @@ async fn add_contact(
     auth: AuthenticatedUser,
     Json(body): Json<AddContactBody>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    // user@domain形式も許容
-    let contact_user_id = UserId::validate_full(&body.user_id)
+    // ベアID → @server_hostname 付与、ドメイン付き → そのまま
+    let contact_user_id = UserId::resolve(&body.user_id, &state.config.server_hostname)
         .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
 
     // 自分自身の追加を拒否
@@ -44,8 +44,8 @@ async fn add_contact(
         ));
     }
 
-    // 外部ユーザ（@含む）の場合はローカル存在確認をスキップ
-    if contact_user_id.domain().is_none() {
+    // ローカルユーザの場合はDB存在確認（外部ユーザはスキップ）
+    if contact_user_id.is_local(&state.config.server_hostname) {
         db::users::get_user(&state.pool, &contact_user_id)
             .await?
             .ok_or_else(|| AppError::NotFound("user not found".into()))?;
@@ -64,7 +64,7 @@ async fn delete_contact(
     auth: AuthenticatedUser,
     Path(contact_user_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let contact_user_id = UserId::validate_full(&contact_user_id)
+    let contact_user_id = UserId::resolve(&contact_user_id, &state.config.server_hostname)
         .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
 
     let deleted =

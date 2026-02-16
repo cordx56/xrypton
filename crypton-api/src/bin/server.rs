@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crypton_api::AppState;
 use crypton_api::config::AppConfig;
 use crypton_api::db;
+use crypton_api::federation::dns::DnsTxtResolver;
 use crypton_api::routes::build_router;
 use crypton_api::storage::S3Storage;
 use tokio::time::{Duration, sleep};
@@ -28,6 +29,9 @@ async fn main() {
         .await
         .expect("failed to connect to database");
     db::migrate(&pool).await.expect("failed to run migrations");
+    db::migrate_user_ids(&pool, &config.server_hostname)
+        .await
+        .expect("failed to migrate user IDs");
 
     {
         let cleanup_pool = pool.clone();
@@ -57,11 +61,13 @@ async fn main() {
     }
 
     let storage = Arc::new(S3Storage::new(&config).await);
+    let dns_resolver = DnsTxtResolver::new(Duration::from_secs(3600));
 
     let state = AppState {
         pool,
         config: config.clone(),
         storage,
+        dns_resolver,
     };
 
     let app = build_router(state);

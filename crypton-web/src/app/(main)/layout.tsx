@@ -24,7 +24,6 @@ export default function MainLayout({
     return (
       <div className="h-dvh overflow-y-auto">
         <div className="min-h-full flex flex-col items-center justify-center p-6">
-          <p className="mb-4 text-center">{t("auth.init_message")}</p>
           <GenerateKey mode="init" />
           {auth.accountIds.length > 0 && (
             <div className="mt-8 w-full max-w-lg">
