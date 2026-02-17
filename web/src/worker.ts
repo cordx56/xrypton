@@ -5,6 +5,7 @@ import init, {
   get_signing_sub_key_id,
   get_private_key_user_ids,
   sign,
+  sign_bytes,
   sign_encrypt_sign,
   sign_encrypt_sign_bin,
   decrypt,
@@ -233,6 +234,35 @@ worker.addEventListener("message", async ({ data }) => {
             result.data?.result === "error"
               ? result.data.message
               : "sign error",
+        },
+      });
+    }
+  } else if (parsed.data.call === "sign_bytes") {
+    const payload = new TextEncoder().encode(parsed.data.payload);
+    const result = WasmReturnValue.safeParse(
+      sign_bytes(parsed.data.keys, parsed.data.passphrase, payload),
+    );
+    if (
+      result.success === true &&
+      result.data.result === "ok" &&
+      result.data.value[0].type === "base64"
+    ) {
+      post({
+        call: "sign_bytes",
+        result: {
+          success: true,
+          data: { data: result.data.value[0].data },
+        },
+      });
+    } else {
+      post({
+        call: "sign_bytes",
+        result: {
+          success: false,
+          message:
+            result.data?.result === "error"
+              ? result.data.message
+              : "sign_bytes error",
         },
       });
     }

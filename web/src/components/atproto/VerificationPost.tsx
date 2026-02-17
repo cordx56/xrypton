@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useAtproto } from "@/contexts/AtprotoContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useI18n } from "@/contexts/I18nContext";
@@ -11,22 +11,46 @@ import { buildSignatureTarget } from "@/utils/canonicalize";
 /** OAuth認証直後に公開鍵を投稿させ、ATProtoアカウントとXryptonの紐付けを証明する画面 */
 const VerificationPost = () => {
   const { agent, completeVerification } = useAtproto();
-  const { publicKeys, signText, getSignedMessage } = useAuth();
+  const {
+    signText,
+    getSignedMessage,
+    userId,
+    privateKeys,
+    subPassphrase,
+    worker,
+  } = useAuth();
   const { t } = useI18n();
   const { showError } = useErrorToast();
   const [posting, setPosting] = useState(false);
+  const [signedUserId, setSignedUserId] = useState<string | null>(null);
 
   const hostname =
     process.env.NEXT_PUBLIC_SERVER_HOSTNAME ??
     (typeof window !== "undefined" ? window.location.host : "localhost");
 
+  // userId の PGP署名をバイナリbase64で計算
+  useEffect(() => {
+    if (!privateKeys || !subPassphrase || !userId || !worker) return;
+    worker.eventWaiter("sign_bytes", (result) => {
+      if (result.success) {
+        setSignedUserId(result.data.data);
+      }
+    });
+    worker.postMessage({
+      call: "sign_bytes",
+      keys: privateKeys,
+      passphrase: subPassphrase,
+      payload: userId,
+    });
+  }, [privateKeys, subPassphrase, userId, worker]);
+
   const postText = useMemo(
-    () => `Xrypton at ${hostname} pubkey:\n\n${publicKeys ?? ""}`,
-    [hostname, publicKeys],
+    () => `Xrypton at ${hostname} verification:\n\n${signedUserId ?? ""}`,
+    [hostname, signedUserId],
   );
 
   const handlePost = async () => {
-    if (!agent || !publicKeys || posting) return;
+    if (!agent || !signedUserId || posting) return;
     setPosting(true);
     try {
       // ATProtoに投稿
@@ -87,7 +111,7 @@ const VerificationPost = () => {
 
         <button
           onClick={handlePost}
-          disabled={posting || !publicKeys}
+          disabled={posting || !signedUserId}
           className="w-full px-6 py-3 rounded-full bg-accent text-white font-medium disabled:opacity-50 transition-opacity"
         >
           {posting ? (

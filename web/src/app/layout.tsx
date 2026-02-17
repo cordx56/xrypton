@@ -38,6 +38,7 @@ export default function RootLayout({
           content="Secure messaging with end-to-end encryption"
         />
         {/* OGP */}
+        <meta property="og:site_name" content="Xrypton" />
         <meta property="og:title" content="Xrypton" />
         <meta
           property="og:description"

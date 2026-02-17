@@ -13,6 +13,7 @@ export const WorkerResultCallList = {
   verify: "verify",
   get_key_id: "get_key_id",
   sign: "sign",
+  sign_bytes: "sign_bytes",
   validate_passphrases: "validate_passphrases",
   get_private_key_user_ids: "get_private_key_user_ids",
   verify_extract_string: "verify_extract_string",
@@ -308,6 +309,12 @@ export const WorkerCallMessage = z.union([
     payload: z.string(),
   }),
   z.object({
+    call: z.literal(WorkerResultCallList["sign_bytes"]),
+    keys: z.string(),
+    passphrase: z.string(),
+    payload: z.string(),
+  }),
+  z.object({
     call: z.literal(WorkerResultCallList["validate_passphrases"]),
     privateKeys: z.string(),
     mainPassphrase: z.string(),
@@ -387,6 +394,10 @@ export const WorkerResultMessage = z.union([
   z.object({
     call: z.literal(WorkerResultCallList["sign"]),
     result: WorkerResult(z.object({ signed_message: z.string() })),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["sign_bytes"]),
+    result: WorkerResult(z.object({ data: z.string() })),
   }),
   z.object({
     call: z.literal(WorkerResultCallList["validate_passphrases"]),
