@@ -51,7 +51,7 @@ function LandingPageContent() {
       icon: faCode,
       title: t("landing.feature_oss"),
       description: t("landing.feature_oss_desc"),
-      href: "https://github.com/cordx56/crypton",
+      href: "https://github.com/cordx56/xrypton",
     },
   ];
 

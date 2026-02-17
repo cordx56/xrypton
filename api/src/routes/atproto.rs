@@ -638,7 +638,7 @@ async fn save_signature(
         .ok_or_else(|| AppError::Forbidden("DID is not linked to your account".into()))?;
 
     // PGP署名のサーバサイド検証
-    let public_keys = crypton_common::keys::PublicKeys::try_from(auth.signing_public_key.as_str())
+    let public_keys = xrypton_common::keys::PublicKeys::try_from(auth.signing_public_key.as_str())
         .map_err(|e| AppError::Internal(format!("failed to parse signing key: {e}")))?;
 
     let payload_bytes = public_keys

@@ -6,7 +6,7 @@ use web_push::{
 use crate::config::AppConfig;
 use crate::db;
 use crate::types::{ChatId, MessageId, ThreadId, UserId};
-use crypton_common::keys::PublicKeys;
+use xrypton_common::keys::PublicKeys;
 
 const PGP_MESSAGE_PREFIX: &str = "-----BEGIN PGP MESSAGE-----";
 

@@ -8,7 +8,7 @@ import { useErrorToast } from "@/contexts/ErrorToastContext";
 import { authApiClient } from "@/api/client";
 import { buildSignatureTarget } from "@/utils/canonicalize";
 
-/** OAuth認証直後に公開鍵を投稿させ、ATProtoアカウントとCryptonの紐付けを証明する画面 */
+/** OAuth認証直後に公開鍵を投稿させ、ATProtoアカウントとXryptonの紐付けを証明する画面 */
 const VerificationPost = () => {
   const { agent, completeVerification } = useAtproto();
   const { publicKeys, signText, getSignedMessage } = useAuth();
@@ -21,7 +21,7 @@ const VerificationPost = () => {
     (typeof window !== "undefined" ? window.location.host : "localhost");
 
   const postText = useMemo(
-    () => `Crypton at ${hostname} pubkey:\n${publicKeys ?? ""}`,
+    () => `Xrypton at ${hostname} pubkey:\n${publicKeys ?? ""}`,
     [hostname, publicKeys],
   );
 

@@ -54,7 +54,7 @@ export default function DocsSidebar() {
           href={`/docs/${locale}`}
           className="block text-lg font-bold text-fg mb-6 no-underline"
         >
-          Crypton Docs
+          Xrypton Docs
         </Link>
 
         <nav className="flex flex-col gap-1">

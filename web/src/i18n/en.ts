@@ -1,7 +1,7 @@
 import { TranslationKeys } from "./types";
 
 export const en: TranslationKeys = {
-  "app.name": "Crypton",
+  "app.name": "Xrypton",
   "tab.chat": "Channels",
   "tab.contacts": "Contacts",
   "tab.profile": "Profile",
@@ -170,7 +170,7 @@ export const en: TranslationKeys = {
   "atproto.sign_post": "Sign with PGP",
   "atproto.post": "Post",
   "atproto.posting": "Posting...",
-  "atproto.signature_verified": "Crypton Verified",
+  "atproto.signature_verified": "Xrypton Verified",
   "atproto.signature_mismatch": "Signature Mismatch",
   "atproto.no_signature": "No Signature",
   "atproto.signature_detail": "Signature Details",
@@ -178,14 +178,14 @@ export const en: TranslationKeys = {
   "atproto.unlink_account": "Unlink",
   "atproto.linked_accounts": "Linked Accounts",
   "atproto.privacy_notice":
-    "Posts on AT Protocol servers are public. PGP signatures stored on the Crypton server link your Crypton identity to your ATProto identity.",
+    "Posts on AT Protocol servers are public. PGP signatures stored on the Xrypton server link your Xrypton identity to your ATProto identity.",
   "atproto.signature_retry": "Retry Signature",
   "atproto.notifications": "Notifications",
   "atproto.search": "Search",
   "atproto.settings": "ATProto Settings",
   "atproto.verification_title": "Verification Post",
   "atproto.verification_desc":
-    "Post the following to verify the link between your AT Protocol account and Crypton identity.",
+    "Post the following to verify the link between your AT Protocol account and Xrypton identity.",
   "error.atproto_resolve_failed": "Failed to resolve handle.",
   "error.atproto_auth_failed": "ATProto authentication failed.",
   "error.atproto_post_failed": "Failed to create post.",

@@ -2,13 +2,13 @@ services:
   db:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: crypton
-      POSTGRES_USER: crypton
-      POSTGRES_PASSWORD: crypton
+      POSTGRES_DB: xrypton
+      POSTGRES_USER: xrypton
+      POSTGRES_PASSWORD: xrypton
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["pg_isready", "-U", "crypton", "-d", "crypton"]
+      test: ["pg_isready", "-U", "xrypton", "-d", "xrypton"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -18,7 +18,7 @@ services:
       context: .
       dockerfile: api.Dockerfile
     environment:
-      DATABASE_URL: postgres://crypton:crypton@db:5432/crypton
+      DATABASE_URL: postgres://xrypton:xrypton@db:5432/xrypton
       LISTEN_ADDR: 0.0.0.0:8080
     depends_on:
       db:

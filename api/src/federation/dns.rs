@@ -23,7 +23,7 @@ struct CacheEntry {
 
 /// DNS TXTレコードを用いたドメインリゾルバ。
 ///
-/// `_crypton.{domain}` のTXTレコードを参照し、`user=[id]@[domain]` 形式の
+/// `_xrypton.{domain}` のTXTレコードを参照し、`user=[id]@[domain]` 形式の
 /// エントリからユーザIDのマッピングを解決する。結果はTTL付きでキャッシュされる。
 #[derive(Clone)]
 pub struct DnsTxtResolver {
@@ -87,7 +87,7 @@ impl DnsTxtResolver {
     }
 }
 
-/// `_crypton.{domain}` のDNS TXTレコードをクエリする。
+/// `_xrypton.{domain}` のDNS TXTレコードをクエリする。
 async fn query_txt_records(domain: &str) -> Option<Vec<String>> {
     let resolver = TokioResolver::builder_tokio()
         .map_err(|e| {
@@ -96,7 +96,7 @@ async fn query_txt_records(domain: &str) -> Option<Vec<String>> {
         .ok()?
         .build();
 
-    let lookup_name = format!("_crypton.{domain}");
+    let lookup_name = format!("_xrypton.{domain}");
     let response = resolver
         .txt_lookup(lookup_name.as_str())
         .await

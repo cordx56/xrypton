@@ -330,7 +330,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return false;
       }
       try {
-        const name = userName ?? userId ?? "crypton-user";
+        const name = userName ?? userId ?? "xrypton-user";
         const savedHandle = await getWebAuthnKey(WEBAUTHN_USER_HANDLE_KEY);
         const userIdBytes = savedHandle
           ? fromBase64Url(savedHandle)
@@ -340,7 +340,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const credential = (await navigator.credentials.create({
           publicKey: {
             challenge,
-            rp: { name: "Crypton" },
+            rp: { name: "Xrypton" },
             user: {
               id: toArrayBuffer(userIdBytes),
               name,

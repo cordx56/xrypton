@@ -1,5 +1,5 @@
 import { z } from "zod";
-import init, { decrypt, sign } from "crypton-wasm";
+import init, { decrypt, sign } from "xrypton-wasm";
 import { Notification, WasmReturnValue } from "@/utils/schema";
 import { decodeBase64Url } from "@/utils/base64";
 import { getKey } from "@/utils/keyStore";

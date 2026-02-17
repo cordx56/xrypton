@@ -1,23 +1,23 @@
 # Getting Started
 
-This guide walks you through setting up Crypton and sending your first encrypted message.
+This guide walks you through setting up Xrypton and sending your first encrypted message.
 
 ## Set Up Your Account
 
-To use Crypton, you first need to set up an account.
+To use Xrypton, you first need to set up an account.
 Here's how to get started.
 
-### Accessing a Crypton Server
+### Accessing a Xrypton Server
 
-First, access the Crypton server you want to join.
-Once the Crypton landing page is displayed, click "Get Started" to proceed to the registration screen.
+First, access the Xrypton server you want to join.
+Once the Xrypton landing page is displayed, click "Get Started" to proceed to the registration screen.
 
 ### Key Generation
 
 On the registration screen, you will first be asked to generate your keys.
 These keys are used to verify that what you send truly comes from you, and to allow others to send you encrypted messages.
 
-- **User ID** : This identifies you across the entire Crypton network. Choose carefully. If the same name is already registered, you will not be able to register.
+- **User ID** : This identifies you across the entire Xrypton network. Choose carefully. If the same name is already registered, you will not be able to register.
 - **Main Passphrase** : Used to encrypt your main private key. You won't use this often, but it is important, so store it in a safe place.
 - **Sub Passphrase** : Used to encrypt your sub private key. This is the key you'll use day-to-day. You can have your browser remember this passphrase.
 
@@ -89,4 +89,4 @@ Once the contact is added, you can start chatting.
 ## Conclusion
 
 That covers all the basic operations.
-Now explore and use Crypton however you like!
+Now explore and use Xrypton however you like!

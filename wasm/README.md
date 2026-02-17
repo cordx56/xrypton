@@ -1,4 +1,4 @@
-# crypton-wasm
+# xrypton-wasm
 
 PGP暗号処理をブラウザで利用するためのWASM実装。Web Workerから呼び出される。
 

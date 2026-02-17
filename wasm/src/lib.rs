@@ -310,14 +310,14 @@ pub fn verify_detached_signature(
 /// 返り値: [Base64(inner_bytes), String(outer_key_id)]
 #[wasm_bindgen]
 pub fn unwrap_outer(public_key: String, outer_armored: &str) -> Result<JsValue, JsValue> {
-    let outer_key_id = crypton_common::keys::extract_issuer_key_id(outer_armored).map_err(|e| {
+    let outer_key_id = xrypton_common::keys::extract_issuer_key_id(outer_armored).map_err(|e| {
         ReturnValue::Error {
             message: e.to_string(),
         }
         .to_value()
     })?;
     let common_pk =
-        crypton_common::keys::PublicKeys::try_from(public_key.as_str()).map_err(|e| {
+        xrypton_common::keys::PublicKeys::try_from(public_key.as_str()).map_err(|e| {
             ReturnValue::Error {
                 message: e.to_string(),
             }
@@ -374,7 +374,7 @@ pub fn decrypt_bytes(
 /// 返り値: [String(key_id)]
 #[wasm_bindgen]
 pub fn extract_key_id_bytes(data: Vec<u8>) -> Result<JsValue, JsValue> {
-    let key_id = crypton_common::keys::extract_issuer_key_id_from_bytes(&data).map_err(|e| {
+    let key_id = xrypton_common::keys::extract_issuer_key_id_from_bytes(&data).map_err(|e| {
         ReturnValue::Error {
             message: e.to_string(),
         }
@@ -391,14 +391,14 @@ pub fn extract_key_id_bytes(data: Vec<u8>) -> Result<JsValue, JsValue> {
 #[wasm_bindgen]
 pub fn unwrap_outer_bytes(public_key: String, data: Vec<u8>) -> Result<JsValue, JsValue> {
     let outer_key_id =
-        crypton_common::keys::extract_issuer_key_id_from_bytes(&data).map_err(|e| {
+        xrypton_common::keys::extract_issuer_key_id_from_bytes(&data).map_err(|e| {
             ReturnValue::Error {
                 message: e.to_string(),
             }
             .to_value()
         })?;
     let common_pk =
-        crypton_common::keys::PublicKeys::try_from(public_key.as_str()).map_err(|e| {
+        xrypton_common::keys::PublicKeys::try_from(public_key.as_str()).map_err(|e| {
             ReturnValue::Error {
                 message: e.to_string(),
             }
@@ -428,7 +428,7 @@ pub fn unwrap_outer_bytes(public_key: String, data: Vec<u8>) -> Result<JsValue, 
 #[wasm_bindgen]
 pub fn verify_extract_string(public_key: String, armored: &str) -> Result<JsValue, JsValue> {
     let common_pk =
-        crypton_common::keys::PublicKeys::try_from(public_key.as_str()).map_err(|e| {
+        xrypton_common::keys::PublicKeys::try_from(public_key.as_str()).map_err(|e| {
             ReturnValue::Error {
                 message: e.to_string(),
             }
@@ -456,7 +456,7 @@ pub fn verify_extract_string(public_key: String, armored: &str) -> Result<JsValu
 /// 返り値: [String(key_id)]
 #[wasm_bindgen]
 pub fn extract_key_id(armored: &str) -> Result<JsValue, JsValue> {
-    let key_id = crypton_common::keys::extract_issuer_key_id(armored).map_err(|e| {
+    let key_id = xrypton_common::keys::extract_issuer_key_id(armored).map_err(|e| {
         ReturnValue::Error {
             message: e.to_string(),
         }

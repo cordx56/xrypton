@@ -1,4 +1,4 @@
-// Crypton server-side account linking information
+// Xrypton server-side account linking information
 export type AtprotoAccount = {
   user_id: string;
   atproto_did: string;
@@ -8,7 +8,7 @@ export type AtprotoAccount = {
   updated_at: string;
 };
 
-// Crypton server-side signature record
+// Xrypton server-side signature record
 export type AtprotoSignature = {
   id: string;
   user_id: string;

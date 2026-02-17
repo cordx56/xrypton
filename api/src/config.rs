@@ -21,9 +21,9 @@ impl AppConfig {
     pub fn from_env() -> Self {
         Self {
             database_url: env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "sqlite:crypton.db?mode=rwc".into()),
+                .unwrap_or_else(|_| "sqlite:xrypton.db?mode=rwc".into()),
             listen_addr: env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into()),
-            s3_bucket: env::var("S3_BUCKET").unwrap_or_else(|_| "crypton".into()),
+            s3_bucket: env::var("S3_BUCKET").unwrap_or_else(|_| "xrypton".into()),
             s3_endpoint: env::var("S3_ENDPOINT").ok(),
             s3_region: env::var("S3_REGION").unwrap_or_else(|_| "auto".into()),
             vapid_public_key: env::var("VAPID_PUBLIC_KEY").ok(),

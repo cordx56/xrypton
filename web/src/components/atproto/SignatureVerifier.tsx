@@ -48,7 +48,7 @@ const SignatureVerifier = ({ signature, level, onClose }: Props) => {
       {/* Signer info */}
       <div className="space-y-1 text-sm">
         <p>
-          <span className="text-muted">Crypton User: </span>
+          <span className="text-muted">Xrypton User: </span>
           {signature.user_id}
         </p>
         <p>

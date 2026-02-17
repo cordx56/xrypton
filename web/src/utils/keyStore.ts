@@ -3,7 +3,7 @@
  * Service Worker からもアクセス可能（localStorage は SW では使えない）。
  */
 
-const DB_NAME = "crypton-keys";
+const DB_NAME = "xrypton-keys";
 const STORE_NAME = "keys";
 const DB_VERSION = 1;
 

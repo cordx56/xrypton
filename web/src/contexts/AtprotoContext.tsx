@@ -20,7 +20,7 @@ import type { AtprotoAccount } from "@/types/atproto";
 
 /** BrowserOAuthClientが要求するHandleResolverインターフェースの自前実装。
  *  ライブラリのデフォルトはXRPC (`/xrpc/com.atproto.identity.resolveHandle`) を
- *  叩くが、Cryptonバックエンドは REST (`/v1/atproto/handle/{handle}`) なので
+ *  叩くが、Xryptonバックエンドは REST (`/v1/atproto/handle/{handle}`) なので
  *  カスタムリゾルバで橋渡しする。 */
 function createHandleResolver(apiBase: string): HandleResolver {
   const base = apiBase.startsWith("/")

@@ -103,7 +103,7 @@ const ComposePost = ({ onClose }: Props) => {
           const signature = await signText(target);
           if (!signature) throw new Error("Signing failed");
 
-          // Cryptonサーバに署名保存
+          // Xryptonサーバに署名保存
           const signed = await getSignedMessage();
           if (!signed) throw new Error("Auth failed");
 

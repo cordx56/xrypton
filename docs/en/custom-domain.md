@@ -1,13 +1,13 @@
 # Setting Up a Custom Domain
 
-In addition to setting up a distributed server, Crypton offers a way to use your own domain.
+In addition to setting up a distributed server, Xrypton offers a way to use your own domain.
 
 ## Add a TXT Record to DNS
 
 To use a custom domain on a server, you first need to add a value to the TXT record of your domain.
 
 First, decide on the server you want to join, `[host-domain]`, and the User ID you want to use, `[ID]@[your-domain]`.
-Then, add the following TXT record to `_crypton.[your-domain]` for your domain `[your-domain]`:
+Then, add the following TXT record to `_xrypton.[your-domain]` for your domain `[your-domain]`:
 
 `"user=[ID]@[host-domain]"`
 

@@ -11,7 +11,7 @@ export default function DocsLayout({ children }: { children: ReactNode }) {
           href="/"
           className="text-sm text-muted hover:text-fg no-underline"
         >
-          &larr; Crypton
+          &larr; Xrypton
         </Link>
       </header>
 

@@ -49,7 +49,7 @@ pub(crate) async fn authenticate(
     let auth_header = String::from_utf8(auth_decoded)
         .map_err(|e| AppError::Unauthorized(format!("invalid utf-8 in authorization: {e}")))?;
 
-    let signing_key_id = crypton_common::keys::extract_issuer_key_id(&auth_header)
+    let signing_key_id = xrypton_common::keys::extract_issuer_key_id(&auth_header)
         .map_err(|e| AppError::Unauthorized(format!("failed to extract key ID: {e}")))?;
 
     let user = db::users::get_user_by_signing_key_id(pool, &signing_key_id).await?;
@@ -57,7 +57,7 @@ pub(crate) async fn authenticate(
     if let Some(user) = user {
         let user_id = UserId(user.id.clone());
         let public_keys =
-            crypton_common::keys::PublicKeys::try_from(user.signing_public_key.as_str())
+            xrypton_common::keys::PublicKeys::try_from(user.signing_public_key.as_str())
                 .map_err(|e| AppError::Unauthorized(format!("invalid signing key: {e}")))?;
 
         match public_keys.verify_and_extract(&auth_header) {

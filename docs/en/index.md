@@ -1,6 +1,6 @@
-# Crypton Documentation
+# Xrypton Documentation
 
-Welcome to the Crypton documentation. Crypton is an end-to-end encrypted messaging platform built on cryptographic technology.
+Welcome to the Xrypton documentation. Xrypton is an end-to-end encrypted messaging platform built on cryptographic technology.
 
 ## Features
 
@@ -10,4 +10,4 @@ Welcome to the Crypton documentation. Crypton is an end-to-end encrypted messagi
 
 ## Getting Started
 
-Read [Getting Started](/docs/en/getting-started) to start using Crypton!
+Read [Getting Started](/docs/en/getting-started) to start using Xrypton!

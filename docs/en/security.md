@@ -1,10 +1,10 @@
 # Security
 
-Crypton places a strong emphasis on security.
+Xrypton places a strong emphasis on security.
 
 ## Signing and Encryption
 
-Most data on Crypton is signed, and data sent as messages is encrypted.
+Most data on Xrypton is signed, and data sent as messages is encrypted.
 The following table shows which data is signed or encrypted.
 
 | Data             | Security           |

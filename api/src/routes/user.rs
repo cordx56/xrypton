@@ -43,7 +43,7 @@ struct PostKeysBody {
 /// ユーザ登録（認証不要）
 ///
 /// カスタムドメイン対応: `user@custom-domain` 形式のIDが渡された場合、
-/// DNS TXTレコード（`_crypton.custom-domain`）を検証し、解決先が自サーバであれば
+/// DNS TXTレコード（`_xrypton.custom-domain`）を検証し、解決先が自サーバであれば
 /// ローカルユーザとして登録する。
 async fn post_keys(
     State(state): State<AppState>,
@@ -87,7 +87,7 @@ async fn post_keys(
     };
 
     // signing key ID を抽出して検証
-    let public_keys = crypton_common::keys::PublicKeys::try_from(body.signing_public_key.as_str())
+    let public_keys = xrypton_common::keys::PublicKeys::try_from(body.signing_public_key.as_str())
         .map_err(|e| AppError::BadRequest(format!("invalid signing public key: {e}")))?;
     let signing_key_id = public_keys
         .get_signing_sub_key_id()
@@ -135,7 +135,7 @@ async fn update_keys(
         return Err(AppError::Forbidden("can only update own keys".into()));
     }
 
-    let public_keys = crypton_common::keys::PublicKeys::try_from(body.signing_public_key.as_str())
+    let public_keys = xrypton_common::keys::PublicKeys::try_from(body.signing_public_key.as_str())
         .map_err(|e| AppError::BadRequest(format!("invalid signing public key: {e}")))?;
     let signing_key_id = public_keys
         .get_signing_sub_key_id()
@@ -253,7 +253,7 @@ async fn get_keys(
         // キャッシュとしてローカルに保存（元のIDを維持）
         let full_id = format!("{local_part}@{domain}");
         let public_keys =
-            crypton_common::keys::PublicKeys::try_from(remote_keys.signing_public_key.as_str())
+            xrypton_common::keys::PublicKeys::try_from(remote_keys.signing_public_key.as_str())
                 .map_err(|e| AppError::BadGateway(format!("invalid remote signing key: {e}")))?;
         let remote_signing_key_id = public_keys
             .get_signing_sub_key_id()
@@ -340,7 +340,7 @@ async fn verify_pubkey_post(pool: &db::Db, uri: &str, pds_url: &str) -> bool {
 
     // 2. PGP署名を検証
     let Ok(public_keys) =
-        crypton_common::keys::PublicKeys::try_from(sig.signing_public_key.as_str())
+        xrypton_common::keys::PublicKeys::try_from(sig.signing_public_key.as_str())
     else {
         return false;
     };

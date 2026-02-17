@@ -1,5 +1,5 @@
 {
-  "name": "crypton-common",
+  "name": "xrypton-common",
   "type": "module",
   "version": "1.0.0",
   "main": "src/index.ts",

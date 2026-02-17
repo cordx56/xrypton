@@ -1,5 +1,5 @@
 [package]
-name = "crypton-wasm"
+name = "xrypton-wasm"
 version = "0.1.0"
 edition = "2024"
 
@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 base64 = "0.22.1"
 bytes = "1"
 chrono = "0.4"
-crypton-common = { path = "../common" }
+xrypton-common = { path = "../common" }
 gloo = "0.11.0"
 pgp = { version = "0.18.0", features = ["wasm"] }
 rand = "0.8.5"

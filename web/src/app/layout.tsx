@@ -28,7 +28,7 @@ export default function RootLayout({
   return (
     <html lang="en" data-mode="dark" data-theme="muted-blue">
       <head>
-        <title>Crypton</title>
+        <title>Xrypton</title>
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
@@ -38,7 +38,7 @@ export default function RootLayout({
           content="Secure messaging with end-to-end encryption"
         />
         {/* OGP */}
-        <meta property="og:title" content="Crypton" />
+        <meta property="og:title" content="Xrypton" />
         <meta
           property="og:description"
           content="Secure messaging with end-to-end encryption"
@@ -46,24 +46,24 @@ export default function RootLayout({
         <meta property="og:type" content="website" />
         <meta
           property="og:image"
-          content={`https://${process.env.NEXT_PUBLIC_SERVER_HOSTNAME ?? ""}/crypton.png`}
+          content={`https://${process.env.NEXT_PUBLIC_SERVER_HOSTNAME ?? ""}/xrypton.png`}
         />
         {/* Twitter Card */}
         <meta name="twitter:card" content="summary" />
-        <meta name="twitter:title" content="Crypton" />
+        <meta name="twitter:title" content="Xrypton" />
         <meta
           name="twitter:description"
           content="Secure messaging with end-to-end encryption"
         />
         <meta
           name="twitter:image"
-          content={`https://${process.env.NEXT_PUBLIC_SERVER_HOSTNAME ?? ""}/crypton.png`}
+          content={`https://${process.env.NEXT_PUBLIC_SERVER_HOSTNAME ?? ""}/xrypton.png`}
         />
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#6c8ebf" />
-        <link rel="icon" href="/crypton.svg" type="image/svg+xml" />
-        <link rel="icon" href="/crypton.png" type="image/png" />
-        <link rel="apple-touch-icon" href="/crypton.png" />
+        <link rel="icon" href="/xrypton.svg" type="image/svg+xml" />
+        <link rel="icon" href="/xrypton.png" type="image/png" />
+        <link rel="apple-touch-icon" href="/xrypton.png" />
       </head>
       <body className="antialiased">
         <ThemeProvider>

@@ -1,5 +1,5 @@
 #[derive(Debug, thiserror::Error)]
-pub enum CryptonError {
+pub enum XryptonError {
     #[error("key format error: {0}")]
     KeyFormat(String),
     #[error("verification error: {0}")]

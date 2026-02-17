@@ -1,18 +1,18 @@
 {
-  "name": "Crypton",
-  "short_name": "Crypton",
+  "name": "Xrypton",
+  "short_name": "Xrypton",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1a1a2e",
   "theme_color": "#6c8ebf",
   "icons": [
     {
-      "src": "/crypton.png",
+      "src": "/xrypton.png",
       "sizes": "512x512",
       "type": "image/png"
     },
     {
-      "src": "/crypton.svg",
+      "src": "/xrypton.svg",
       "sizes": "any",
       "type": "image/svg+xml"
     }

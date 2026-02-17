@@ -5,7 +5,7 @@ export async function GET(request: Request) {
 
   return Response.json({
     client_id: `${origin}/oauth-client-metadata.json`,
-    client_name: "Crypton",
+    client_name: "Xrypton",
     client_uri: origin,
     grant_types: ["authorization_code", "refresh_token"],
     scope: "atproto transition:generic",

@@ -16,7 +16,7 @@ import init, {
   verify_detached_signature,
   verify_extract_string,
   validate_passphrases,
-} from "crypton-wasm";
+} from "xrypton-wasm";
 import {
   WasmReturnValue,
   WorkerCallMessage,

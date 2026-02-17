@@ -1,7 +1,7 @@
 import { TranslationKeys } from "./types";
 
 export const ja: TranslationKeys = {
-  "app.name": "Crypton",
+  "app.name": "Xrypton",
   "tab.chat": "チャンネル",
   "tab.contacts": "連絡先",
   "tab.profile": "プロフィール",
@@ -174,7 +174,7 @@ export const ja: TranslationKeys = {
   "atproto.sign_post": "PGP署名付きで投稿",
   "atproto.post": "投稿",
   "atproto.posting": "投稿中...",
-  "atproto.signature_verified": "Crypton署名済み",
+  "atproto.signature_verified": "Xrypton署名済み",
   "atproto.signature_mismatch": "署名不一致",
   "atproto.no_signature": "署名なし",
   "atproto.signature_detail": "署名の詳細",
@@ -182,14 +182,14 @@ export const ja: TranslationKeys = {
   "atproto.unlink_account": "紐付け解除",
   "atproto.linked_accounts": "紐付け済みアカウント",
   "atproto.privacy_notice":
-    "ATProtoサーバへの投稿は公開されます。CryptonサーバにはPGP署名が保存され、CryptonのIDとATProtoのIDが紐付けられます。",
+    "ATProtoサーバへの投稿は公開されます。XryptonサーバにはPGP署名が保存され、XryptonのIDとATProtoのIDが紐付けられます。",
   "atproto.signature_retry": "署名を再送",
   "atproto.notifications": "通知",
   "atproto.search": "検索",
   "atproto.settings": "ATProto設定",
   "atproto.verification_title": "公開鍵の検証投稿",
   "atproto.verification_desc":
-    "ATProtoアカウントとCryptonの紐付けを証明するため、以下の内容を投稿してください。",
+    "ATProtoアカウントとXryptonの紐付けを証明するため、以下の内容を投稿してください。",
   "error.atproto_resolve_failed": "ハンドルの解決に失敗しました。",
   "error.atproto_auth_failed": "ATProto認証に失敗しました。",
   "error.atproto_post_failed": "投稿の作成に失敗しました。",

@@ -25,7 +25,7 @@ pub async fn verify_or_fetch_external_user(
     // 1. ローカルDBで外部ユーザとして検索
     if let Some(user) = db::users::get_user_by_signing_key_id(pool, signing_key_id).await? {
         let public_keys =
-            crypton_common::keys::PublicKeys::try_from(user.signing_public_key.as_str())
+            xrypton_common::keys::PublicKeys::try_from(user.signing_public_key.as_str())
                 .map_err(|e| AppError::Unauthorized(format!("invalid signing key: {e}")))?;
 
         // 署名検証を試行
@@ -51,7 +51,7 @@ pub async fn verify_or_fetch_external_user(
     }
 
     // 3. SignersUserIDサブパケットからuser_id@domainを抽出
-    let signer_user_id = crypton_common::keys::extract_signer_user_id(auth_header_decoded)
+    let signer_user_id = xrypton_common::keys::extract_signer_user_id(auth_header_decoded)
         .map_err(|e| AppError::Unauthorized(format!("failed to extract signer user ID: {e}")))?;
     tracing::debug!("extracted SignersUserID: {:?}", signer_user_id);
 
@@ -91,7 +91,7 @@ pub async fn verify_or_fetch_external_user(
         })?;
 
         let public_keys =
-            crypton_common::keys::PublicKeys::try_from(user.signing_public_key.as_str())
+            xrypton_common::keys::PublicKeys::try_from(user.signing_public_key.as_str())
                 .map_err(|e| AppError::Unauthorized(format!("invalid signing key: {e}")))?;
 
         let payload_bytes = public_keys
@@ -127,7 +127,7 @@ pub async fn verify_or_fetch_external_user(
     // 5. ローカルDBにupsert（元のIDを保持）
     let full_id = format!("{orig_local}@{orig_domain}");
     let public_keys =
-        crypton_common::keys::PublicKeys::try_from(remote_keys.signing_public_key.as_str())
+        xrypton_common::keys::PublicKeys::try_from(remote_keys.signing_public_key.as_str())
             .map_err(|e| AppError::Unauthorized(format!("invalid remote signing key: {e}")))?;
     let remote_signing_key_id = public_keys
         .get_signing_sub_key_id()

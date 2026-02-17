@@ -1,4 +1,4 @@
--- ATproto accounts: CryptonユーザとAT Protocol DIDの紐付け
+-- ATproto accounts: XryptonユーザとAT Protocol DIDの紐付け
 CREATE TABLE atproto_accounts (
     user_id TEXT NOT NULL,
     atproto_did TEXT NOT NULL,

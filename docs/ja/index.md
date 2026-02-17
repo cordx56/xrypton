@@ -1,6 +1,6 @@
-# Cryptonドキュメント
+# Xryptonドキュメント
 
-Cryptonドキュメントへようこそ。Cryptonは、暗号技術に基づいて構築されたエンドツーエンド暗号化メッセージングプラットフォームです。
+Xryptonドキュメントへようこそ。Xryptonは、暗号技術に基づいて構築されたエンドツーエンド暗号化メッセージングプラットフォームです。
 
 ## 特徴
 
@@ -10,4 +10,4 @@ Cryptonドキュメントへようこそ。Cryptonは、暗号技術に基づい
 
 ## はじめに
 
-[はじめに](/docs/ja/getting-started) を読んで、Cryptonを使い始めましょう！
+[はじめに](/docs/ja/getting-started) を読んで、Xryptonを使い始めましょう！
