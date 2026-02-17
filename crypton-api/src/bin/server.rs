@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crypton_api::AppState;
+use crypton_api::DidCache;
 use crypton_api::config::AppConfig;
 use crypton_api::db;
 use crypton_api::federation::dns::DnsTxtResolver;
@@ -62,12 +63,14 @@ async fn main() {
 
     let storage = Arc::new(S3Storage::new(&config).await);
     let dns_resolver = DnsTxtResolver::new(Duration::from_secs(3600));
+    let did_cache = DidCache::new(Duration::from_secs(86400));
 
     let state = AppState {
         pool,
         config: config.clone(),
         storage,
         dns_resolver,
+        did_cache,
     };
 
     let app = build_router(state);

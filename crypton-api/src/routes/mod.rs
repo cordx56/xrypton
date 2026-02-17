@@ -1,3 +1,4 @@
+mod atproto;
 mod chat;
 mod contacts;
 mod federation;
@@ -23,7 +24,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(file::routes())
         .merge(contacts::routes())
         .merge(notification::routes())
-        .merge(federation::routes());
+        .merge(federation::routes())
+        .merge(atproto::routes());
 
     Router::new()
         .nest("/v1", api)

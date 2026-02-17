@@ -1,3 +1,4 @@
+pub mod atproto;
 pub mod chat;
 pub mod contacts;
 pub mod files;

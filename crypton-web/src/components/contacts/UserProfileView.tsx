@@ -16,6 +16,7 @@ import { displayUserId } from "@/utils/schema";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faArrowLeft,
+  faAt,
   faCheck,
   faPen,
   faPlus,
@@ -41,6 +42,13 @@ type Props = {
   userId: string;
 };
 
+type ExternalAccount = {
+  type: "atproto";
+  validated: boolean;
+  did: string;
+  handle: string | null;
+};
+
 type VerificationState = "pending" | "verified" | "unverified";
 
 const UserProfileView = ({ userId }: Props) => {
@@ -57,6 +65,9 @@ const UserProfileView = ({ userId }: Props) => {
   const [iconUrl, setIconUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAccounts, setShowAccounts] = useState(false);
+  const [externalAccounts, setExternalAccounts] = useState<ExternalAccount[]>(
+    [],
+  );
   const [isContact, setIsContact] = useState(false);
   const [addingContact, setAddingContact] = useState(false);
   const [verificationState, setVerificationState] =
@@ -119,6 +130,7 @@ const UserProfileView = ({ userId }: Props) => {
       const rawDn = profile.display_name ?? "";
       const rawSt = profile.status ?? "";
       const rawBi = profile.bio ?? "";
+      setExternalAccounts(profile.external_accounts ?? []);
 
       // 署名済みフィールドがあるか判定
       const hasSigned =
@@ -343,6 +355,23 @@ const UserProfileView = ({ userId }: Props) => {
           </span>
         )}
       </div>
+
+      {externalAccounts.length > 0 && (
+        <div className="flex flex-wrap gap-2 justify-center">
+          {externalAccounts.map((account) => (
+            <span
+              key={account.did}
+              className={`inline-flex items-center gap-1.5 text-sm ${
+                account.validated ? "text-muted" : "text-red-500"
+              }`}
+              title={account.did}
+            >
+              <FontAwesomeIcon icon={faAt} />
+              {account.handle ?? account.did}
+            </span>
+          ))}
+        </div>
+      )}
 
       {bio && (
         <div>

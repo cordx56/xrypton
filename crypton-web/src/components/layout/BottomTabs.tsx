@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faMessage, faAddressBook } from "@fortawesome/free-regular-svg-icons";
-import { faGear } from "@fortawesome/free-solid-svg-icons";
+import { faGear, faGlobe } from "@fortawesome/free-solid-svg-icons";
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 
 type TabDef = {
@@ -24,6 +24,11 @@ const tabs: TabDef[] = [
     href: "/contact",
     match: (p) => p.startsWith("/contact"),
     icon: faAddressBook,
+  },
+  {
+    href: "/atproto",
+    match: (p) => p.startsWith("/atproto"),
+    icon: faGlobe,
   },
   {
     href: "/config",

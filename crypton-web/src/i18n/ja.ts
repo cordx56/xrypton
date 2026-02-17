@@ -124,7 +124,7 @@ export const ja: TranslationKeys = {
     "コードは公開されており、誰でも自由に利用できます。",
   "landing.feature_distributed": "分散システム",
   "landing.feature_distributed_desc":
-    "特定の運営者に依存しない、分散システム。",
+    "特定の運営者に依存しない、分散システム。AT Protocol上のデータも署名可能。",
   "account.add": "アカウントを追加",
   "account.switch": "アカウントを切替",
   "account.active": "使用中",
@@ -164,4 +164,37 @@ export const ja: TranslationKeys = {
   "error.file_download_failed": "ファイルのダウンロードに失敗しました。",
   "settings.hide_non_contact_channels":
     "連絡先にないユーザのみからの受信を非表示",
+  "tab.social": "ソーシャル",
+  "atproto.connect": "ATProtoサーバに接続",
+  "atproto.disconnect": "切断",
+  "atproto.connecting": "接続中...",
+  "atproto.handle_placeholder": "handle.example.com",
+  "atproto.timeline": "タイムライン",
+  "atproto.compose": "新しい投稿",
+  "atproto.sign_post": "PGP署名付きで投稿",
+  "atproto.post": "投稿",
+  "atproto.posting": "投稿中...",
+  "atproto.signature_verified": "Crypton署名済み",
+  "atproto.signature_mismatch": "署名不一致",
+  "atproto.no_signature": "署名なし",
+  "atproto.signature_detail": "署名の詳細",
+  "atproto.link_account": "アカウントの紐付けが完了しました",
+  "atproto.unlink_account": "紐付け解除",
+  "atproto.linked_accounts": "紐付け済みアカウント",
+  "atproto.privacy_notice":
+    "ATProtoサーバへの投稿は公開されます。CryptonサーバにはPGP署名が保存され、CryptonのIDとATProtoのIDが紐付けられます。",
+  "atproto.signature_retry": "署名を再送",
+  "atproto.notifications": "通知",
+  "atproto.search": "検索",
+  "atproto.settings": "ATProto設定",
+  "atproto.verification_title": "公開鍵の検証投稿",
+  "atproto.verification_desc":
+    "ATProtoアカウントとCryptonの紐付けを証明するため、以下の内容を投稿してください。",
+  "error.atproto_resolve_failed": "ハンドルの解決に失敗しました。",
+  "error.atproto_auth_failed": "ATProto認証に失敗しました。",
+  "error.atproto_post_failed": "投稿の作成に失敗しました。",
+  "error.atproto_sign_failed":
+    "投稿は成功しましたが、PGP署名に失敗しました。後で再試行できます。",
+  "error.atproto_did_already_linked":
+    "このDIDは既に他のアカウントに紐付けられています。",
 };

@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// SQLite では TEXT として格納されるため String、
 /// PostgreSQL では TIMESTAMPTZ として格納されるため chrono 型を使用。
@@ -97,4 +97,56 @@ pub struct ContactRow {
     pub user_id: String,
     pub contact_user_id: String,
     pub created_at: Timestamp,
+}
+
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct AtprotoAccountRow {
+    pub user_id: String,
+    pub atproto_did: String,
+    pub atproto_handle: Option<String>,
+    pub pds_url: String,
+    pub pubkey_post_uri: Option<String>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct AtprotoSignatureRow {
+    pub id: String,
+    pub user_id: String,
+    pub atproto_did: String,
+    pub atproto_uri: String,
+    pub atproto_cid: String,
+    pub collection: String,
+    pub record_json: String,
+    pub signature: String,
+    pub created_at: Timestamp,
+}
+
+/// 署名取得時に公開鍵をJOINして返す用の型
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct AtprotoSignatureWithKeyRow {
+    pub id: String,
+    pub user_id: String,
+    pub atproto_did: String,
+    pub atproto_uri: String,
+    pub atproto_cid: String,
+    pub collection: String,
+    pub record_json: String,
+    pub signature: String,
+    pub created_at: Timestamp,
+    pub signing_public_key: String,
+}
+
+// --- 外部アカウント ---
+
+/// プロフィールレスポンスに含める外部アカウント情報（今後バリアントを追加予定）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExternalAccount {
+    Atproto {
+        validated: bool,
+        did: String,
+        handle: Option<String>,
+    },
 }

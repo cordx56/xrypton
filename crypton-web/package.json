@@ -13,6 +13,8 @@
     "fmt": "prettier -w src"
   },
   "dependencies": {
+    "@atproto/api": "^0.18.21",
+    "@atproto/oauth-client-browser": "^0.3.40",
     "@fortawesome/fontawesome-svg-core": "^7.2.0",
     "@fortawesome/free-regular-svg-icons": "^7.2.0",
     "@fortawesome/free-solid-svg-icons": "^7.2.0",

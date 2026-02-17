@@ -1,3 +1,6 @@
+use atrium_api::client::AtpServiceClient;
+use atrium_api::com::atproto::repo::get_record;
+use atrium_api::types::string::{Did, Nsid, RecordKey};
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Multipart, Path, State};
 use axum::http::{HeaderMap, header};
@@ -9,6 +12,7 @@ use serde::Deserialize;
 use crate::AppState;
 use crate::auth::AuthenticatedUser;
 use crate::db;
+use crate::db::models::ExternalAccount;
 use crate::error::AppError;
 use crate::types::UserId;
 
@@ -291,6 +295,119 @@ async fn delete_user(
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
+/// ATProtoアカウント等から外部アカウント情報を構築する。
+/// 公開鍵投稿の署名を検証し、成功した場合のみ validated=true にする。
+async fn build_external_accounts(state: &AppState, user_id: &str) -> Vec<ExternalAccount> {
+    let accounts = db::atproto::list_accounts(&state.pool, user_id)
+        .await
+        .unwrap_or_default();
+
+    let mut result = Vec::with_capacity(accounts.len());
+    for a in accounts {
+        let validated = match &a.pubkey_post_uri {
+            Some(uri) => verify_pubkey_post(&state.pool, uri, &a.pds_url).await,
+            None => false,
+        };
+        result.push(ExternalAccount::Atproto {
+            validated,
+            did: a.atproto_did,
+            handle: a.atproto_handle,
+        });
+    }
+    result
+}
+
+/// AT URIをパースして (Did, Nsid, RecordKey) に分解する
+fn parse_at_uri(uri: &str) -> Option<(Did, Nsid, RecordKey)> {
+    let rest = uri.strip_prefix("at://")?;
+    let mut parts = rest.splitn(3, '/');
+    let did: Did = parts.next()?.parse().ok()?;
+    let collection: Nsid = parts.next()?.parse().ok()?;
+    let rkey: RecordKey = parts.next()?.parse().ok()?;
+    Some((did, collection, rkey))
+}
+
+/// 公開鍵投稿をPDSから実際に取得し、DB上の署名と照合して検証する
+async fn verify_pubkey_post(pool: &db::Db, uri: &str, pds_url: &str) -> bool {
+    // 1. DB から署名を取得
+    let sigs = match db::atproto::get_signatures_by_uri(pool, uri, None).await {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let Some(sig) = sigs.first() else {
+        return false;
+    };
+
+    // 2. PGP署名を検証
+    let Ok(public_keys) =
+        crypton_common::keys::PublicKeys::try_from(sig.signing_public_key.as_str())
+    else {
+        return false;
+    };
+    let Ok(payload_bytes) = public_keys.verify_and_extract(&sig.signature) else {
+        return false;
+    };
+    let Ok(payload_text) = String::from_utf8(payload_bytes) else {
+        return false;
+    };
+
+    // 3. AT URIをパースしてPDSから実際のレコードを取得
+    let Some((did, collection, rkey)) = parse_at_uri(uri) else {
+        return false;
+    };
+
+    // SSRF防止: PDSのURLがプライベートIPでないことを検証
+    if super::atproto::validate_url_not_private(pds_url)
+        .await
+        .is_err()
+    {
+        return false;
+    }
+
+    let Ok(http_client) = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    else {
+        return false;
+    };
+    let client = AtpServiceClient::new(
+        atrium_xrpc_client::reqwest::ReqwestClientBuilder::new(pds_url)
+            .client(http_client)
+            .build(),
+    );
+    let params: get_record::Parameters = get_record::ParametersData {
+        repo: did.into(),
+        collection,
+        rkey,
+        cid: None,
+    }
+    .into();
+    let Ok(output) = client.service.com.atproto.repo.get_record(params).await else {
+        return false;
+    };
+
+    // 4. 取得したレコードから署名対象を構築し、署名の平文と照合
+    let cid_str = output
+        .cid
+        .as_ref()
+        .and_then(|c| serde_json::to_value(c).ok())
+        .and_then(|v| v.get("$link").and_then(|s| s.as_str()).map(String::from));
+    let Some(cid_str) = cid_str else {
+        return false;
+    };
+    let Ok(record_value) = serde_json::to_value(&output.value) else {
+        return false;
+    };
+    let target = serde_json::json!({
+        "cid": cid_str,
+        "record": record_value,
+        "uri": uri,
+    });
+    let expected = super::atproto::canonicalize_json(&target);
+    payload_text == expected
+}
+
 async fn get_profile(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -308,23 +425,29 @@ async fn get_profile(
             .as_ref()
             .map(|_| format!("/v1/user/{}/icon", user_id.as_str()));
 
+        let external_accounts = build_external_accounts(&state, user_id.as_str()).await;
+
         return Ok(Json(serde_json::json!({
             "user_id": profile.user_id,
             "display_name": profile.display_name,
             "status": profile.status,
             "bio": profile.bio,
             "icon_url": icon_url,
+            "external_accounts": external_accounts,
         })));
     }
 
     // usersテーブルに存在すればローカルユーザ（プロフィール未設定）
     if db::users::get_user(&state.pool, &user_id).await?.is_some() {
+        let external_accounts = build_external_accounts(&state, user_id.as_str()).await;
+
         return Ok(Json(serde_json::json!({
             "user_id": user_id.as_str(),
             "display_name": "",
             "status": "",
             "bio": "",
             "icon_url": null,
+            "external_accounts": external_accounts,
         })));
     }
 

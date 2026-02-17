@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/contexts/AuthContext";
 import { useI18n } from "@/contexts/I18nContext";
+import { AtprotoProvider } from "@/contexts/AtprotoContext";
 import BottomTabs from "@/components/layout/BottomTabs";
 import GlobalHeader from "@/components/layout/GlobalHeader";
 import GenerateKey from "@/components/GenerateKey";
@@ -44,10 +45,12 @@ export default function MainLayout({
   }
 
   return (
-    <div className="h-dvh flex flex-col">
-      <GlobalHeader />
-      <div className="flex-1 overflow-y-auto">{children}</div>
-      <BottomTabs />
-    </div>
+    <AtprotoProvider>
+      <div className="h-dvh flex flex-col">
+        <GlobalHeader />
+        <div className="flex-1 overflow-y-auto">{children}</div>
+        <BottomTabs />
+      </div>
+    </AtprotoProvider>
   );
 }

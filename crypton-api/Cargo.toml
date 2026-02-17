@@ -7,6 +7,7 @@ edition = "2024"
 crypton-common = { path = "../crypton-common" }
 
 axum = { version = "0.8", features = ["multipart"] }
+axum-extra = { version = "0.12", features = ["query"] }
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
@@ -29,6 +30,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 dotenvy = "0.15"
+atrium-api = "0.25.7"
+atrium-xrpc-client = "0.5.15"
 
 [features]
 default = ["sqlite"]

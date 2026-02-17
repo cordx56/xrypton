@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
-import { createPortal } from "react-dom";
+import { useState, useCallback } from "react";
 import Avatar from "@/components/common/Avatar";
+import ImageLightbox from "@/components/common/ImageLightbox";
 import type { Message } from "@/types/chat";
 import { useI18n } from "@/contexts/I18nContext";
 import { linkify } from "@/utils/linkify";
@@ -8,7 +8,6 @@ import { formatTime } from "@/utils/date";
 import { isImageType } from "@/utils/fileMessage";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faFile } from "@fortawesome/free-regular-svg-icons";
-import { faDownload, faXmark } from "@fortawesome/free-solid-svg-icons";
 
 type Props = {
   message: Message;
@@ -18,62 +17,6 @@ type Props = {
   status?: string;
   onClickUser?: () => void;
   onDownloadFile?: (message: Message) => void;
-};
-
-/** 画像拡大表示のライトボックス */
-const ImageLightbox = ({
-  src,
-  alt,
-  onClose,
-  onDownload,
-}: {
-  src: string;
-  alt: string;
-  onClose: () => void;
-  onDownload: () => void;
-}) => {
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
-      onClick={onClose}
-    >
-      <div className="absolute top-4 right-4 flex gap-2">
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDownload();
-          }}
-          className="p-2 rounded-full bg-white/20 hover:bg-white/30 text-white"
-          title="Download"
-        >
-          <FontAwesomeIcon icon={faDownload} className="text-lg" />
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="p-2 rounded-full bg-white/20 hover:bg-white/30 text-white"
-        >
-          <FontAwesomeIcon icon={faXmark} className="text-lg" />
-        </button>
-      </div>
-      <img
-        src={src}
-        alt={alt}
-        className="max-w-[90vw] max-h-[90vh] object-contain"
-        onClick={(e) => e.stopPropagation()}
-      />
-    </div>,
-    document.body,
-  );
 };
 
 /** ファイルメッセージの表示コンポーネント */

@@ -1,4 +1,11 @@
-import { NotificationPublicKeyResponse } from "@/utils/schema";
+import {
+  NotificationPublicKeyResponse,
+  AtprotoAccountSchema,
+  AtprotoSignatureSchema,
+  AtprotoSignatureBatchResponse,
+  AtprotoSignatureListResponse,
+  AtprotoSaveSignatureResponse,
+} from "@/utils/schema";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -100,6 +107,35 @@ export function apiClient() {
         const resp = await apiFetch("/notification/public-key");
         const data = NotificationPublicKeyResponse.parse(await resp.json());
         return data.key;
+      },
+    },
+    atproto: {
+      getSignature: async (uri: string, cid?: string) => {
+        const params = new URLSearchParams({ uri });
+        if (cid) params.set("cid", cid);
+        const resp = await apiFetch(`/v1/atproto/signature?${params}`);
+        const json = await resp.json();
+        return AtprotoSignatureSchema.array().parse(json.signatures);
+      },
+      getSignatureBatch: async (uris: string[]) => {
+        const params = new URLSearchParams();
+        uris.forEach((u) => params.append("uris", u));
+        const resp = await apiFetch(`/v1/atproto/signature/batch?${params}`);
+        const data = AtprotoSignatureBatchResponse.parse(await resp.json());
+        return data.signatures;
+      },
+      getUserSignatures: async (
+        userId: string,
+        params?: { limit?: number; offset?: number },
+      ) => {
+        const search = new URLSearchParams();
+        if (params?.limit) search.set("limit", String(params.limit));
+        if (params?.offset) search.set("offset", String(params.offset));
+        const qs = search.toString() ? `?${search}` : "";
+        const resp = await apiFetch(
+          `/v1/atproto/signature/user/${encodeURIComponent(userId)}${qs}`,
+        );
+        return AtprotoSignatureListResponse.parse(await resp.json());
       },
     },
   };
@@ -378,6 +414,51 @@ export function authApiClient(signedMessage: string) {
           },
           auth,
         );
+      },
+    },
+    atproto: {
+      linkAccount: async (did: string, handle: string, pdsUrl: string) => {
+        const resp = await apiFetch(
+          "/v1/atproto/account",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              atproto_did: did,
+              atproto_handle: handle,
+              pds_url: pdsUrl,
+            }),
+          },
+          auth,
+        );
+        return AtprotoAccountSchema.parse(await resp.json());
+      },
+      getAccounts: async () => {
+        const resp = await apiFetch("/v1/atproto/account", {}, auth);
+        const json = await resp.json();
+        return AtprotoAccountSchema.array().parse(json.accounts ?? json);
+      },
+      unlinkAccount: async (did: string) => {
+        await apiFetch(
+          `/v1/atproto/account/${encodeURIComponent(did)}`,
+          { method: "DELETE" },
+          auth,
+        );
+      },
+      saveSignature: async (body: {
+        atproto_did: string;
+        atproto_uri: string;
+        atproto_cid: string;
+        collection: string;
+        record_json: string;
+        signature: string;
+        is_pubkey_post?: boolean;
+      }) => {
+        const resp = await apiFetch(
+          "/v1/atproto/signature",
+          { method: "POST", body: JSON.stringify(body) },
+          auth,
+        );
+        return AtprotoSaveSignatureResponse.parse(await resp.json());
       },
     },
   };

@@ -189,6 +189,43 @@ export const NotificationPublicKeyResponse = z.object({
   key: z.string(),
 });
 
+// --- ATproto API schemas ---
+
+export const AtprotoAccountSchema = z.object({
+  user_id: z.string(),
+  atproto_did: z.string(),
+  atproto_handle: z.string().nullable(),
+  pds_url: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+export const AtprotoSignatureSchema = z.object({
+  id: z.string(),
+  user_id: z.string(),
+  atproto_did: z.string(),
+  atproto_uri: z.string(),
+  atproto_cid: z.string(),
+  collection: z.string(),
+  record_json: z.string(),
+  signature: z.string(),
+  signing_public_key: z.string(),
+  created_at: z.string(),
+});
+
+export const AtprotoSaveSignatureResponse = z.object({
+  id: z.string(),
+});
+
+export const AtprotoSignatureBatchResponse = z.object({
+  signatures: z.record(z.string(), z.array(AtprotoSignatureSchema)),
+});
+
+export const AtprotoSignatureListResponse = z.object({
+  signatures: z.array(AtprotoSignatureSchema),
+  total: z.number(),
+});
+
 // Old
 export const Contacts = z.record(
   z.string(),
