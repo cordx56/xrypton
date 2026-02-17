@@ -72,6 +72,9 @@ const UserProfileView = ({ userId }: Props) => {
   const [addingContact, setAddingContact] = useState(false);
   const [verificationState, setVerificationState] =
     useState<VerificationState>("pending");
+  const [signingPublicKey, setSigningPublicKey] = useState<string | undefined>(
+    undefined,
+  );
 
   const isLoggedIn = !!auth.userId && auth.isRegistered;
   const isOwnProfile = auth.userId === userId;
@@ -148,6 +151,7 @@ const UserProfileView = ({ userId }: Props) => {
       } else if (isOwnProfile) {
         // 自分のプロフィール: auth.publicKeys で検証
         const signingKey = auth.publicKeys ?? null;
+        setSigningPublicKey(signingKey ?? undefined);
         if (signingKey) {
           const [dnResult, stResult, biResult] = await Promise.all([
             verifyField(signingKey, rawDn),
@@ -160,21 +164,24 @@ const UserProfileView = ({ userId }: Props) => {
           const allVerified =
             dnResult.verified && stResult.verified && biResult.verified;
           setVerificationState(allVerified ? "verified" : "unverified");
-          if (!allVerified) showWarning();
+          if (!allVerified) showWarning(userId, dnResult.text);
         } else {
           setDisplayName(rawDn);
           setStatus(rawSt);
           setBio(rawBi);
           setVerificationState("unverified");
-          showWarning();
+          showWarning(userId);
         }
       } else {
         // 他ユーザ: withKeyRetry で IDB キャッシュ + リトライ
         const result = await withKeyRetry(
           userId,
-          (signingKey) => verifyAllFields(signingKey, rawDn, rawSt, rawBi),
+          (signingKey) => {
+            setSigningPublicKey(signingKey);
+            return verifyAllFields(signingKey, rawDn, rawSt, rawBi);
+          },
           () => {
-            showWarning();
+            showWarning(userId);
           },
         );
         if (result) {
@@ -333,15 +340,12 @@ const UserProfileView = ({ userId }: Props) => {
       )}
 
       <div className="flex flex-col items-center">
-        {iconUrl ? (
-          <img
-            src={iconUrl}
-            alt="avatar"
-            className="w-20 h-20 rounded-full object-cover"
-          />
-        ) : (
-          <Avatar name={displayName || userId} size="lg" />
-        )}
+        <Avatar
+          name={displayName || userId}
+          iconUrl={iconUrl}
+          publicKey={signingPublicKey}
+          size="xl"
+        />
         <h2 className="mt-3 text-lg font-semibold">
           {displayName || displayUserId(userId)}
         </h2>

@@ -4,10 +4,14 @@ import { useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDialogs } from "@/contexts/DialogContext";
 import { useI18n } from "@/contexts/I18nContext";
+import { displayUserId } from "@/utils/schema";
 import Dialog from "@/components/common/Dialog";
 import { createElement } from "react";
 
 const PGP_MESSAGE_PREFIX = "-----BEGIN PGP MESSAGE-----";
+
+// セッション中にユーザ毎に警告ダイアログを一度だけ表示するためのセット
+const warnedUsers = new Set<string>();
 
 /** armored PGP メッセージかどうかを判定する */
 export function isSignedMessage(value: string): boolean {
@@ -20,37 +24,48 @@ export function useSignatureVerifier() {
   const { pushDialog } = useDialogs();
   const { t } = useI18n();
 
-  const showWarning = useCallback(() => {
-    pushDialog((p) =>
-      createElement(
-        Dialog,
-        { ...p, title: t("security.signature_failed_title") },
+  const showWarning = useCallback(
+    (userId: string, displayName?: string) => {
+      if (warnedUsers.has(userId)) return;
+      warnedUsers.add(userId);
+
+      const label = displayName
+        ? `${displayName} (${displayUserId(userId)})`
+        : displayUserId(userId);
+
+      pushDialog((p) =>
         createElement(
-          "div",
-          { className: "space-y-3" },
+          Dialog,
+          { ...p, title: t("security.signature_failed_title") },
           createElement(
-            "p",
-            { className: "text-sm" },
-            t("security.signature_failed_message"),
-          ),
-          createElement(
-            "p",
-            { className: "text-sm text-muted" },
-            t("security.signature_failed_detail"),
-          ),
-          createElement(
-            "button",
-            {
-              type: "button",
-              onClick: p.close,
-              className: "px-4 py-2 bg-accent/30 rounded hover:bg-accent/50",
-            },
-            t("common.ok"),
+            "div",
+            { className: "space-y-3" },
+            createElement("p", { className: "text-sm font-medium" }, label),
+            createElement(
+              "p",
+              { className: "text-sm" },
+              t("security.signature_failed_message"),
+            ),
+            createElement(
+              "p",
+              { className: "text-sm text-muted" },
+              t("security.signature_failed_detail"),
+            ),
+            createElement(
+              "button",
+              {
+                type: "button",
+                onClick: p.close,
+                className: "px-4 py-2 bg-accent/30 rounded hover:bg-accent/50",
+              },
+              t("common.ok"),
+            ),
           ),
         ),
-      ),
-    );
-  }, [pushDialog, t]);
+      );
+    },
+    [pushDialog, t],
+  );
 
   /**
    * 署名を検証して平文を返す。

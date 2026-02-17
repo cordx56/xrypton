@@ -10,7 +10,7 @@ type Props = {
   name: string;
   iconUrl?: string | null;
   publicKey?: string;
-  size?: "xs" | "sm" | "md" | "lg";
+  size?: "xs" | "sm" | "md" | "lg" | "xl";
 };
 
 const sizeClasses = {
@@ -18,13 +18,15 @@ const sizeClasses = {
   sm: "w-10 h-10 text-sm",
   md: "w-10 h-10 text-sm",
   lg: "w-16 h-16 text-xl",
+  xl: "w-20 h-20 text-2xl",
 };
 
 const warningBadgeSizes = {
-  xs: "w-2.5 h-2.5 text-[6px]",
-  sm: "w-3 h-3 text-[7px]",
-  md: "w-3 h-3 text-[7px]",
-  lg: "w-4 h-4 text-[9px]",
+  xs: "w-4 h-4 text-[10px]",
+  sm: "w-5 h-5 text-xs",
+  md: "w-5 h-5 text-xs",
+  lg: "w-6 h-6 text-sm",
+  xl: "w-7 h-7 text-sm",
 };
 
 const Avatar = ({ name, iconUrl, publicKey, size = "md" }: Props) => {
