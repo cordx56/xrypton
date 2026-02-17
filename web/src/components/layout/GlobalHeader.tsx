@@ -33,13 +33,15 @@ const GlobalHeader = () => {
         <Link href="/?landing" className="font-bold text-sm tracking-wide">
           Xrypton
         </Link>
-        <Link href="/profile" className="flex items-center">
-          <Avatar
-            name={profile?.displayName || auth.userId || "?"}
-            iconUrl={profile?.iconUrl}
-            size="sm"
-          />
-        </Link>
+        {auth.userId && (
+          <Link href="/profile" className="flex items-center">
+            <Avatar
+              name={profile?.displayName || auth.userId || "?"}
+              iconUrl={profile?.iconUrl}
+              size="sm"
+            />
+          </Link>
+        )}
       </div>
     </header>
   );

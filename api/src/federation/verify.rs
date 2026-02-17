@@ -11,7 +11,7 @@ use crate::types::UserId;
 /// 1. signing_key_idでローカルDBから検索（外部ユーザは`user@domain`で保存済みの場合あり）
 /// 2. 見つかった → 公開鍵で署名検証を試行、成功すれば返却
 /// 3. PGP署名のSignersUserIDサブパケットからuser_id@domainを抽出
-/// 4. ドメインの鍵取得エンドポイントにリクエスト（Authorizationヘッダー転送）
+/// 4. ドメインの鍵取得エンドポイントにリクエスト（認証不要）
 /// 5. 取得した公開鍵をローカルusersテーブルにupsert
 /// 6. 公開鍵で署名検証 → AuthenticatedUser返却
 pub async fn verify_or_fetch_external_user(
@@ -116,13 +116,8 @@ pub async fn verify_or_fetch_external_user(
     }
 
     // 4. リモートサーバから公開鍵を取得（DNS解決後のドメインを使用）
-    let remote_keys = super::client::fetch_user_keys(
-        &domain,
-        &local_part,
-        auth_header_raw,
-        config.federation_allow_http,
-    )
-    .await?;
+    let remote_keys =
+        super::client::fetch_user_keys(&domain, &local_part, config.federation_allow_http).await?;
 
     // 5. ローカルDBにupsert（元のIDを保持）
     let full_id = format!("{orig_local}@{orig_domain}");

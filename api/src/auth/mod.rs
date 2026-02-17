@@ -28,21 +28,14 @@ pub struct AuthenticatedUser {
     pub raw_auth_header: String,
 }
 
-/// 認証の結果。nonceの新規性を呼び出し側で判断できるようにする。
-pub struct AuthResult {
-    pub user: AuthenticatedUser,
-    /// nonceが新規であればtrue。再利用されていればfalse。
-    pub nonce_is_new: bool,
-}
-
 /// Authorizationヘッダーを検証し、認証されたユーザ情報を返す。
-/// nonceの新規性は`AuthResult.nonce_is_new`で返し、拒否は呼び出し側に委ねる。
+/// nonce再利用はリプレイ攻撃として拒否する。
 pub(crate) async fn authenticate(
     pool: &Db,
     config: &AppConfig,
     dns_resolver: &DnsTxtResolver,
     auth_header_raw: &str,
-) -> Result<AuthResult, AppError> {
+) -> Result<AuthenticatedUser, AppError> {
     let auth_decoded = STANDARD
         .decode(auth_header_raw)
         .map_err(|e| AppError::Unauthorized(format!("invalid base64 in authorization: {e}")))?;
@@ -68,15 +61,15 @@ pub(crate) async fn authenticate(
 
                 let is_new =
                     db::nonces::try_use_nonce(pool, &payload.nonce, user_id.as_str()).await?;
+                if !is_new {
+                    return Err(AppError::Unauthorized("nonce already used".into()));
+                }
 
-                return Ok(AuthResult {
-                    user: AuthenticatedUser {
-                        user_id,
-                        signing_key_id,
-                        signing_public_key: user.signing_public_key,
-                        raw_auth_header: auth_header_raw.to_string(),
-                    },
-                    nonce_is_new: is_new,
+                return Ok(AuthenticatedUser {
+                    user_id,
+                    signing_key_id,
+                    signing_public_key: user.signing_public_key,
+                    raw_auth_header: auth_header_raw.to_string(),
                 });
             }
             Err(_) => {
@@ -85,8 +78,8 @@ pub(crate) async fn authenticate(
         }
     }
 
-    // 外部ユーザとして検証（nonce処理は内部で行われ、常にnew）
-    let auth = crate::federation::verify::verify_or_fetch_external_user(
+    // 外部ユーザとして検証（nonce処理は内部で行われる）
+    crate::federation::verify::verify_or_fetch_external_user(
         pool,
         config,
         dns_resolver,
@@ -94,12 +87,7 @@ pub(crate) async fn authenticate(
         &auth_header,
         &signing_key_id,
     )
-    .await?;
-
-    Ok(AuthResult {
-        user: auth,
-        nonce_is_new: true,
-    })
+    .await
 }
 
 impl FromRequestParts<AppState> for AuthenticatedUser {
@@ -115,17 +103,13 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
             .and_then(|v| v.to_str().ok())
             .ok_or_else(|| AppError::Unauthorized("missing authorization header".into()))?;
 
-        let result = authenticate(
+        authenticate(
             &state.pool,
             &state.config,
             &state.dns_resolver,
             auth_header_raw,
         )
-        .await?;
-        if !result.nonce_is_new {
-            return Err(AppError::Unauthorized("nonce already used".into()));
-        }
-        Ok(result.user)
+        .await
     }
 }
 

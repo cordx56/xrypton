@@ -12,6 +12,7 @@ export const WorkerResultCallList = {
   extract_key_id: "extract_key_id",
   verify: "verify",
   get_key_id: "get_key_id",
+  get_primary_fingerprint: "get_primary_fingerprint",
   sign: "sign",
   sign_bytes: "sign_bytes",
   validate_passphrases: "validate_passphrases",
@@ -304,6 +305,10 @@ export const WorkerCallMessage = z.union([
     publicKeys: z.string(),
   }),
   z.object({
+    call: z.literal(WorkerResultCallList["get_primary_fingerprint"]),
+    publicKeys: z.string(),
+  }),
+  z.object({
     call: z.literal(WorkerResultCallList["sign"]),
     keys: z.string(),
     passphrase: z.string(),
@@ -396,6 +401,10 @@ export const WorkerResultMessage = z.union([
   z.object({
     call: z.literal(WorkerResultCallList["get_key_id"]),
     result: WorkerResult(z.object({ key_id: z.string() })),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["get_primary_fingerprint"]),
+    result: WorkerResult(z.object({ fingerprint: z.string() })),
   }),
   z.object({
     call: z.literal(WorkerResultCallList["sign"]),

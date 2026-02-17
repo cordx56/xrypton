@@ -17,12 +17,10 @@ pub struct UserKeysResponse {
     pub signing_key_id: String,
 }
 
-/// 外部サーバからユーザの公開鍵を取得する。
-/// Authorizationヘッダーを転送して、リモートサーバでの認証を可能にする。
+/// 外部サーバからユーザの公開鍵を取得する（認証不要）。
 pub async fn fetch_user_keys(
     domain: &str,
     user_id: &str,
-    auth_header_raw: &str,
     allow_http: bool,
 ) -> Result<UserKeysResponse, AppError> {
     let base = base_url(domain, allow_http);
@@ -32,7 +30,6 @@ pub async fn fetch_user_keys(
     let client = reqwest::Client::new();
     let resp = client
         .get(&url)
-        .header("Authorization", auth_header_raw)
         .send()
         .await
         .map_err(|e| AppError::BadGateway(format!("federation request failed: {e}")))?;

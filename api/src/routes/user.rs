@@ -173,45 +173,46 @@ async fn fetch_local_user_keys(
     })))
 }
 
-/// 公開鍵取得（認証必須 — 連合対応）
-///
-/// AuthenticatedUser extractorを使わず手動で認証を行う。
-/// 連合3ホップ目のコールバック（認証ユーザ自身の鍵要求でnonce再利用）のみ許可する。
-/// それ以外のnonce再利用はリプレイ攻撃（ユーザ存在の総当たり検索）を防ぐため拒否する。
+/// 公開鍵取得（認証不要）
 async fn get_keys(
     State(state): State<AppState>,
     Path(id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let auth_header_raw = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| AppError::Unauthorized("missing authorization header".into()))?;
-
-    let result = crate::auth::authenticate(
-        &state.pool,
-        &state.config,
-        &state.dns_resolver,
-        auth_header_raw,
-    )
-    .await?;
-    let auth = result.user;
-
-    // nonce再利用の場合、連合3ホップ目のコールバックパターンのみ許可:
-    // パスIDを正規化して認証ユーザ自身の鍵を要求している場合。
-    // 自身の鍵取得なので新たな情報漏洩はなく、安全。
-    if !result.nonce_is_new {
-        let normalized = UserId::resolve(&id, &state.config.server_hostname)
-            .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
-        if normalized == auth.user_id {
-            return fetch_local_user_keys(&state, &normalized).await;
-        }
-        return Err(AppError::Unauthorized("nonce already used".into()));
-    }
-
     // CASE A: リクエストIDに@あり
     if let Some((local_part, domain)) = id.split_once('@') {
-        // DNS TXTレコードによるドメイン解決
+        // まずはリクエストIDそのままでローカルDBを検索し、DNSクエリを避ける。
+        let raw_user_id = UserId::validate_full(&id)
+            .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
+        if let Ok(keys) = fetch_local_user_keys(&state, &raw_user_id).await {
+            return Ok(keys);
+        }
+
+        // ローカルにない外部検索は認証済みリクエストのみ許可。
+        let auth = match headers.get(header::AUTHORIZATION) {
+            Some(v) => {
+                let auth_header_raw = v
+                    .to_str()
+                    .map_err(|_| AppError::Unauthorized("invalid authorization header".into()))?;
+                Some(
+                    crate::auth::authenticate(
+                        &state.pool,
+                        &state.config,
+                        &state.dns_resolver,
+                        auth_header_raw,
+                    )
+                    .await?,
+                )
+            }
+            None => None,
+        };
+        if auth.is_none() {
+            return Err(AppError::BadRequest(
+                "authentication required for external key lookup".into(),
+            ));
+        }
+
+        // 外部検索（旧仕様）: DNS TXTレコードによるドメイン解決
         let (resolved_local, resolved_domain) =
             match state.dns_resolver.resolve(domain, local_part).await {
                 crate::federation::dns::ResolvedDomain::Mapped {
@@ -233,19 +234,10 @@ async fn get_keys(
             return fetch_local_user_keys(&state, &user_id).await;
         }
 
-        // DNS解決がOriginalでも、リクエストIDでDBに存在すればローカルとして返す
-        // （DNS一時障害時のフォールバック）
-        let raw_user_id = UserId::validate_full(&id)
-            .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
-        if let Ok(keys) = fetch_local_user_keys(&state, &raw_user_id).await {
-            return Ok(keys);
-        }
-
         // 外部サーバのユーザ → 連合リクエスト（DNS解決後のドメインで取得）
         let remote_keys = crate::federation::client::fetch_user_keys(
             &resolved_domain,
             &resolved_local,
-            &auth.raw_auth_header,
             state.config.federation_allow_http,
         )
         .await?;

@@ -154,7 +154,7 @@ const ContactsView = () => {
                 className="flex items-center gap-3 px-4 py-3 border-b border-accent/10 hover:bg-accent/5 transition-colors"
               >
                 <Link
-                  href={`/contact/${c.userId}`}
+                  href={`/profile/${c.userId}`}
                   className="flex items-center gap-3 min-w-0 flex-1"
                 >
                   <Avatar name={c.displayName} iconUrl={c.iconUrl} />

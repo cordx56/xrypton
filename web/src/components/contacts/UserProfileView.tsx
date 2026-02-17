@@ -58,7 +58,7 @@ const UserProfileView = ({ userId }: Props) => {
   const { t } = useI18n();
   const { showError } = useErrorToast();
   const { verifyExtract, showWarning } = useSignatureVerifier();
-  const { withKeyRetry } = usePublicKeyResolver();
+  const { withKeyRetry, resolveKeys } = usePublicKeyResolver();
   const [displayName, setDisplayName] = useState("");
   const [status, setStatus] = useState("");
   const [bio, setBio] = useState("");
@@ -73,6 +73,7 @@ const UserProfileView = ({ userId }: Props) => {
   const [verificationState, setVerificationState] =
     useState<VerificationState>("pending");
 
+  const isLoggedIn = !!auth.userId && auth.isRegistered;
   const isOwnProfile = auth.userId === userId;
 
   // 署名済みフィールドから平文を抽出し検証状態を判定する
@@ -235,9 +236,9 @@ const UserProfileView = ({ userId }: Props) => {
     return () => window.removeEventListener("profile-updated", fetchProfile);
   }, [isOwnProfile, fetchProfile]);
 
-  // 他ユーザの場合、連絡先に追加済みか確認
+  // 他ユーザの場合、連絡先に追加済みか確認（ログイン時のみ）
   useEffect(() => {
-    if (isOwnProfile) return;
+    if (isOwnProfile || !isLoggedIn) return;
     (async () => {
       const signed = await auth.getSignedMessage();
       if (!signed) return;
@@ -246,7 +247,7 @@ const UserProfileView = ({ userId }: Props) => {
       ).contacts.list();
       setIsContact(contacts.some((c) => c.contact_user_id === userId));
     })();
-  }, [userId, isOwnProfile]);
+  }, [userId, isOwnProfile, isLoggedIn]);
 
   const handleAddContact = async () => {
     const signed = await auth.getSignedMessage();
@@ -277,6 +278,20 @@ const UserProfileView = ({ userId }: Props) => {
     ));
   };
 
+  const showOtherUserPublicKeys = async () => {
+    const keys = await resolveKeys(userId);
+    if (!keys) {
+      showError(t("error.unknown"));
+      return;
+    }
+    pushDialog((p) => (
+      <Dialog {...p} title={t("profile.public_keys")}>
+        <QrDisplay data={keys.signing_public_key} />
+        <Code code={keys.signing_public_key} />
+      </Dialog>
+    ));
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -298,21 +313,22 @@ const UserProfileView = ({ userId }: Props) => {
             <FontAwesomeIcon icon={faArrowLeft} />
           </button>
           <h2 className="text-lg font-semibold flex-1">{t("tab.profile")}</h2>
-          {isContact ? (
-            <span className="p-2 text-accent">
-              <FontAwesomeIcon icon={faCheck} />
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={handleAddContact}
-              disabled={addingContact}
-              className="p-2 hover:bg-accent/10 rounded disabled:opacity-50"
-              title={t("contacts.add")}
-            >
-              <FontAwesomeIcon icon={faPlus} />
-            </button>
-          )}
+          {isLoggedIn &&
+            (isContact ? (
+              <span className="p-2 text-accent">
+                <FontAwesomeIcon icon={faCheck} />
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={handleAddContact}
+                disabled={addingContact}
+                className="p-2 hover:bg-accent/10 rounded disabled:opacity-50"
+                title={t("contacts.add")}
+              >
+                <FontAwesomeIcon icon={faPlus} />
+              </button>
+            ))}
         </div>
       )}
 
@@ -379,6 +395,20 @@ const UserProfileView = ({ userId }: Props) => {
             {t("profile.bio")}
           </label>
           <p className="text-sm whitespace-pre-wrap">{linkify(bio)}</p>
+        </div>
+      )}
+
+      {/* 他ユーザの公開鍵表示 */}
+      {!isOwnProfile && (
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={showOtherUserPublicKeys}
+            className="w-full py-2 rounded border border-accent/30 hover:bg-accent/10 text-sm flex items-center justify-center gap-2"
+          >
+            <FontAwesomeIcon icon={faKey} />
+            {t("profile.public_keys")}
+          </button>
         </div>
       )}
 

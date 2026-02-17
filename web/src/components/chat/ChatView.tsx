@@ -176,7 +176,7 @@ const ChatView = ({
                 status={profile?.status ?? ""}
                 onClickUser={
                   senderId
-                    ? () => router.push(`/contact/${senderId}`)
+                    ? () => router.push(`/profile/${senderId}`)
                     : undefined
                 }
                 onDownloadFile={onDownloadFile}

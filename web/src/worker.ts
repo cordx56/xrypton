@@ -3,6 +3,7 @@ import init, {
   generate_private_keys,
   export_public_keys,
   get_signing_sub_key_id,
+  get_primary_fingerprint,
   get_private_key_user_ids,
   sign,
   sign_bytes,
@@ -130,6 +131,23 @@ worker.addEventListener("message", async ({ data }) => {
       post({
         call: "get_key_id",
         result: { success: true, data: { key_id: result.data.value[0].data } },
+      });
+    }
+  } else if (parsed.data.call === "get_primary_fingerprint") {
+    const result = WasmReturnValue.safeParse(
+      get_primary_fingerprint(parsed.data.publicKeys),
+    );
+    if (
+      result.success &&
+      result.data.result === "ok" &&
+      result.data.value[0].type === "string"
+    ) {
+      post({
+        call: "get_primary_fingerprint",
+        result: {
+          success: true,
+          data: { fingerprint: result.data.value[0].data },
+        },
       });
     }
   } else if (parsed.data.call === "encrypt") {

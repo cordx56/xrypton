@@ -92,9 +92,13 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
     async (rawUserId: string, publicKeys: string): Promise<string> => {
       const bracketMatch = rawUserId.match(/<([^>]+)>/);
       const address = bracketMatch ? bracketMatch[1] : rawUserId;
+      // WebAuthnのuser.nameはインポート時と一致させるため、@hostnameを含める
+      const webauthnName = address.includes("@")
+        ? address
+        : `${address}@${window.location.host}`;
 
       // 新規登録: WebAuthnクレデンシャルを新規作成
-      const webauthnOk = await auth.registerWebAuthn(address);
+      const webauthnOk = await auth.registerWebAuthn(webauthnName);
       if (!webauthnOk) {
         throw new Error("webauthn_failed");
       }

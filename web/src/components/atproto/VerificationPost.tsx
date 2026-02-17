@@ -7,51 +7,53 @@ import { useI18n } from "@/contexts/I18nContext";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
 import { authApiClient } from "@/api/client";
 import { buildSignatureTarget } from "@/utils/canonicalize";
-import { encodeToBase64 } from "@/utils/base64";
 
 /** OAuth認証直後に公開鍵を投稿させ、ATProtoアカウントとXryptonの紐付けを証明する画面 */
 const VerificationPost = () => {
   const { agent, completeVerification } = useAtproto();
-  const {
-    signText,
-    getSignedMessage,
-    userId,
-    privateKeys,
-    subPassphrase,
-    worker,
-  } = useAuth();
+  const { signText, getSignedMessage, userId, publicKeys, worker } = useAuth();
   const { t } = useI18n();
   const { showError } = useErrorToast();
   const [posting, setPosting] = useState(false);
-  const [signedUserId, setSignedUserId] = useState<string | null>(null);
+  const [fingerprint, setFingerprint] = useState<string | null>(null);
 
   const hostname =
     process.env.NEXT_PUBLIC_SERVER_HOSTNAME ??
     (typeof window !== "undefined" ? window.location.host : "localhost");
 
-  // userId の PGP署名をバイナリbase64で計算
+  // 主鍵のフィンガープリントを取得
   useEffect(() => {
-    if (!privateKeys || !subPassphrase || !userId || !worker) return;
-    worker.eventWaiter("sign_bytes", (result) => {
+    if (!publicKeys || !worker) return;
+    worker.eventWaiter("get_primary_fingerprint", (result) => {
       if (result.success) {
-        setSignedUserId(result.data.data);
+        setFingerprint(result.data.fingerprint);
       }
     });
     worker.postMessage({
-      call: "sign_bytes",
-      keys: privateKeys,
-      passphrase: subPassphrase,
-      payload: encodeToBase64(userId),
+      call: "get_primary_fingerprint",
+      publicKeys,
     });
-  }, [privateKeys, subPassphrase, userId, worker]);
+  }, [publicKeys, worker]);
+
+  const profileUrl = useMemo(
+    () =>
+      userId ? `https://${hostname}/profile/${encodeURIComponent(userId)}` : "",
+    [hostname, userId],
+  );
+
+  const formattedFingerprint = useMemo(
+    () => (fingerprint ? fingerprint.replace(/(.{4})(?=.)/g, "$1 ") : ""),
+    [fingerprint],
+  );
 
   const postText = useMemo(
-    () => `Xrypton at ${hostname} verification:\n\n${signedUserId ?? ""}`,
-    [hostname, signedUserId],
+    () =>
+      `Xrypton at ${hostname} verification:\n\n${formattedFingerprint}\n\nYou can view my public key: ${profileUrl}`,
+    [hostname, formattedFingerprint, profileUrl],
   );
 
   const handlePost = async () => {
-    if (!agent || !signedUserId || posting) return;
+    if (!agent || !fingerprint || posting) return;
     setPosting(true);
     try {
       // ATProtoに投稿
@@ -112,7 +114,7 @@ const VerificationPost = () => {
 
         <button
           onClick={handlePost}
-          disabled={posting || !signedUserId}
+          disabled={posting || !fingerprint}
           className="w-full px-6 py-3 rounded-full bg-accent text-white font-medium disabled:opacity-50 transition-opacity"
         >
           {posting ? (
