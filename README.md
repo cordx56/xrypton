@@ -15,11 +15,11 @@ Crypton is an end-to-end encrypted chat application built with a Rust backend an
 
 ```
 crypton/
-├── crypton-api/       Rust API server (Axum, SQLx)
-├── crypton-common/    Shared library (Rust + TypeScript schemas)
-├── crypton-wasm/      WebAssembly module for PGP operations
-├── crypton-web/       Next.js web frontend
-└── crypton-ecs/       Terraform infrastructure (AWS ECS)
+├── api/       Rust API server (Axum, SQLx)
+├── common/    Shared library (Rust + TypeScript schemas)
+├── wasm/      WebAssembly module for PGP operations
+├── web/       Next.js web frontend
+└── ecs/       Terraform infrastructure (AWS ECS)
 ```
 
 ### crypton-api
@@ -50,7 +50,7 @@ The frontend, built with Next.js 16, React 19, and Tailwind CSS 4. All cryptogra
 ### API Server
 
 ```bash
-cd crypton-api
+cd api
 cp .env.example .env
 # Edit .env if needed (see Environment Variables below)
 cargo run --bin server
@@ -74,11 +74,11 @@ The server listens on `http://localhost:8080` by default.
 
 ```bash
 # Build the WASM module first
-cd crypton-wasm
+cd wasm
 wasm-pack build --target web
 
 # Then start the dev server
-cd ../crypton-web
+cd ../web
 pnpm install
 pnpm dev
 ```

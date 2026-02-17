@@ -16,7 +16,7 @@ const nextConfig: NextConfig = {
     config.resolve.alias["@docs"] = path.resolve(
       process.cwd(),
       "..",
-      "crypton-docs",
+      "docs",
     );
     return config;
   },

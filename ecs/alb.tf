@@ -10,7 +10,7 @@ resource "aws_lb" "main" {
   }
 }
 
-# Target group: crypton-api
+# Target group: xrypton-api
 resource "aws_lb_target_group" "api" {
   name        = "${var.project}-api-tg"
   port        = 8080
@@ -33,7 +33,7 @@ resource "aws_lb_target_group" "api" {
   }
 }
 
-# Target group: crypton-web
+# Target group: xrypton-web
 resource "aws_lb_target_group" "web" {
   name        = "${var.project}-web-tg"
   port        = 3000
@@ -88,7 +88,7 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# Listener rule: /api/* → crypton-api (with URL rewrite to strip /api prefix)
+# Listener rule: /api/* → xrypton-api (with URL rewrite to strip /api prefix)
 # e.g. /api/v1/users → /v1/users
 resource "aws_lb_listener_rule" "api" {
   listener_arn = aws_lb_listener.https.arn

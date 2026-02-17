@@ -5,9 +5,9 @@ import type { ComponentType } from "react";
 
 type Params = { locale: string; slug?: string[] };
 
-const DOCS_DIR = path.resolve(process.cwd(), "..", "crypton-docs");
+const DOCS_DIR = path.resolve(process.cwd(), "..", "docs");
 
-// webpack require.context to discover all .md/.mdx files under crypton-docs
+// webpack require.context to discover all .md/.mdx files under docs
 const mdxContext = require.context("@docs", true, /\.mdx?$/);
 
 function loadMDX(locale: string, slug: string): ComponentType | null {

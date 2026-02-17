@@ -6,7 +6,7 @@ resource "aws_ecs_cluster" "main" {
   }
 }
 
-# --- crypton-api ---
+# --- xrypton-api ---
 
 resource "aws_ecs_task_definition" "api" {
   family                   = "${var.project}-api"
@@ -35,7 +35,7 @@ resource "aws_ecs_task_definition" "api" {
       { name = "S3_REGION", value = var.aws_region },
       { name = "VAPID_PUBLIC_KEY", value = var.vapid_public_key },
       { name = "SERVER_HOSTNAME", value = var.server_hostname },
-      { name = "RUST_LOG", value = "crypton_api=info,tower_http=info" },
+      { name = "RUST_LOG", value = "xrypton_api=info,tower_http=info" },
     ]
     secrets = concat(
       [{ name = "DATABASE_URL", valueFrom = local.database_url_secret_arn }],
@@ -88,7 +88,7 @@ resource "aws_ecs_service" "api" {
   }
 }
 
-# --- crypton-web ---
+# --- xrypton-web ---
 
 resource "aws_ecs_task_definition" "web" {
   family                   = "${var.project}-web"

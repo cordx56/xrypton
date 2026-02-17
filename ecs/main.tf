@@ -10,7 +10,7 @@ terraform {
 
   # S3 backend (uncomment and configure for remote state)
   # backend "s3" {
-  #   bucket = "crypton-tfstate"
+  #   bucket = "xrypton-tfstate"
   #   key    = "ecs/terraform.tfstate"
   #   region = "ap-northeast-1"
   # }

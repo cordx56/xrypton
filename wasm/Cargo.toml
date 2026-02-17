@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 base64 = "0.22.1"
 bytes = "1"
 chrono = "0.4"
-crypton-common = { path = "../crypton-common" }
+crypton-common = { path = "../common" }
 gloo = "0.11.0"
 pgp = { version = "0.18.0", features = ["wasm"] }
 rand = "0.8.5"

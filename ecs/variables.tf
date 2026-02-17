@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "project" {
   description = "Project name used for resource naming"
   type        = string
-  default     = "crypton"
+  default     = "xrypton"
 }
 
 variable "acm_certificate_arn" {
@@ -42,7 +42,7 @@ variable "availability_zones" {
 variable "db_master_username" {
   description = "Aurora PostgreSQL master username"
   type        = string
-  default     = "crypton"
+  default     = "xrypton"
 }
 
 variable "db_master_password" {
@@ -54,17 +54,17 @@ variable "db_master_password" {
 variable "db_name" {
   description = "Database name"
   type        = string
-  default     = "crypton"
+  default     = "xrypton"
 }
 
 variable "api_image" {
-  description = "Docker image for crypton-api (ECR URI with tag)"
+  description = "Docker image for xrypton-api (ECR URI with tag)"
   type        = string
   default     = ""
 }
 
 variable "web_image" {
-  description = "Docker image for crypton-web (ECR URI with tag)"
+  description = "Docker image for xrypton-web (ECR URI with tag)"
   type        = string
   default     = ""
 }
@@ -101,6 +101,6 @@ variable "vapid_private_key" {
 }
 
 variable "server_hostname" {
-  description = "Server hostname for federation (e.g. crypton.example.com)"
+  description = "Server hostname for federation (e.g. xrypton.example.com)"
   type        = string
 }

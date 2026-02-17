@@ -9,12 +9,12 @@ output "alb_url" {
 }
 
 output "ecr_api_repository_url" {
-  description = "ECR repository URL for crypton-api"
+  description = "ECR repository URL for xrypton-api"
   value       = aws_ecr_repository.api.repository_url
 }
 
 output "ecr_web_repository_url" {
-  description = "ECR repository URL for crypton-web"
+  description = "ECR repository URL for xrypton-web"
   value       = aws_ecr_repository.web.repository_url
 }
 

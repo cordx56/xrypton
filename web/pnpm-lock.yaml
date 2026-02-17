@@ -42,8 +42,8 @@ importers:
         specifier: ^2.0.13
         version: 2.0.13
       crypton-wasm:
-        specifier: file:../crypton-wasm/pkg
-        version: file:../crypton-wasm/pkg
+        specifier: file:../wasm/pkg
+        version: file:../wasm/pkg
       next:
         specifier: 16.0.10
         version: 16.0.10(@babel/core@7.28.5)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
@@ -1353,8 +1353,8 @@ packages:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
 
-  crypton-wasm@file:../crypton-wasm/pkg:
-    resolution: {directory: ../crypton-wasm/pkg, type: directory}
+  crypton-wasm@file:../wasm/pkg:
+    resolution: {directory: ../wasm/pkg, type: directory}
 
   cssesc@3.0.0:
     resolution: {integrity: sha512-/Tb/JcjK111nNScGob5MNtsntNM1aCNUDipB/TkwZFhyDrrE47SOx/18wF2bbjgc3ZzCSKW1T5nt5EbFoAz/Vg==}
@@ -4123,7 +4123,7 @@ snapshots:
       shebang-command: 2.0.0
       which: 2.0.2
 
-  crypton-wasm@file:../crypton-wasm/pkg: {}
+  crypton-wasm@file:../wasm/pkg: {}
 
   cssesc@3.0.0: {}
 
