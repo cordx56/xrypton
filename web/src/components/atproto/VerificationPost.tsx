@@ -7,6 +7,7 @@ import { useI18n } from "@/contexts/I18nContext";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
 import { authApiClient } from "@/api/client";
 import { buildSignatureTarget } from "@/utils/canonicalize";
+import { displayUserId } from "@/utils/schema";
 
 /** OAuth認証直後に公開鍵を投稿させ、ATProtoアカウントとXryptonの紐付けを証明する画面 */
 const VerificationPost = () => {
@@ -37,7 +38,9 @@ const VerificationPost = () => {
 
   const profileUrl = useMemo(
     () =>
-      userId ? `https://${hostname}/profile/${encodeURIComponent(userId)}` : "",
+      userId
+        ? `https://${hostname}/profile/${encodeURIComponent(displayUserId(userId))}`
+        : "",
     [hostname, userId],
   );
 

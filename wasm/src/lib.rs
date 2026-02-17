@@ -463,6 +463,41 @@ pub fn verify_extract_string(public_key: String, armored: &str) -> Result<JsValu
     .to_value())
 }
 
+/// armored PGP メッセージからデータを抽出し、署名検証結果も返す。
+/// 検証失敗でもデータは返す。
+/// 返り値: [String(plaintext), String("true"|"false")]
+#[wasm_bindgen]
+pub fn extract_and_verify_string(public_key: String, armored: &str) -> Result<JsValue, JsValue> {
+    let common_pk =
+        xrypton_common::keys::PublicKeys::try_from(public_key.as_str()).map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
+    let (bytes, verified) = common_pk.extract_and_verify(armored).map_err(|e| {
+        ReturnValue::Error {
+            message: e.to_string(),
+        }
+        .to_value()
+    })?;
+    let plaintext = String::from_utf8(bytes).map_err(|e| {
+        ReturnValue::Error {
+            message: e.to_string(),
+        }
+        .to_value()
+    })?;
+    Ok(ReturnValue::Ok {
+        value: vec![
+            ResultData::String { data: plaintext },
+            ResultData::String {
+                data: verified.to_string(),
+            },
+        ],
+    }
+    .to_value())
+}
+
 /// armored PGP メッセージから署名者の鍵IDを抽出する。
 /// 返り値: [String(key_id)]
 #[wasm_bindgen]

@@ -93,5 +93,37 @@ export function useSignatureVerifier() {
     [auth.worker],
   );
 
-  return { verifyExtract, isSignedMessage, showWarning };
+  /**
+   * 署名を検証しつつ平文を抽出する。
+   * 検証失敗でも平文が取得できれば返す。パース自体の失敗時のみ null。
+   */
+  const extractAndVerify = useCallback(
+    async (
+      publicKey: string,
+      armored: string,
+    ): Promise<{ text: string; verified: boolean } | null> => {
+      if (!auth.worker) return null;
+
+      return new Promise((resolve) => {
+        auth.worker!.eventWaiter("extract_and_verify_string", (result) => {
+          if (result.success) {
+            resolve({
+              text: result.data.plaintext,
+              verified: result.data.verified,
+            });
+          } else {
+            resolve(null);
+          }
+        });
+        auth.worker!.postMessage({
+          call: "extract_and_verify_string",
+          publicKey,
+          armored,
+        });
+      });
+    },
+    [auth.worker],
+  );
+
+  return { verifyExtract, extractAndVerify, isSignedMessage, showWarning };
 }

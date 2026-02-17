@@ -187,6 +187,19 @@ impl PublicKeys {
     /// 先にデータを読み出してからでないとペイロードが空になる。
     /// そのため `as_data_vec()` → `verify_read()` の順で呼ぶ。
     pub fn verify_and_extract(&self, armored: &str) -> Result<Vec<u8>, XryptonError> {
+        let (data, verified) = self.extract_and_verify(armored)?;
+        if verified {
+            Ok(data)
+        } else {
+            Err(XryptonError::Verification(
+                "signature verification failed".to_string(),
+            ))
+        }
+    }
+
+    /// armored PGP メッセージからデータを抽出し、署名検証結果とともに返す。
+    /// パース失敗時のみ Err を返し、署名不一致ではデータを返しつつ verified=false とする。
+    pub fn extract_and_verify(&self, armored: &str) -> Result<(Vec<u8>, bool), XryptonError> {
         let (msg, _) =
             Message::from_string(armored).map_err(|e| XryptonError::Verification(e.to_string()))?;
         let mut msg = msg
@@ -198,9 +211,8 @@ impl PublicKeys {
             .as_data_vec()
             .map_err(|e| XryptonError::Verification(e.to_string()))?;
         // 読み出し後に署名を検証する（drain は 0 バイト読み出し → verify のみ実行）
-        msg.verify_read(signing_key)
-            .map_err(|e| XryptonError::Verification(e.to_string()))?;
-        Ok(data)
+        let verified = msg.verify_read(signing_key).is_ok();
+        Ok((data, verified))
     }
 
     /// raw PGP バイト列の署名を検証してペイロードを取り出す。

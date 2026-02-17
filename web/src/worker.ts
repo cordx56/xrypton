@@ -17,6 +17,7 @@ import init, {
   extract_key_id_bytes,
   verify_detached_signature,
   verify_extract_string,
+  extract_and_verify_string,
   validate_passphrases,
 } from "xrypton-wasm";
 import {
@@ -823,6 +824,48 @@ worker.addEventListener("message", async ({ data }) => {
         result: {
           success: false,
           message: e instanceof Error ? e.message : "verify extract error",
+        },
+      });
+    }
+  } else if (parsed.data.call === "extract_and_verify_string") {
+    try {
+      const result = WasmReturnValue.safeParse(
+        extract_and_verify_string(parsed.data.publicKey, parsed.data.armored),
+      );
+      if (
+        result.success &&
+        result.data.result === "ok" &&
+        result.data.value[0]?.type === "string" &&
+        result.data.value[1]?.type === "string"
+      ) {
+        post({
+          call: "extract_and_verify_string",
+          result: {
+            success: true,
+            data: {
+              plaintext: result.data.value[0].data,
+              verified: result.data.value[1].data === "true",
+            },
+          },
+        });
+      } else {
+        post({
+          call: "extract_and_verify_string",
+          result: {
+            success: false,
+            message:
+              result.data?.result === "error"
+                ? result.data.message
+                : "extract and verify error",
+          },
+        });
+      }
+    } catch (e) {
+      post({
+        call: "extract_and_verify_string",
+        result: {
+          success: false,
+          message: e instanceof Error ? e.message : "extract and verify error",
         },
       });
     }

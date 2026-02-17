@@ -101,6 +101,12 @@ export function apiClient() {
         );
         return resp.json();
       },
+      getKeys: async (userId: string) => {
+        const resp = await apiFetch(
+          `/v1/user/${encodeURIComponent(userId)}/keys`,
+        );
+        return resp.json();
+      },
     },
     notification: {
       publicKey: async (): Promise<string> => {

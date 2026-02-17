@@ -57,7 +57,7 @@ const UserProfileView = ({ userId }: Props) => {
   const { pushDialog } = useDialogs();
   const { t } = useI18n();
   const { showError } = useErrorToast();
-  const { verifyExtract, showWarning } = useSignatureVerifier();
+  const { extractAndVerify, showWarning } = useSignatureVerifier();
   const { withKeyRetry, resolveKeys } = usePublicKeyResolver();
   const [displayName, setDisplayName] = useState("");
   const [status, setStatus] = useState("");
@@ -79,7 +79,8 @@ const UserProfileView = ({ userId }: Props) => {
   const isLoggedIn = !!auth.userId && auth.isRegistered;
   const isOwnProfile = auth.userId === userId;
 
-  // 署名済みフィールドから平文を抽出し検証状態を判定する
+  // 署名済みフィールドから平文を抽出し検証状態を判定する。
+  // 検証失敗でも平文が取れれば返す。
   const verifyField = useCallback(
     async (
       publicKey: string,
@@ -90,39 +91,45 @@ const UserProfileView = ({ userId }: Props) => {
         // 未署名データ（レガシー）
         return { text: value, verified: false };
       }
-      const plaintext = await verifyExtract(publicKey, value);
-      if (plaintext !== null) {
-        return { text: plaintext, verified: true };
+      const result = await extractAndVerify(publicKey, value);
+      if (result) {
+        return result;
       }
-      // 検証失敗 — armored データをそのまま表示はしない
+      // パース自体の失敗
       return { text: value, verified: false };
     },
-    [verifyExtract],
+    [extractAndVerify],
   );
 
-  // 全フィールドを検証し、1つでも失敗なら throw
+  type FieldResults = {
+    dnResult: { text: string; verified: boolean };
+    stResult: { text: string; verified: boolean };
+    biResult: { text: string; verified: boolean };
+  };
+
+  // 全フィールドを検証する。全て検証成功なら結果を返し、
+  // 1つでも失敗なら結果を添えて throw する（withKeyRetry のリトライ用）。
   const verifyAllFields = useCallback(
     async (
       signingKey: string,
       rawDn: string,
       rawSt: string,
       rawBi: string,
-    ): Promise<{
-      dnResult: { text: string; verified: boolean };
-      stResult: { text: string; verified: boolean };
-      biResult: { text: string; verified: boolean };
-    }> => {
+    ): Promise<FieldResults> => {
       const [dnResult, stResult, biResult] = await Promise.all([
         verifyField(signingKey, rawDn),
         verifyField(signingKey, rawSt),
         verifyField(signingKey, rawBi),
       ]);
+      const results = { dnResult, stResult, biResult };
       const allVerified =
         dnResult.verified && stResult.verified && biResult.verified;
       if (!allVerified) {
-        throw new Error("verification failed");
+        const err = new Error("verification failed");
+        (err as any).results = results;
+        throw err;
       }
-      return { dnResult, stResult, biResult };
+      return results;
     },
     [verifyField],
   );
@@ -174,23 +181,37 @@ const UserProfileView = ({ userId }: Props) => {
         }
       } else {
         // 他ユーザ: withKeyRetry で IDB キャッシュ + リトライ
+        // リトライ失敗時にも抽出データを使うため、最後の結果を保持する
+        let lastResults: FieldResults | null = null;
         const result = await withKeyRetry(
           userId,
-          (signingKey) => {
+          async (signingKey) => {
             setSigningPublicKey(signingKey);
-            return verifyAllFields(signingKey, rawDn, rawSt, rawBi);
+            try {
+              return await verifyAllFields(signingKey, rawDn, rawSt, rawBi);
+            } catch (e) {
+              if (e && typeof e === "object" && "results" in e) {
+                lastResults = (e as any).results;
+              }
+              throw e;
+            }
           },
           () => {
             showWarning(userId);
           },
         );
-        if (result) {
-          setDisplayName(result.dnResult.text);
-          setStatus(result.stResult.text);
-          setBio(result.biResult.text);
-          setVerificationState("verified");
+        const fields = result ?? lastResults;
+        if (fields) {
+          setDisplayName(fields.dnResult.text);
+          setStatus(fields.stResult.text);
+          setBio(fields.biResult.text);
+          const allVerified =
+            fields.dnResult.verified &&
+            fields.stResult.verified &&
+            fields.biResult.verified;
+          setVerificationState(allVerified ? "verified" : "unverified");
         } else {
-          // リトライ失敗 or 鍵取得失敗
+          // 鍵取得自体の失敗
           setDisplayName(rawDn);
           setStatus(rawSt);
           setBio(rawBi);
@@ -286,17 +307,23 @@ const UserProfileView = ({ userId }: Props) => {
   };
 
   const showOtherUserPublicKeys = async () => {
-    const keys = await resolveKeys(userId);
-    if (!keys) {
+    try {
+      // ログイン状態に関わらず認証不要APIで取得
+      const raw = await apiClient().user.getKeys(userId);
+      const signingKey = raw?.signing_public_key;
+      if (!signingKey) {
+        showError(t("error.unknown"));
+        return;
+      }
+      pushDialog((p) => (
+        <Dialog {...p} title={t("profile.public_keys")}>
+          <QrDisplay data={signingKey} />
+          <Code code={signingKey} />
+        </Dialog>
+      ));
+    } catch {
       showError(t("error.unknown"));
-      return;
     }
-    pushDialog((p) => (
-      <Dialog {...p} title={t("profile.public_keys")}>
-        <QrDisplay data={keys.signing_public_key} />
-        <Code code={keys.signing_public_key} />
-      </Dialog>
-    ));
   };
 
   if (loading) {
