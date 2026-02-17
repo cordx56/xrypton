@@ -25,44 +25,55 @@ export function useSignatureVerifier() {
   const { t } = useI18n();
 
   const showWarning = useCallback(
-    (userId: string, displayName?: string) => {
-      if (warnedUsers.has(userId)) return;
+    (userId: string, displayName?: string): Promise<void> => {
+      if (warnedUsers.has(userId)) return Promise.resolve();
       warnedUsers.add(userId);
 
       const label = displayName
         ? `${displayName} (${displayUserId(userId)})`
         : displayUserId(userId);
 
-      pushDialog((p) =>
-        createElement(
-          Dialog,
-          { ...p, title: t("security.signature_failed_title") },
-          createElement(
-            "div",
-            { className: "space-y-3" },
-            createElement("p", { className: "text-sm font-medium" }, label),
+      return new Promise<void>((resolve) => {
+        pushDialog((p) => {
+          const handleClose = () => {
+            p.close();
+            resolve();
+          };
+          return createElement(
+            Dialog,
+            {
+              ...p,
+              close: handleClose,
+              title: t("security.signature_failed_title"),
+            },
             createElement(
-              "p",
-              { className: "text-sm" },
-              t("security.signature_failed_message"),
+              "div",
+              { className: "space-y-3" },
+              createElement("p", { className: "text-sm font-medium" }, label),
+              createElement(
+                "p",
+                { className: "text-sm" },
+                t("security.signature_failed_message"),
+              ),
+              createElement(
+                "p",
+                { className: "text-sm text-muted" },
+                t("security.signature_failed_detail"),
+              ),
+              createElement(
+                "button",
+                {
+                  type: "button",
+                  onClick: handleClose,
+                  className:
+                    "px-4 py-2 bg-accent/30 rounded hover:bg-accent/50",
+                },
+                t("common.ok"),
+              ),
             ),
-            createElement(
-              "p",
-              { className: "text-sm text-muted" },
-              t("security.signature_failed_detail"),
-            ),
-            createElement(
-              "button",
-              {
-                type: "button",
-                onClick: p.close,
-                className: "px-4 py-2 bg-accent/30 rounded hover:bg-accent/50",
-              },
-              t("common.ok"),
-            ),
-          ),
-        ),
-      );
+          );
+        });
+      });
     },
     [pushDialog, t],
   );

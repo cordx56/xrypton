@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDialogs } from "@/contexts/DialogContext";
@@ -54,6 +54,16 @@ type ExternalAccount = {
 
 type VerificationState = "pending" | "verified" | "unverified";
 
+// プロフィールAPIレスポンスのセッション中キャッシュ
+type ProfileResponse = {
+  display_name?: string;
+  status?: string;
+  bio?: string;
+  icon_url?: string | null;
+  external_accounts?: ExternalAccount[];
+};
+const profileCache = new Map<string, ProfileResponse>();
+
 const UserProfileView = ({ userId }: Props) => {
   const auth = useAuth();
   const router = useRouter();
@@ -80,9 +90,12 @@ const UserProfileView = ({ userId }: Props) => {
   const [signingPublicKey, setSigningPublicKey] = useState<string | undefined>(
     undefined,
   );
+  const fetchedForRef = useRef<string | null>(null);
+  const isFetchingRef = useRef(false);
 
   const isLoggedIn = !!auth.userId && auth.isRegistered;
   const isOwnProfile = auth.userId === userId;
+  const hasWorker = !!auth.worker;
 
   // テキストフィールドとアイコンの検証状態を統合
   // アイコンがない場合はアイコン検証を無視する
@@ -153,9 +166,19 @@ const UserProfileView = ({ userId }: Props) => {
   );
 
   const fetchProfile = useCallback(async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     setLoading(true);
     try {
-      const profile = await apiClient().user.getProfile(userId);
+      // プロフィールAPIレスポンスをキャッシュから取得、なければフェッチ
+      let profile: ProfileResponse;
+      const cached = profileCache.get(userId);
+      if (cached) {
+        profile = cached;
+      } else {
+        profile = await apiClient().user.getProfile(userId);
+        profileCache.set(userId, profile);
+      }
       const rawDn = profile.display_name ?? "";
       const rawSt = profile.status ?? "";
       const rawBi = profile.bio ?? "";
@@ -166,6 +189,9 @@ const UserProfileView = ({ userId }: Props) => {
         isSignedMessage(rawDn) ||
         isSignedMessage(rawSt) ||
         isSignedMessage(rawBi);
+
+      // 検証失敗時の警告ダイアログを閉じるまでローディングを維持するための Promise
+      let warningPromise: Promise<void> | null = null;
 
       if (!hasSigned) {
         // 未署名データ（レガシー）
@@ -189,18 +215,19 @@ const UserProfileView = ({ userId }: Props) => {
           const allVerified =
             dnResult.verified && stResult.verified && biResult.verified;
           setTextVerificationState(allVerified ? "verified" : "unverified");
-          if (!allVerified) showWarning(userId, dnResult.text);
+          if (!allVerified) warningPromise = showWarning(userId, dnResult.text);
         } else {
           setDisplayName(rawDn);
           setStatus(rawSt);
           setBio(rawBi);
           setTextVerificationState("unverified");
-          showWarning(userId);
+          warningPromise = showWarning(userId);
         }
       } else if (isLoggedIn) {
         // ログイン済みの他ユーザ: withKeyRetry で IDB キャッシュ + リトライ
         // リトライ失敗時にも抽出データを使うため、最後の結果を保持する
         let lastResults: FieldResults | null = null;
+        let needsWarning = false;
         const result = await withKeyRetry(
           userId,
           async (signingKey) => {
@@ -215,7 +242,7 @@ const UserProfileView = ({ userId }: Props) => {
             }
           },
           () => {
-            showWarning(userId);
+            needsWarning = true;
           },
         );
         const fields = result ?? lastResults;
@@ -235,6 +262,7 @@ const UserProfileView = ({ userId }: Props) => {
           setBio(rawBi);
           setTextVerificationState("unverified");
         }
+        if (needsWarning) warningPromise = showWarning(userId);
       } else {
         // 未ログイン: 認証不要APIで公開鍵を取得し、署名内容を抽出
         try {
@@ -253,20 +281,21 @@ const UserProfileView = ({ userId }: Props) => {
             const allVerified =
               dnResult.verified && stResult.verified && biResult.verified;
             setTextVerificationState(allVerified ? "verified" : "unverified");
-            if (!allVerified) showWarning(userId, dnResult.text);
+            if (!allVerified)
+              warningPromise = showWarning(userId, dnResult.text);
           } else {
             setDisplayName(rawDn);
             setStatus(rawSt);
             setBio(rawBi);
             setTextVerificationState("unverified");
-            showWarning(userId);
+            warningPromise = showWarning(userId);
           }
         } catch {
           setDisplayName(rawDn);
           setStatus(rawSt);
           setBio(rawBi);
           setTextVerificationState("unverified");
-          showWarning(userId);
+          warningPromise = showWarning(userId);
         }
       }
 
@@ -287,14 +316,21 @@ const UserProfileView = ({ userId }: Props) => {
           iconUrl: resolvedIconUrl,
         });
       }
+
+      // 検証失敗の警告ダイアログが出ている場合、閉じるまでローディングを維持
+      if (warningPromise) await warningPromise;
+
+      fetchedForRef.current = userId;
     } catch {
       showError(t("error.unknown"));
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
   }, [
     userId,
     isOwnProfile,
+    isLoggedIn,
     showError,
     t,
     auth.publicKeys,
@@ -305,15 +341,34 @@ const UserProfileView = ({ userId }: Props) => {
   ]);
 
   useEffect(() => {
+    // auth 初期化と Worker の準備完了を待つ（PGP検証に必要）
+    if (!auth.isInitialized || !hasWorker) return;
+    // 自分のプロフィールで公開鍵の導出がまだなら待つ
+    if (isOwnProfile && auth.privateKeys && !auth.publicKeys) return;
+    // 同一ユーザについて再フェッチしない
+    if (fetchedForRef.current === userId) return;
     fetchProfile();
-  }, [fetchProfile]);
+  }, [
+    fetchProfile,
+    userId,
+    auth.isInitialized,
+    hasWorker,
+    isOwnProfile,
+    auth.privateKeys,
+    auth.publicKeys,
+  ]);
 
   // プロフィール編集画面からの更新通知を受け取って再取得
   useEffect(() => {
     if (!isOwnProfile) return;
-    window.addEventListener("profile-updated", fetchProfile);
-    return () => window.removeEventListener("profile-updated", fetchProfile);
-  }, [isOwnProfile, fetchProfile]);
+    const handleUpdate = () => {
+      profileCache.delete(userId);
+      fetchedForRef.current = null;
+      fetchProfile();
+    };
+    window.addEventListener("profile-updated", handleUpdate);
+    return () => window.removeEventListener("profile-updated", handleUpdate);
+  }, [isOwnProfile, fetchProfile, userId]);
 
   // 他ユーザの場合、連絡先に追加済みか確認（ログイン時のみ）
   useEffect(() => {
