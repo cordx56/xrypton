@@ -17,6 +17,7 @@ import {
   useSignatureVerifier,
   isSignedMessage,
 } from "@/hooks/useSignatureVerifier";
+import { bytesToBase64, base64ToBytes } from "@/utils/base64";
 
 /** プロフィール編集画面 */
 const ProfileEditView = () => {
@@ -104,7 +105,7 @@ const ProfileEditView = () => {
 
   const handleIconChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !auth.userId) return;
+    if (!file || !auth.userId || !auth.worker) return;
 
     const previewUrl = URL.createObjectURL(file);
     setIconUrl(previewUrl);
@@ -112,8 +113,35 @@ const ProfileEditView = () => {
     const signed = await auth.getSignedMessage();
     if (!signed) return;
     try {
+      // 画像バイト列をbase64エンコードしてWorkerで署名
+      const arrayBuf = await file.arrayBuffer();
+      const imageBase64 = bytesToBase64(new Uint8Array(arrayBuf));
+
+      const signedData = await new Promise<string>((resolve, reject) => {
+        auth.worker!.eventWaiter("sign_bytes", (result) => {
+          if (result.success) {
+            resolve(result.data.data);
+          } else {
+            reject(new Error(result.message));
+          }
+        });
+        auth.worker!.postMessage({
+          call: "sign_bytes",
+          keys: auth.privateKeys!,
+          passphrase: auth.subPassphrase!,
+          payload: imageBase64,
+        });
+      });
+
+      // 署名済みraw PGP bytesをBlobに変換してアップロード
+      const signedBlob = new Blob(
+        [base64ToBytes(signedData).buffer as ArrayBuffer],
+        {
+          type: "application/octet-stream",
+        },
+      );
       const client = authApiClient(signed.signedMessage);
-      await client.user.uploadIcon(auth.userId, file);
+      await client.user.uploadIcon(auth.userId, signedBlob);
       // キャッシュバスター付きのサーバURLで保存し、ヘッダーに通知
       const serverIconUrl = `${getApiBaseUrl()}/v1/user/${encodeURIComponent(auth.userId)}/icon?t=${Date.now()}`;
       setIconUrl(serverIconUrl);

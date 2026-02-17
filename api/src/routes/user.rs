@@ -523,10 +523,7 @@ async fn upload_icon(
         .map_err(|e| AppError::BadRequest(format!("multipart error: {e}")))?
         .ok_or_else(|| AppError::BadRequest("no file field".into()))?;
 
-    let content_type = field
-        .content_type()
-        .unwrap_or("application/octet-stream")
-        .to_string();
+    let content_type = "application/octet-stream";
     let data = field
         .bytes()
         .await
@@ -542,7 +539,7 @@ async fn upload_icon(
     let s3_key = format!("profiles/{}/icon", user_id.as_str());
     state
         .storage
-        .put_object(&s3_key, data.to_vec(), &content_type)
+        .put_object(&s3_key, data.to_vec(), content_type)
         .await
         .map_err(|e| AppError::Internal(format!("storage error: {e}")))?;
 
@@ -575,7 +572,7 @@ async fn get_icon(
             .map_err(|e| AppError::Internal(format!("storage error: {e}")))?;
 
         return Ok(Response::builder()
-            .header(header::CONTENT_TYPE, "image/png")
+            .header(header::CONTENT_TYPE, "application/octet-stream")
             .header(header::CACHE_CONTROL, "public, max-age=3600")
             .body(Body::from(data))
             .unwrap());
@@ -602,7 +599,7 @@ async fn get_icon(
             .await
             .map_err(|e| AppError::BadGateway(format!("proxy response failed: {e}")))?;
         return Ok(Response::builder()
-            .header(header::CONTENT_TYPE, "image/png")
+            .header(header::CONTENT_TYPE, "application/octet-stream")
             .header(header::CACHE_CONTROL, "public, max-age=3600")
             .body(Body::from(bytes))
             .unwrap());

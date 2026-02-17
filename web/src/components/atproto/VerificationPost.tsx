@@ -7,6 +7,7 @@ import { useI18n } from "@/contexts/I18nContext";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
 import { authApiClient } from "@/api/client";
 import { buildSignatureTarget } from "@/utils/canonicalize";
+import { encodeToBase64 } from "@/utils/base64";
 
 /** OAuth認証直後に公開鍵を投稿させ、ATProtoアカウントとXryptonの紐付けを証明する画面 */
 const VerificationPost = () => {
@@ -40,7 +41,7 @@ const VerificationPost = () => {
       call: "sign_bytes",
       keys: privateKeys,
       passphrase: subPassphrase,
-      payload: userId,
+      payload: encodeToBase64(userId),
     });
   }, [privateKeys, subPassphrase, userId, worker]);
 

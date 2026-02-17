@@ -238,7 +238,7 @@ worker.addEventListener("message", async ({ data }) => {
       });
     }
   } else if (parsed.data.call === "sign_bytes") {
-    const payload = new TextEncoder().encode(parsed.data.payload);
+    const payload = Buffer.from(parsed.data.payload, "base64");
     const result = WasmReturnValue.safeParse(
       sign_bytes(parsed.data.keys, parsed.data.passphrase, payload),
     );
@@ -805,6 +805,51 @@ worker.addEventListener("message", async ({ data }) => {
         result: {
           success: false,
           message: e instanceof Error ? e.message : "verify extract error",
+        },
+      });
+    }
+  } else if (parsed.data.call === "verify_extract_bytes") {
+    try {
+      const rawData = Buffer.from(parsed.data.data, "base64");
+      const result = WasmReturnValue.safeParse(
+        unwrap_outer_bytes(parsed.data.publicKey, rawData),
+      );
+      if (
+        result.success &&
+        result.data.result === "ok" &&
+        result.data.value.length >= 2 &&
+        result.data.value[0].type === "base64" &&
+        result.data.value[1].type === "string"
+      ) {
+        post({
+          call: "verify_extract_bytes",
+          result: {
+            success: true,
+            data: {
+              data: result.data.value[0].data,
+              keyId: result.data.value[1].data,
+            },
+          },
+        });
+      } else {
+        post({
+          call: "verify_extract_bytes",
+          result: {
+            success: false,
+            message:
+              result.data?.result === "error"
+                ? result.data.message
+                : "verify extract bytes error",
+          },
+        });
+      }
+    } catch (e) {
+      post({
+        call: "verify_extract_bytes",
+        result: {
+          success: false,
+          message:
+            e instanceof Error ? e.message : "verify extract bytes error",
         },
       });
     }

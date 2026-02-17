@@ -192,9 +192,9 @@ export function authApiClient(signedMessage: string) {
         );
         return resp.json();
       },
-      uploadIcon: async (id: string, file: File) => {
+      uploadIcon: async (id: string, blob: Blob) => {
         const formData = new FormData();
-        formData.append("icon", file);
+        formData.append("icon", blob);
         const baseUrl = getApiBaseUrl();
         const url = baseUrl.startsWith("/")
           ? `${baseUrl}/v1/user/${encodeURIComponent(id)}/icon`

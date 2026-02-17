@@ -17,6 +17,7 @@ export const WorkerResultCallList = {
   validate_passphrases: "validate_passphrases",
   get_private_key_user_ids: "get_private_key_user_ids",
   verify_extract_string: "verify_extract_string",
+  verify_extract_bytes: "verify_extract_bytes",
 } as const;
 export type WorkerResultCall =
   (typeof WorkerResultCallList)[keyof typeof WorkerResultCallList];
@@ -312,7 +313,7 @@ export const WorkerCallMessage = z.union([
     call: z.literal(WorkerResultCallList["sign_bytes"]),
     keys: z.string(),
     passphrase: z.string(),
-    payload: z.string(),
+    payload: z.base64(),
   }),
   z.object({
     call: z.literal(WorkerResultCallList["validate_passphrases"]),
@@ -328,6 +329,11 @@ export const WorkerCallMessage = z.union([
     call: z.literal(WorkerResultCallList["verify_extract_string"]),
     publicKey: z.string(),
     armored: z.string(),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["verify_extract_bytes"]),
+    publicKey: z.string(),
+    data: z.base64(),
   }),
 ]);
 
@@ -410,5 +416,9 @@ export const WorkerResultMessage = z.union([
   z.object({
     call: z.literal(WorkerResultCallList["verify_extract_string"]),
     result: WorkerResult(z.object({ plaintext: z.string() })),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["verify_extract_bytes"]),
+    result: WorkerResult(z.object({ data: z.base64(), keyId: z.string() })),
   }),
 ]);
