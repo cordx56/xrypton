@@ -26,7 +26,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" data-mode="dark" data-theme="muted-blue">
+    <html lang="en" data-mode="dark" data-theme="muted-red">
       <head>
         <title>Xrypton</title>
         <meta

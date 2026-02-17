@@ -12,7 +12,7 @@ type ThemeContextType = {
 };
 
 const ThemeContext = createContext<ThemeContextType>({
-  color: "muted-blue",
+  color: "muted-red",
   mode: "dark",
   setColor: () => {},
   setMode: () => {},
@@ -21,7 +21,7 @@ const ThemeContext = createContext<ThemeContextType>({
 export const ThemeProvider = ({ children }: { children: ReactNode }) => {
   const [color, setColor] = useLocalStorage<ThemeColor>(
     "theme-color",
-    "muted-blue",
+    "muted-red",
   );
   const [mode, setMode] = useLocalStorage<ThemeMode>("theme-mode", "dark");
 
