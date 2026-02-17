@@ -254,8 +254,8 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const knownPublicKeys = useRef<PublicKeyMap>({});
   // メンバー暗号化公開鍵のキャッシュ（暗号化用、グループ選択時に取得）
   const encryptionPublicKeys = useRef<string[]>([]);
-  // signing_key_id → user_id の逆引きマップ
-  const keyIdToUserId = useRef<Record<string, string>>({});
+  // primary_key_fingerprint → user_id の逆引きマップ
+  const fingerprintToUserId = useRef<Record<string, string>>({});
   // リトライ済みメッセージの追跡（重複防止）
   const retryingMessages = useRef<Set<string>>(new Set());
   // メンバープロフィールのキャッシュ
@@ -530,18 +530,18 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
 
       const pubKeys: PublicKeyMap = {};
       const encPubKeys: string[] = [];
-      const keyIdMap: Record<string, string> = {};
+      const fingerprintMap: Record<string, string> = {};
       const profiles: Record<string, MemberProfile> = {};
       for (const member of data.members ?? []) {
         try {
           const resolved = await resolveKeys(member.user_id);
           if (resolved) {
-            pubKeys[resolved.signing_key_id] = {
+            pubKeys[resolved.primary_key_fingerprint] = {
               name: member.user_id,
               publicKeys: resolved.signing_public_key,
             };
             encPubKeys.push(resolved.encryption_public_key);
-            keyIdMap[resolved.signing_key_id] = member.user_id;
+            fingerprintMap[resolved.primary_key_fingerprint] = member.user_id;
           }
         } catch {
           // 公開鍵を取得できないメンバーはスキップ
@@ -569,7 +569,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       }
       knownPublicKeys.current = pubKeys;
       encryptionPublicKeys.current = encPubKeys;
-      keyIdToUserId.current = keyIdMap;
+      fingerprintToUserId.current = fingerprintMap;
       setMemberProfiles(profiles);
 
       // 空名グループの場合、メンバー表示名で代替しキャッシュに保存
@@ -897,17 +897,19 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     if (result.status === "changed") {
       // インメモリ ref を更新（confirmed に関わらず復号リトライ用）
       // 古い key_id のエントリを削除
-      for (const [keyId, uid] of Object.entries(keyIdToUserId.current)) {
+      for (const [fingerprint, uid] of Object.entries(
+        fingerprintToUserId.current,
+      )) {
         if (uid === userId) {
-          delete knownPublicKeys.current[keyId];
-          delete keyIdToUserId.current[keyId];
+          delete knownPublicKeys.current[fingerprint];
+          delete fingerprintToUserId.current[fingerprint];
         }
       }
-      knownPublicKeys.current[result.keys.signing_key_id] = {
+      knownPublicKeys.current[result.keys.primary_key_fingerprint] = {
         name: userId,
         publicKeys: result.keys.signing_public_key,
       };
-      keyIdToUserId.current[result.keys.signing_key_id] = userId;
+      fingerprintToUserId.current[result.keys.primary_key_fingerprint] = userId;
       return { changed: true };
     }
     return { changed: false };

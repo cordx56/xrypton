@@ -109,6 +109,22 @@ pub fn extract_issuer_key_id(armored: &str) -> Result<String, XryptonError> {
     extract_issuer_key_id_from_bytes(&bytes)
 }
 
+/// PGP署名メッセージから署名者のフィンガープリントを検証なしで抽出する。
+///
+/// Signature パケットの issuer_fingerprint 情報を使用する。
+pub fn extract_issuer_fingerprint(armored: &str) -> Result<String, XryptonError> {
+    use pgp::armor::Dearmor;
+    use std::io::{BufReader, Read};
+
+    let mut dearmor = Dearmor::new(BufReader::new(armored.as_bytes()));
+    let mut bytes = Vec::new();
+    dearmor
+        .read_to_end(&mut bytes)
+        .map_err(|e| XryptonError::Verification(format!("dearmor failed: {e}")))?;
+
+    extract_issuer_fingerprint_from_bytes(&bytes)
+}
+
 /// raw PGP バイト列から署名者の鍵IDを検証なしで抽出する。
 ///
 /// CompressedData パケットがあれば展開してから内部パケットを走査する。
@@ -149,6 +165,41 @@ pub fn extract_issuer_key_id_from_bytes(data: &[u8]) -> Result<String, XryptonEr
     ))
 }
 
+/// raw PGP バイト列から署名者のフィンガープリントを検証なしで抽出する。
+///
+/// CompressedData パケットがあれば展開してから内部パケットを走査する。
+pub fn extract_issuer_fingerprint_from_bytes(data: &[u8]) -> Result<String, XryptonError> {
+    use pgp::packet::{Packet, PacketParser};
+    use std::io::{BufReader, Read};
+
+    let parser = PacketParser::new(BufReader::new(data));
+
+    for result in parser.flatten() {
+        match result {
+            Packet::Signature(ref sig) => {
+                if let Some(fingerprint) = sig.issuer_fingerprint().first() {
+                    return Ok(format!("{fingerprint:X}"));
+                }
+            }
+            Packet::CompressedData(ref cd) => {
+                let mut decompressed = Vec::new();
+                cd.decompress()
+                    .map_err(|e| XryptonError::Verification(format!("decompress failed: {e}")))?
+                    .read_to_end(&mut decompressed)
+                    .map_err(|e| {
+                        XryptonError::Verification(format!("decompress read failed: {e}"))
+                    })?;
+                return extract_issuer_fingerprint_from_bytes(&decompressed);
+            }
+            _ => continue,
+        }
+    }
+
+    Err(XryptonError::Verification(
+        "no issuer fingerprint found in message".into(),
+    ))
+}
+
 /// Server-side public key holder for signature verification.
 #[derive(Debug)]
 pub struct PublicKeys {
@@ -167,6 +218,11 @@ impl PublicKeys {
     /// Returns the key ID of the signing subkey (hex string).
     pub fn get_signing_sub_key_id(&self) -> Result<String, XryptonError> {
         Ok(self.signing_public()?.key_id().to_string())
+    }
+
+    /// 主鍵のフィンガープリントを大文字16進文字列で返す。
+    pub fn get_primary_fingerprint(&self) -> String {
+        format!("{:X}", self.keys.fingerprint())
     }
 
     /// PGP公開鍵のプライマリユーザIDからアドレス（`user@domain`）を抽出する。

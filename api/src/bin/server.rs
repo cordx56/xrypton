@@ -33,6 +33,9 @@ async fn main() {
     db::migrate_user_ids(&pool, &config.server_hostname)
         .await
         .expect("failed to migrate user IDs");
+    db::migrate_primary_key_fingerprint(&pool)
+        .await
+        .expect("failed to migrate primary key fingerprints");
 
     {
         let cleanup_pool = pool.clone();

@@ -24,7 +24,9 @@ import {
   faRepeat,
   faShieldHalved,
 } from "@fortawesome/free-solid-svg-icons";
-import Avatar from "@/components/common/Avatar";
+import Avatar, {
+  type VerifyState as AvatarVerifyState,
+} from "@/components/common/Avatar";
 import Spinner from "@/components/common/Spinner";
 import Dialog from "@/components/common/Dialog";
 import Code from "@/components/Code";
@@ -47,6 +49,7 @@ type ExternalAccount = {
   validated: boolean;
   did: string;
   handle: string | null;
+  pds_url: string;
 };
 
 type VerificationState = "pending" | "verified" | "unverified";
@@ -70,14 +73,29 @@ const UserProfileView = ({ userId }: Props) => {
   );
   const [isContact, setIsContact] = useState(false);
   const [addingContact, setAddingContact] = useState(false);
-  const [verificationState, setVerificationState] =
+  const [textVerificationState, setTextVerificationState] =
     useState<VerificationState>("pending");
+  const [iconVerifyState, setIconVerifyState] =
+    useState<AvatarVerifyState>("loading");
   const [signingPublicKey, setSigningPublicKey] = useState<string | undefined>(
     undefined,
   );
 
   const isLoggedIn = !!auth.userId && auth.isRegistered;
   const isOwnProfile = auth.userId === userId;
+
+  // テキストフィールドとアイコンの検証状態を統合
+  // アイコンがない場合はアイコン検証を無視する
+  const iconFailed = !!iconUrl && iconVerifyState === "warning";
+  const iconLoading = !!iconUrl && iconVerifyState === "loading";
+  const verificationState: VerificationState =
+    textVerificationState === "pending"
+      ? "pending"
+      : textVerificationState === "unverified" || iconFailed
+        ? "unverified"
+        : iconLoading
+          ? "pending"
+          : "verified";
 
   // 署名済みフィールドから平文を抽出し検証状態を判定する。
   // 検証失敗でも平文が取れれば返す。
@@ -154,7 +172,7 @@ const UserProfileView = ({ userId }: Props) => {
         setDisplayName(rawDn);
         setStatus(rawSt);
         setBio(rawBi);
-        setVerificationState("pending");
+        setTextVerificationState("pending");
       } else if (isOwnProfile) {
         // 自分のプロフィール: auth.publicKeys で検証
         const signingKey = auth.publicKeys ?? null;
@@ -170,17 +188,17 @@ const UserProfileView = ({ userId }: Props) => {
           setBio(biResult.text);
           const allVerified =
             dnResult.verified && stResult.verified && biResult.verified;
-          setVerificationState(allVerified ? "verified" : "unverified");
+          setTextVerificationState(allVerified ? "verified" : "unverified");
           if (!allVerified) showWarning(userId, dnResult.text);
         } else {
           setDisplayName(rawDn);
           setStatus(rawSt);
           setBio(rawBi);
-          setVerificationState("unverified");
+          setTextVerificationState("unverified");
           showWarning(userId);
         }
-      } else {
-        // 他ユーザ: withKeyRetry で IDB キャッシュ + リトライ
+      } else if (isLoggedIn) {
+        // ログイン済みの他ユーザ: withKeyRetry で IDB キャッシュ + リトライ
         // リトライ失敗時にも抽出データを使うため、最後の結果を保持する
         let lastResults: FieldResults | null = null;
         const result = await withKeyRetry(
@@ -209,13 +227,46 @@ const UserProfileView = ({ userId }: Props) => {
             fields.dnResult.verified &&
             fields.stResult.verified &&
             fields.biResult.verified;
-          setVerificationState(allVerified ? "verified" : "unverified");
+          setTextVerificationState(allVerified ? "verified" : "unverified");
         } else {
           // 鍵取得自体の失敗
           setDisplayName(rawDn);
           setStatus(rawSt);
           setBio(rawBi);
-          setVerificationState("unverified");
+          setTextVerificationState("unverified");
+        }
+      } else {
+        // 未ログイン: 認証不要APIで公開鍵を取得し、署名内容を抽出
+        try {
+          const keysRaw = await apiClient().user.getKeys(userId);
+          const signingKey = keysRaw?.signing_public_key;
+          if (signingKey) {
+            setSigningPublicKey(signingKey);
+            const [dnResult, stResult, biResult] = await Promise.all([
+              verifyField(signingKey, rawDn),
+              verifyField(signingKey, rawSt),
+              verifyField(signingKey, rawBi),
+            ]);
+            setDisplayName(dnResult.text);
+            setStatus(stResult.text);
+            setBio(biResult.text);
+            const allVerified =
+              dnResult.verified && stResult.verified && biResult.verified;
+            setTextVerificationState(allVerified ? "verified" : "unverified");
+            if (!allVerified) showWarning(userId, dnResult.text);
+          } else {
+            setDisplayName(rawDn);
+            setStatus(rawSt);
+            setBio(rawBi);
+            setTextVerificationState("unverified");
+            showWarning(userId);
+          }
+        } catch {
+          setDisplayName(rawDn);
+          setStatus(rawSt);
+          setBio(rawBi);
+          setTextVerificationState("unverified");
+          showWarning(userId);
         }
       }
 
@@ -372,11 +423,12 @@ const UserProfileView = ({ userId }: Props) => {
           iconUrl={iconUrl}
           publicKey={signingPublicKey}
           size="xl"
+          onVerifyStateChange={setIconVerifyState}
         />
         <h2 className="mt-3 text-lg font-semibold">
           {displayName || displayUserId(userId)}
         </h2>
-        <p className="text-xs text-muted/50 select-all">
+        <p className="text-sm text-muted/50 select-all">
           {displayUserId(userId)}
         </p>
         {status && <p className="text-sm text-muted mt-1">{status}</p>}
@@ -405,18 +457,27 @@ const UserProfileView = ({ userId }: Props) => {
 
       {externalAccounts.length > 0 && (
         <div className="flex flex-wrap gap-2 justify-center">
-          {externalAccounts.map((account) => (
-            <span
-              key={account.did}
-              className={`inline-flex items-center gap-1.5 text-sm ${
-                account.validated ? "text-muted" : "text-red-500"
-              }`}
-              title={account.did}
-            >
-              <FontAwesomeIcon icon={faAt} />
-              {account.handle ?? account.did}
-            </span>
-          ))}
+          {externalAccounts.map((account) => {
+            const label = account.handle ?? account.did;
+            const href = account.handle
+              ? `https://bsky.app/profile/${account.handle}`
+              : `https://bsky.app/profile/${account.did}`;
+            return (
+              <a
+                key={account.did}
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`inline-flex items-center gap-1.5 text-sm hover:underline ${
+                  account.validated ? "text-muted" : "text-red-500"
+                }`}
+                title={account.did}
+              >
+                <FontAwesomeIcon icon={faAt} />
+                {label}
+              </a>
+            );
+          })}
         </div>
       )}
 

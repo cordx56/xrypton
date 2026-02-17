@@ -4,13 +4,14 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { bytesToBase64, base64ToBytes } from "@/utils/base64";
 
-type VerifyState = "verified" | "warning" | "loading";
+export type VerifyState = "verified" | "warning" | "loading";
 
 type Props = {
   name: string;
   iconUrl?: string | null;
   publicKey?: string;
   size?: "xs" | "sm" | "md" | "lg" | "xl";
+  onVerifyStateChange?: (state: VerifyState) => void;
 };
 
 const sizeClasses = {
@@ -29,12 +30,22 @@ const warningBadgeSizes = {
   xl: "w-7 h-7 text-sm",
 };
 
-const Avatar = ({ name, iconUrl, publicKey, size = "md" }: Props) => {
+const Avatar = ({
+  name,
+  iconUrl,
+  publicKey,
+  size = "md",
+  onVerifyStateChange,
+}: Props) => {
   const initial = name.charAt(0).toUpperCase() || "?";
   const auth = useAuth();
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
   const [verifyState, setVerifyState] = useState<VerifyState>("warning");
   const prevUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    onVerifyStateChange?.(verifyState);
+  }, [verifyState, onVerifyStateChange]);
 
   useEffect(() => {
     // 前回のblob URLをクリーンアップ
@@ -65,7 +76,7 @@ const Avatar = ({ name, iconUrl, publicKey, size = "md" }: Props) => {
           const dataBase64 = bytesToBase64(rawBytes);
 
           const result = await new Promise<
-            | { success: true; data: { data: string; keyId: string } }
+            | { success: true; data: { data: string; fingerprint: string } }
             | { success: false }
           >((resolve) => {
             worker.eventWaiter("verify_extract_bytes", (r) => {

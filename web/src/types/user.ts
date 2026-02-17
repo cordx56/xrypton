@@ -2,7 +2,7 @@ export type UserKeys = {
   id: string;
   encryption_public_key: string;
   signing_public_key: string;
-  signing_key_id: string;
+  primary_key_fingerprint: string;
 };
 
 export type UserProfile = {

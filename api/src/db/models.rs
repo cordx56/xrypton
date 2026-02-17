@@ -12,7 +12,7 @@ pub struct UserRow {
     pub id: String,
     pub encryption_public_key: String,
     pub signing_public_key: String,
-    pub signing_key_id: String,
+    pub primary_key_fingerprint: String,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -148,5 +148,6 @@ pub enum ExternalAccount {
         validated: bool,
         did: String,
         handle: Option<String>,
+        pds_url: String,
     },
 }

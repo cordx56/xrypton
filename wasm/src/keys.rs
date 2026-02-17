@@ -8,7 +8,7 @@ use pgp::{
 };
 use rand::rngs::OsRng;
 
-/// (plaintext, detached_signature, issuer_key_ids)
+/// (plaintext, detached_signature, issuer_fingerprints)
 pub type DecryptResult = (Vec<u8>, Option<String>, Vec<String>);
 
 #[derive(Debug)]
@@ -69,7 +69,7 @@ impl PrivateKeys {
         Ok(SubpacketConfig::UserDefined { hashed, unhashed })
     }
 
-    /// returns (data, signature, issuers)
+    /// returns (data, signature, issuer_fingerprints)
     #[tracing::instrument]
     pub fn decrypt(&self, passphrase: &str, armor: &str) -> Result<DecryptResult, Error> {
         let (msg, _) =
@@ -107,8 +107,13 @@ impl PrivateKeys {
             Message::SignedOnePass { reader, .. } => reader.signature(),
             _ => None,
         };
-        let issuers = signature
-            .map(|v| v.issuer().iter().map(|w| w.to_string()).collect())
+        let issuer_fingerprints = signature
+            .map(|v| {
+                v.issuer_fingerprint()
+                    .into_iter()
+                    .map(|fp| format!("{fp:X}"))
+                    .collect()
+            })
             .unwrap_or(Vec::new());
         let signature = signature.map_or(Ok(None), |v| {
             DetachedSignature::new(v.clone())
@@ -116,7 +121,7 @@ impl PrivateKeys {
                 .map(Some)
                 .map_err(|e| Error::VerificationError(e.to_string()))
         })?;
-        Ok((data, signature, issuers))
+        Ok((data, signature, issuer_fingerprints))
     }
 
     /// 署名済みメッセージビルダーを構築し、`finish` で出力形式を決定する。

@@ -86,12 +86,10 @@ async fn post_keys(
             .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?
     };
 
-    // signing key ID を抽出して検証
+    // 主鍵フィンガープリントを抽出
     let public_keys = xrypton_common::keys::PublicKeys::try_from(body.signing_public_key.as_str())
         .map_err(|e| AppError::BadRequest(format!("invalid signing public key: {e}")))?;
-    let signing_key_id = public_keys
-        .get_signing_sub_key_id()
-        .map_err(|e| AppError::BadRequest(format!("failed to get signing key id: {e}")))?;
+    let fingerprint = public_keys.get_primary_fingerprint();
 
     // PGP公開鍵のユーザIDが登録IDと一致するか検証（ドメインだけでなく名前も確認）
     let key_address = public_keys
@@ -114,7 +112,7 @@ async fn post_keys(
         &user_id,
         &body.encryption_public_key,
         &body.signing_public_key,
-        &signing_key_id,
+        &fingerprint,
     )
     .await?;
 
@@ -137,16 +135,14 @@ async fn update_keys(
 
     let public_keys = xrypton_common::keys::PublicKeys::try_from(body.signing_public_key.as_str())
         .map_err(|e| AppError::BadRequest(format!("invalid signing public key: {e}")))?;
-    let signing_key_id = public_keys
-        .get_signing_sub_key_id()
-        .map_err(|e| AppError::BadRequest(format!("failed to get signing key id: {e}")))?;
+    let fingerprint = public_keys.get_primary_fingerprint();
 
     let updated = db::users::update_user_keys(
         &state.pool,
         &user_id,
         &body.encryption_public_key,
         &body.signing_public_key,
-        &signing_key_id,
+        &fingerprint,
     )
     .await?;
 
@@ -169,7 +165,7 @@ async fn fetch_local_user_keys(
         "id": user.id,
         "encryption_public_key": user.encryption_public_key,
         "signing_public_key": user.signing_public_key,
-        "signing_key_id": user.signing_key_id,
+        "primary_key_fingerprint": user.primary_key_fingerprint,
     })))
 }
 
@@ -247,15 +243,13 @@ async fn get_keys(
         let public_keys =
             xrypton_common::keys::PublicKeys::try_from(remote_keys.signing_public_key.as_str())
                 .map_err(|e| AppError::BadGateway(format!("invalid remote signing key: {e}")))?;
-        let remote_signing_key_id = public_keys
-            .get_signing_sub_key_id()
-            .map_err(|e| AppError::BadGateway(format!("failed to get remote key id: {e}")))?;
+        let fingerprint = public_keys.get_primary_fingerprint();
         db::users::upsert_external_user(
             &state.pool,
             &full_id,
             &remote_keys.encryption_public_key,
             &remote_keys.signing_public_key,
-            &remote_signing_key_id,
+            &fingerprint,
         )
         .await?;
 
@@ -263,7 +257,7 @@ async fn get_keys(
             "id": remote_keys.id,
             "encryption_public_key": remote_keys.encryption_public_key,
             "signing_public_key": remote_keys.signing_public_key,
-            "signing_key_id": remote_keys.signing_key_id,
+            "primary_key_fingerprint": fingerprint,
         })));
     }
 
@@ -304,6 +298,7 @@ async fn build_external_accounts(state: &AppState, user_id: &str) -> Vec<Externa
             validated,
             did: a.atproto_did,
             handle: a.atproto_handle,
+            pds_url: a.pds_url,
         });
     }
     result

@@ -5,7 +5,7 @@ import { getKey, setKey, deleteKey, deleteKeysWithPrefix } from "./keyStore";
  * keyStore の汎用 KV ストアを `pubkey:{userId}` キーで利用する。
  */
 export type CachedPublicKeys = {
-  signing_key_id: string;
+  primary_key_fingerprint: string;
   signing_public_key: string;
   encryption_public_key: string;
 };

@@ -16,13 +16,13 @@ use crate::types::UserId;
 /// The header must contain a base64-encoded PGP-signed message whose plaintext is
 /// `{"nonce":"<iso8601>"}`.
 /// サーバーはnonceのタイムスタンプが現在時刻から前後1時間以内であることを検証する。
-/// The server extracts the signing key ID from the PGP message, looks up the user,
-/// verifies the signature against the user's registered signing key,
+/// The server extracts the signer user ID from the PGP SignersUserID subpacket,
+/// looks up the user, verifies the signature against the user's registered signing key,
 /// then checks the nonce has not been used before.
 #[derive(Debug, Clone)]
 pub struct AuthenticatedUser {
     pub user_id: UserId,
-    pub signing_key_id: String,
+    pub primary_key_fingerprint: String,
     pub signing_public_key: String,
     /// 転送用にbase64エンコード済みAuthorizationヘッダーを保持
     pub raw_auth_header: String,
@@ -42,13 +42,15 @@ pub(crate) async fn authenticate(
     let auth_header = String::from_utf8(auth_decoded)
         .map_err(|e| AppError::Unauthorized(format!("invalid utf-8 in authorization: {e}")))?;
 
-    let signing_key_id = xrypton_common::keys::extract_issuer_key_id(&auth_header)
-        .map_err(|e| AppError::Unauthorized(format!("failed to extract key ID: {e}")))?;
+    // SignersUserIDサブパケットからユーザIDを抽出してDB検索
+    let signer_address = xrypton_common::keys::extract_signer_user_id(&auth_header)
+        .map_err(|e| AppError::Unauthorized(format!("failed to extract signer user ID: {e}")))?;
 
-    let user = db::users::get_user_by_signing_key_id(pool, &signing_key_id).await?;
+    // ローカルユーザとして解決を試みる（ドメイン付きIDでDB検索）
+    let user_id = UserId::resolve_local(&signer_address, &config.server_hostname)
+        .unwrap_or_else(|_| UserId(signer_address.clone()));
 
-    if let Some(user) = user {
-        let user_id = UserId(user.id.clone());
+    if let Some(user) = db::users::get_user(pool, &user_id).await? {
         let public_keys =
             xrypton_common::keys::PublicKeys::try_from(user.signing_public_key.as_str())
                 .map_err(|e| AppError::Unauthorized(format!("invalid signing key: {e}")))?;
@@ -67,7 +69,7 @@ pub(crate) async fn authenticate(
 
                 return Ok(AuthenticatedUser {
                     user_id,
-                    signing_key_id,
+                    primary_key_fingerprint: user.primary_key_fingerprint,
                     signing_public_key: user.signing_public_key,
                     raw_auth_header: auth_header_raw.to_string(),
                 });
@@ -85,7 +87,6 @@ pub(crate) async fn authenticate(
         dns_resolver,
         auth_header_raw,
         &auth_header,
-        &signing_key_id,
     )
     .await
 }

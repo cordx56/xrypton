@@ -87,14 +87,14 @@ async fn upload_file(
 
     // 外側署名の検証用ヘルパー
     let verify_outer_signature = |content: &str| -> Result<(), AppError> {
-        let content_key_id = xrypton_common::keys::extract_issuer_key_id(content)
-            .map_err(|e| AppError::BadRequest(format!("invalid message format: {e}")))?;
-        if content_key_id != auth.signing_key_id {
-            return Err(AppError::BadRequest("content signer mismatch".into()));
-        }
         let content_public_keys =
             xrypton_common::keys::PublicKeys::try_from(auth.signing_public_key.as_str())
                 .map_err(|e| AppError::BadRequest(format!("invalid signing key: {e}")))?;
+        let content_fingerprint = xrypton_common::keys::extract_issuer_fingerprint(content)
+            .map_err(|e| AppError::BadRequest(format!("invalid message format: {e}")))?;
+        if content_fingerprint != auth.primary_key_fingerprint {
+            return Err(AppError::BadRequest("content signer mismatch".into()));
+        }
         content_public_keys
             .verify_and_extract(content)
             .map_err(|e| AppError::BadRequest(format!("content signature invalid: {e}")))?;

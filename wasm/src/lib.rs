@@ -212,20 +212,20 @@ pub fn sign_encrypt_sign_bin(
 #[wasm_bindgen]
 pub fn decrypt(private_key: String, sub_passphrase: &str, data: &str) -> Result<JsValue, JsValue> {
     let private = get_private_keys(private_key)?;
-    let (data, signature, key_ids) = private.decrypt(sub_passphrase, data).map_err(|e| {
+    let (data, signature, fingerprints) = private.decrypt(sub_passphrase, data).map_err(|e| {
         ReturnValue::Error {
             message: e.to_string(),
         }
         .to_value()
     })?;
-    let mut result = Vec::with_capacity(1 + key_ids.len());
+    let mut result = Vec::with_capacity(1 + fingerprints.len());
     result.push(ResultData::Base64 {
         data: URL_SAFE.encode(&data),
     });
     if let Some(data) = signature {
         result.push(ResultData::String { data });
-        for key_id in key_ids {
-            result.push(ResultData::String { data: key_id });
+        for fingerprint in fingerprints {
+            result.push(ResultData::String { data: fingerprint });
         }
     }
     Ok(ReturnValue::Ok { value: result }.to_value())
@@ -318,15 +318,16 @@ pub fn verify_detached_signature(
 }
 
 /// 外側署名を検証してペイロード（inner encrypted bytes）を取り出す。
-/// 返り値: [Base64(inner_bytes), String(outer_key_id)]
+/// 返り値: [Base64(inner_bytes), String(outer_fingerprint)]
 #[wasm_bindgen]
 pub fn unwrap_outer(public_key: String, outer_armored: &str) -> Result<JsValue, JsValue> {
-    let outer_key_id = xrypton_common::keys::extract_issuer_key_id(outer_armored).map_err(|e| {
-        ReturnValue::Error {
-            message: e.to_string(),
-        }
-        .to_value()
-    })?;
+    let outer_fingerprint = xrypton_common::keys::extract_issuer_fingerprint(outer_armored)
+        .map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
     let common_pk =
         xrypton_common::keys::PublicKeys::try_from(public_key.as_str()).map_err(|e| {
             ReturnValue::Error {
@@ -345,7 +346,9 @@ pub fn unwrap_outer(public_key: String, outer_armored: &str) -> Result<JsValue, 
             ResultData::Base64 {
                 data: STANDARD.encode(&inner_bytes),
             },
-            ResultData::String { data: outer_key_id },
+            ResultData::String {
+                data: outer_fingerprint,
+            },
         ],
     }
     .to_value())
@@ -359,50 +362,50 @@ pub fn decrypt_bytes(
     data: Vec<u8>,
 ) -> Result<JsValue, JsValue> {
     let private = get_private_keys(private_key)?;
-    let (data, signature, key_ids) =
-        private
-            .decrypt_from_bytes(sub_passphrase, &data)
-            .map_err(|e| {
-                ReturnValue::Error {
-                    message: e.to_string(),
-                }
-                .to_value()
-            })?;
-    let mut result = Vec::with_capacity(1 + key_ids.len());
+    let (data, signature, fingerprints) = private
+        .decrypt_from_bytes(sub_passphrase, &data)
+        .map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
+    let mut result = Vec::with_capacity(1 + fingerprints.len());
     result.push(ResultData::Base64 {
         data: URL_SAFE.encode(&data),
     });
     if let Some(data) = signature {
         result.push(ResultData::String { data });
-        for key_id in key_ids {
-            result.push(ResultData::String { data: key_id });
+        for fingerprint in fingerprints {
+            result.push(ResultData::String { data: fingerprint });
         }
     }
     Ok(ReturnValue::Ok { value: result }.to_value())
 }
 
-/// raw PGP バイト列から署名者の鍵IDを抽出する。
-/// 返り値: [String(key_id)]
+/// raw PGP バイト列から署名者のフィンガープリントを抽出する。
+/// 返り値: [String(fingerprint)]
 #[wasm_bindgen]
-pub fn extract_key_id_bytes(data: Vec<u8>) -> Result<JsValue, JsValue> {
-    let key_id = xrypton_common::keys::extract_issuer_key_id_from_bytes(&data).map_err(|e| {
-        ReturnValue::Error {
-            message: e.to_string(),
-        }
-        .to_value()
-    })?;
+pub fn extract_fingerprint_bytes(data: Vec<u8>) -> Result<JsValue, JsValue> {
+    let fingerprint =
+        xrypton_common::keys::extract_issuer_fingerprint_from_bytes(&data).map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
     Ok(ReturnValue::Ok {
-        value: vec![ResultData::String { data: key_id }],
+        value: vec![ResultData::String { data: fingerprint }],
     }
     .to_value())
 }
 
 /// raw PGP バイト列の外側署名を検証してペイロード（inner encrypted bytes）を取り出す。
-/// 返り値: [Base64(inner_bytes), String(outer_key_id)]
+/// 返り値: [Base64(inner_bytes), String(outer_fingerprint)]
 #[wasm_bindgen]
 pub fn unwrap_outer_bytes(public_key: String, data: Vec<u8>) -> Result<JsValue, JsValue> {
-    let outer_key_id =
-        xrypton_common::keys::extract_issuer_key_id_from_bytes(&data).map_err(|e| {
+    let outer_fingerprint = xrypton_common::keys::extract_issuer_fingerprint_from_bytes(&data)
+        .map_err(|e| {
             ReturnValue::Error {
                 message: e.to_string(),
             }
@@ -428,7 +431,9 @@ pub fn unwrap_outer_bytes(public_key: String, data: Vec<u8>) -> Result<JsValue, 
             ResultData::Base64 {
                 data: STANDARD.encode(&inner_bytes),
             },
-            ResultData::String { data: outer_key_id },
+            ResultData::String {
+                data: outer_fingerprint,
+            },
         ],
     }
     .to_value())
@@ -498,18 +503,18 @@ pub fn extract_and_verify_string(public_key: String, armored: &str) -> Result<Js
     .to_value())
 }
 
-/// armored PGP メッセージから署名者の鍵IDを抽出する。
-/// 返り値: [String(key_id)]
+/// armored PGP メッセージから署名者のフィンガープリントを抽出する。
+/// 返り値: [String(fingerprint)]
 #[wasm_bindgen]
-pub fn extract_key_id(armored: &str) -> Result<JsValue, JsValue> {
-    let key_id = xrypton_common::keys::extract_issuer_key_id(armored).map_err(|e| {
+pub fn extract_fingerprint(armored: &str) -> Result<JsValue, JsValue> {
+    let fingerprint = xrypton_common::keys::extract_issuer_fingerprint(armored).map_err(|e| {
         ReturnValue::Error {
             message: e.to_string(),
         }
         .to_value()
     })?;
     Ok(ReturnValue::Ok {
-        value: vec![ResultData::String { data: key_id }],
+        value: vec![ResultData::String { data: fingerprint }],
     }
     .to_value())
 }

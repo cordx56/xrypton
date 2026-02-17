@@ -200,3 +200,45 @@ pub async fn migrate_user_ids(pool: &Db, server_hostname: &str) -> Result<(), sq
     tx.commit().await?;
     Ok(())
 }
+
+/// signing_key_id（署名サブキーID）を primary_key_fingerprint（主鍵フィンガープリント）に
+/// 変換するランタイムマイグレーション。
+/// PGP公開鍵のパースが必要なため SQL マイグレーションでは値の更新ができず、
+/// カラムリネーム後に本関数で既存データを更新する。
+/// フィンガープリントの長さ（40文字以上）で未変換行を判定し、変換済みはスキップする。
+pub async fn migrate_primary_key_fingerprint(pool: &Db) -> Result<(), sqlx::Error> {
+    use xrypton_common::keys::PublicKeys;
+
+    let rows: Vec<(String, String)> = sqlx::query_as(&sql(
+        "SELECT id, signing_public_key FROM users WHERE length(primary_key_fingerprint) < 40",
+    ))
+    .fetch_all(pool)
+    .await?;
+
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    tracing::info!(
+        count = rows.len(),
+        "migrating primary_key_fingerprint for existing users"
+    );
+
+    let update_q = sql("UPDATE users SET primary_key_fingerprint = ? WHERE id = ?");
+    for (id, signing_public_key) in &rows {
+        let fingerprint = match PublicKeys::try_from(signing_public_key.as_str()) {
+            Ok(pk) => pk.get_primary_fingerprint(),
+            Err(e) => {
+                tracing::warn!(user_id = %id, error = %e, "failed to parse signing_public_key, skipping");
+                continue;
+            }
+        };
+        sqlx::query(&update_q)
+            .bind(&fingerprint)
+            .bind(id)
+            .execute(pool)
+            .await?;
+    }
+
+    Ok(())
+}

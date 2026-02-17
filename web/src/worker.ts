@@ -2,19 +2,17 @@ import { z } from "zod";
 import init, {
   generate_private_keys,
   export_public_keys,
-  get_signing_sub_key_id,
   get_primary_fingerprint,
   get_private_key_user_ids,
   sign,
   sign_bytes,
   sign_encrypt_sign,
   sign_encrypt_sign_bin,
-  decrypt,
   unwrap_outer,
   unwrap_outer_bytes,
   decrypt_bytes,
-  extract_key_id,
-  extract_key_id_bytes,
+  extract_fingerprint,
+  extract_fingerprint_bytes,
   verify_detached_signature,
   verify_extract_string,
   extract_and_verify_string,
@@ -118,20 +116,6 @@ worker.addEventListener("message", async ({ data }) => {
               ? result.data.message
               : "message parse error",
         },
-      });
-    }
-  } else if (parsed.data.call === "get_key_id") {
-    const result = WasmReturnValue.safeParse(
-      get_signing_sub_key_id(parsed.data.publicKeys),
-    );
-    if (
-      result.success &&
-      result.data.result === "ok" &&
-      result.data.value[0].type === "string"
-    ) {
-      post({
-        call: "get_key_id",
-        result: { success: true, data: { key_id: result.data.value[0].data } },
       });
     }
   } else if (parsed.data.call === "get_primary_fingerprint") {
@@ -322,34 +306,37 @@ worker.addEventListener("message", async ({ data }) => {
     }
   } else if (parsed.data.call === "decrypt") {
     // sign_encrypt_sign 形式: Signed(Encrypted(Signed(Data)))
-    // 1. extract_key_id で outer signer key ID を取得
+    // 1. extract_fingerprint で outer signer fingerprint を取得
     // 2. knownPublicKeys から送信者の公開鍵を取得
     // 3. unwrap_outer で外側署名検証 + inner encrypted bytes 取得
-    // 4. decrypt_bytes で inner を復号 + inner signer key IDs 取得
-    // 5. outer key ID ∈ inner key IDs を確認
+    // 4. decrypt_bytes で inner を復号 + inner signer fingerprints 取得
+    // 5. outer fingerprint ∈ inner fingerprints を確認
     // 6. detached signature 検証
     const knownPubKeys = new Map(Object.entries(parsed.data.knownPublicKeys));
 
     try {
-      // 1. outer signer key ID を取得
-      const keyIdResult = WasmReturnValue.safeParse(
-        extract_key_id(parsed.data.message),
+      // 1. outer signer fingerprint を取得
+      const fingerprintResult = WasmReturnValue.safeParse(
+        extract_fingerprint(parsed.data.message),
       );
       if (
-        !keyIdResult.success ||
-        keyIdResult.data.result !== "ok" ||
-        keyIdResult.data.value[0]?.type !== "string"
+        !fingerprintResult.success ||
+        fingerprintResult.data.result !== "ok" ||
+        fingerprintResult.data.value[0]?.type !== "string"
       ) {
         post({
           call: "decrypt",
-          result: { success: false, message: "failed to extract outer key id" },
+          result: {
+            success: false,
+            message: "failed to extract outer fingerprint",
+          },
         });
         return;
       }
-      const outerKeyId = keyIdResult.data.value[0].data;
+      const outerFingerprint = fingerprintResult.data.value[0].data;
 
       // 2. 送信者の公開鍵を取得
-      const senderPubKey = knownPubKeys.get(outerKeyId);
+      const senderPubKey = knownPubKeys.get(outerFingerprint);
       if (!senderPubKey) {
         post({
           call: "decrypt",
@@ -411,10 +398,12 @@ worker.addEventListener("message", async ({ data }) => {
       if (innerResult.data.value.length > 1) {
         const plainData = Buffer.from(innerResult.data.value[0].data, "base64");
         const detachedSignature = innerResult.data.value[1].data;
-        const innerKeyIds = innerResult.data.value.slice(2).map((v) => v.data);
+        const innerFingerprints = innerResult.data.value
+          .slice(2)
+          .map((v) => v.data);
 
-        // outer key ID が inner key IDs に含まれるか確認
-        if (!innerKeyIds.includes(outerKeyId)) {
+        // outer fingerprint が inner fingerprints に含まれるか確認
+        if (!innerFingerprints.includes(outerFingerprint)) {
           post({
             call: "decrypt",
             result: {
@@ -449,7 +438,7 @@ worker.addEventListener("message", async ({ data }) => {
           result: {
             success: true,
             data: {
-              key_ids: innerKeyIds,
+              fingerprints: innerFingerprints,
               payload: base64ToBase64Url(innerResult.data.value[0].data),
             },
           },
@@ -460,7 +449,7 @@ worker.addEventListener("message", async ({ data }) => {
           result: {
             success: true,
             data: {
-              key_ids: [],
+              fingerprints: [],
               payload: base64ToBase64Url(innerResult.data.value[0].data),
             },
           },
@@ -475,10 +464,10 @@ worker.addEventListener("message", async ({ data }) => {
         },
       });
     }
-  } else if (parsed.data.call === "extract_key_id") {
+  } else if (parsed.data.call === "extract_fingerprint") {
     try {
       const result = WasmReturnValue.safeParse(
-        extract_key_id(parsed.data.armored),
+        extract_fingerprint(parsed.data.armored),
       );
       if (
         result.success &&
@@ -486,30 +475,30 @@ worker.addEventListener("message", async ({ data }) => {
         result.data.value[0]?.type === "string"
       ) {
         post({
-          call: "extract_key_id",
+          call: "extract_fingerprint",
           result: {
             success: true,
-            data: { key_id: result.data.value[0].data },
+            data: { fingerprint: result.data.value[0].data },
           },
         });
       } else {
         post({
-          call: "extract_key_id",
+          call: "extract_fingerprint",
           result: {
             success: false,
             message:
               result.data?.result === "error"
                 ? result.data.message
-                : "extract key id error",
+                : "extract fingerprint error",
           },
         });
       }
     } catch (e) {
       post({
-        call: "extract_key_id",
+        call: "extract_fingerprint",
         result: {
           success: false,
-          message: e instanceof Error ? e.message : "extract key id error",
+          message: e instanceof Error ? e.message : "extract fingerprint error",
         },
       });
     }
@@ -531,7 +520,7 @@ worker.addEventListener("message", async ({ data }) => {
             success: true,
             data: {
               innerBytes: result.data.value[0].data,
-              outerKeyId: result.data.value[1].data,
+              outerFingerprint: result.data.value[1].data,
             },
           },
         });
@@ -558,36 +547,39 @@ worker.addEventListener("message", async ({ data }) => {
     }
   } else if (parsed.data.call === "decrypt_bin") {
     // sign_encrypt_sign_bin 形式のバイナリデータを完全に復号する
-    // 1. extract_key_id_bytes で outer signer key ID を取得
+    // 1. extract_fingerprint_bytes で outer signer fingerprint を取得
     // 2. knownPublicKeys から送信者の公開鍵を取得
     // 3. unwrap_outer_bytes で外側署名検証 + inner encrypted bytes 取得
-    // 4. decrypt_bytes で inner を復号 + inner signer key IDs 取得
-    // 5. outer key ID ∈ inner key IDs を確認
+    // 4. decrypt_bytes で inner を復号 + inner signer fingerprints 取得
+    // 5. outer fingerprint ∈ inner fingerprints を確認
     // 6. detached signature 検証
     const knownPubKeys = new Map(Object.entries(parsed.data.knownPublicKeys));
 
     try {
       const rawData = Buffer.from(parsed.data.data, "base64");
 
-      // 1. outer signer key ID を取得
-      const keyIdResult = WasmReturnValue.safeParse(
-        extract_key_id_bytes(rawData),
+      // 1. outer signer fingerprint を取得
+      const fingerprintResult = WasmReturnValue.safeParse(
+        extract_fingerprint_bytes(rawData),
       );
       if (
-        !keyIdResult.success ||
-        keyIdResult.data.result !== "ok" ||
-        keyIdResult.data.value[0]?.type !== "string"
+        !fingerprintResult.success ||
+        fingerprintResult.data.result !== "ok" ||
+        fingerprintResult.data.value[0]?.type !== "string"
       ) {
         post({
           call: "decrypt_bin",
-          result: { success: false, message: "failed to extract outer key id" },
+          result: {
+            success: false,
+            message: "failed to extract outer fingerprint",
+          },
         });
         return;
       }
-      const outerKeyId = keyIdResult.data.value[0].data;
+      const outerFingerprint = fingerprintResult.data.value[0].data;
 
       // 2. 送信者の公開鍵を取得
-      const senderPubKey = knownPubKeys.get(outerKeyId);
+      const senderPubKey = knownPubKeys.get(outerFingerprint);
       if (!senderPubKey) {
         post({
           call: "decrypt_bin",
@@ -649,9 +641,11 @@ worker.addEventListener("message", async ({ data }) => {
       if (innerResult.data.value.length > 1) {
         const plainData = Buffer.from(innerResult.data.value[0].data, "base64");
         const detachedSignature = innerResult.data.value[1].data;
-        const innerKeyIds = innerResult.data.value.slice(2).map((v) => v.data);
+        const innerFingerprints = innerResult.data.value
+          .slice(2)
+          .map((v) => v.data);
 
-        if (!innerKeyIds.includes(outerKeyId)) {
+        if (!innerFingerprints.includes(outerFingerprint)) {
           post({
             call: "decrypt_bin",
             result: {
@@ -685,7 +679,7 @@ worker.addEventListener("message", async ({ data }) => {
           result: {
             success: true,
             data: {
-              key_ids: innerKeyIds,
+              fingerprints: innerFingerprints,
               payload: base64ToBase64Url(innerResult.data.value[0].data),
             },
           },
@@ -696,7 +690,7 @@ worker.addEventListener("message", async ({ data }) => {
           result: {
             success: true,
             data: {
-              key_ids: [],
+              fingerprints: [],
               payload: base64ToBase64Url(innerResult.data.value[0].data),
             },
           },
@@ -722,7 +716,7 @@ worker.addEventListener("message", async ({ data }) => {
         result.data.result === "ok" &&
         result.data.value[0]?.type === "base64"
       ) {
-        const keyIds =
+        const fingerprints =
           result.data.value.length > 1
             ? result.data.value.slice(2).map((v) => v.data)
             : [];
@@ -731,7 +725,7 @@ worker.addEventListener("message", async ({ data }) => {
           result: {
             success: true,
             data: {
-              key_ids: keyIds,
+              fingerprints,
               payload: base64ToBase64Url(result.data.value[0].data),
             },
           },
@@ -888,7 +882,7 @@ worker.addEventListener("message", async ({ data }) => {
             success: true,
             data: {
               data: result.data.value[0].data,
-              keyId: result.data.value[1].data,
+              fingerprint: result.data.value[1].data,
             },
           },
         });

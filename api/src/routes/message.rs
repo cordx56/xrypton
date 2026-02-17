@@ -163,14 +163,14 @@ async fn post_message(
     }
 
     // 外側署名の検証: メッセージ送信者が認証ユーザと一致するか確認
-    let content_key_id = xrypton_common::keys::extract_issuer_key_id(&body.content)
-        .map_err(|e| AppError::BadRequest(format!("invalid message format: {e}")))?;
-    if content_key_id != auth.signing_key_id {
-        return Err(AppError::BadRequest("content signer mismatch".into()));
-    }
     let content_public_keys =
         xrypton_common::keys::PublicKeys::try_from(auth.signing_public_key.as_str())
             .map_err(|e| AppError::BadRequest(format!("invalid signing key: {e}")))?;
+    let content_fingerprint = xrypton_common::keys::extract_issuer_fingerprint(&body.content)
+        .map_err(|e| AppError::BadRequest(format!("invalid message format: {e}")))?;
+    if content_fingerprint != auth.primary_key_fingerprint {
+        return Err(AppError::BadRequest("content signer mismatch".into()));
+    }
     content_public_keys
         .verify_and_extract(&body.content)
         .map_err(|e| AppError::BadRequest(format!("content signature invalid: {e}")))?;

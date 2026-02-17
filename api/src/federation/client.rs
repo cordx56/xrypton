@@ -14,7 +14,7 @@ pub struct UserKeysResponse {
     pub id: String,
     pub encryption_public_key: String,
     pub signing_public_key: String,
-    pub signing_key_id: String,
+    pub primary_key_fingerprint: String,
 }
 
 /// 外部サーバからユーザの公開鍵を取得する（認証不要）。

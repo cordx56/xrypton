@@ -48,7 +48,7 @@ export function usePublicKeyResolver() {
         const parsed = GetKeysResponse.safeParse(raw);
         if (!parsed.success) return null;
         const keys: CachedPublicKeys = {
-          signing_key_id: parsed.data.signing_key_id,
+          primary_key_fingerprint: parsed.data.primary_key_fingerprint,
           signing_public_key: parsed.data.signing_public_key,
           encryption_public_key: parsed.data.encryption_public_key,
         };
@@ -78,7 +78,7 @@ export function usePublicKeyResolver() {
           if (!parsed.success) return { status: "unchanged" };
 
           const newKeys: CachedPublicKeys = {
-            signing_key_id: parsed.data.signing_key_id,
+            primary_key_fingerprint: parsed.data.primary_key_fingerprint,
             signing_public_key: parsed.data.signing_public_key,
             encryption_public_key: parsed.data.encryption_public_key,
           };
@@ -86,7 +86,8 @@ export function usePublicKeyResolver() {
           const cached = await getCachedPublicKeys(userId);
           const changed =
             !cached ||
-            cached.signing_key_id !== newKeys.signing_key_id ||
+            cached.primary_key_fingerprint !==
+              newKeys.primary_key_fingerprint ||
             cached.signing_public_key !== newKeys.signing_public_key;
 
           if (!changed) return { status: "unchanged" };

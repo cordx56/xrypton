@@ -9,9 +9,8 @@ export const WorkerResultCallList = {
   decrypt_bin: "decrypt_bin",
   unwrap_outer: "unwrap_outer",
   decrypt_bytes: "decrypt_bytes",
-  extract_key_id: "extract_key_id",
+  extract_fingerprint: "extract_fingerprint",
   verify: "verify",
-  get_key_id: "get_key_id",
   get_primary_fingerprint: "get_primary_fingerprint",
   sign: "sign",
   sign_bytes: "sign_bytes",
@@ -108,7 +107,7 @@ export const GetKeysResponse = z.object({
   id: z.string(),
   encryption_public_key: z.string(),
   signing_public_key: z.string(),
-  signing_key_id: z.string(),
+  primary_key_fingerprint: z.string(),
 });
 
 // GET/POST /v1/user/{id}/profile
@@ -292,7 +291,7 @@ export const WorkerCallMessage = z.union([
     data: z.base64(),
   }),
   z.object({
-    call: z.literal(WorkerResultCallList["extract_key_id"]),
+    call: z.literal(WorkerResultCallList["extract_fingerprint"]),
     armored: z.string(),
   }),
   z.object({
@@ -300,10 +299,6 @@ export const WorkerCallMessage = z.union([
     passphrase: z.string(),
     publicKeys: z.string(),
     message: z.string(),
-  }),
-  z.object({
-    call: z.literal(WorkerResultCallList["get_key_id"]),
-    publicKeys: z.string(),
   }),
   z.object({
     call: z.literal(WorkerResultCallList["get_primary_fingerprint"]),
@@ -379,34 +374,30 @@ export const WorkerResultMessage = z.union([
   z.object({
     call: z.literal(WorkerResultCallList["decrypt"]),
     result: WorkerResult(
-      z.object({ key_ids: z.string().array(), payload: z.base64url() }),
+      z.object({ fingerprints: z.string().array(), payload: z.base64url() }),
     ),
   }),
   z.object({
     call: z.literal(WorkerResultCallList["unwrap_outer"]),
     result: WorkerResult(
-      z.object({ innerBytes: z.base64(), outerKeyId: z.string() }),
+      z.object({ innerBytes: z.base64(), outerFingerprint: z.string() }),
     ),
   }),
   z.object({
     call: z.literal(WorkerResultCallList["decrypt_bin"]),
     result: WorkerResult(
-      z.object({ key_ids: z.string().array(), payload: z.base64url() }),
+      z.object({ fingerprints: z.string().array(), payload: z.base64url() }),
     ),
   }),
   z.object({
     call: z.literal(WorkerResultCallList["decrypt_bytes"]),
     result: WorkerResult(
-      z.object({ key_ids: z.string().array(), payload: z.base64url() }),
+      z.object({ fingerprints: z.string().array(), payload: z.base64url() }),
     ),
   }),
   z.object({
-    call: z.literal(WorkerResultCallList["extract_key_id"]),
-    result: WorkerResult(z.object({ key_id: z.string() })),
-  }),
-  z.object({
-    call: z.literal(WorkerResultCallList["get_key_id"]),
-    result: WorkerResult(z.object({ key_id: z.string() })),
+    call: z.literal(WorkerResultCallList["extract_fingerprint"]),
+    result: WorkerResult(z.object({ fingerprint: z.string() })),
   }),
   z.object({
     call: z.literal(WorkerResultCallList["get_primary_fingerprint"]),
@@ -440,6 +431,8 @@ export const WorkerResultMessage = z.union([
   }),
   z.object({
     call: z.literal(WorkerResultCallList["verify_extract_bytes"]),
-    result: WorkerResult(z.object({ data: z.base64(), keyId: z.string() })),
+    result: WorkerResult(
+      z.object({ data: z.base64(), fingerprint: z.string() }),
+    ),
   }),
 ]);

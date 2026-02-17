@@ -12,13 +12,13 @@ pub async fn get_user(pool: &Db, id: &UserId) -> Result<Option<UserRow>, sqlx::E
 }
 
 #[tracing::instrument(skip(pool), err)]
-pub async fn get_user_by_signing_key_id(
+pub async fn get_user_by_fingerprint(
     pool: &Db,
-    signing_key_id: &str,
+    fingerprint: &str,
 ) -> Result<Option<UserRow>, sqlx::Error> {
-    let q = sql("SELECT * FROM users WHERE signing_key_id = ?");
+    let q = sql("SELECT * FROM users WHERE primary_key_fingerprint = ?");
     sqlx::query_as::<_, UserRow>(&q)
-        .bind(signing_key_id)
+        .bind(fingerprint)
         .fetch_optional(pool)
         .await
 }
@@ -29,18 +29,18 @@ pub async fn create_user(
     id: &UserId,
     encryption_public_key: &str,
     signing_public_key: &str,
-    signing_key_id: &str,
+    primary_key_fingerprint: &str,
 ) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
 
     let q = sql(
-        "INSERT INTO users (id, encryption_public_key, signing_public_key, signing_key_id) VALUES (?, ?, ?, ?)",
+        "INSERT INTO users (id, encryption_public_key, signing_public_key, primary_key_fingerprint) VALUES (?, ?, ?, ?)",
     );
     sqlx::query(&q)
         .bind(id.as_str())
         .bind(encryption_public_key)
         .bind(signing_public_key)
-        .bind(signing_key_id)
+        .bind(primary_key_fingerprint)
         .execute(&mut *tx)
         .await?;
 
@@ -60,7 +60,12 @@ pub async fn delete_user(pool: &Db, id: &UserId) -> Result<bool, sqlx::Error> {
 }
 
 #[tracing::instrument(
-    skip(pool, encryption_public_key, signing_public_key, signing_key_id),
+    skip(
+        pool,
+        encryption_public_key,
+        signing_public_key,
+        primary_key_fingerprint
+    ),
     err
 )]
 pub async fn update_user_keys(
@@ -68,13 +73,13 @@ pub async fn update_user_keys(
     id: &UserId,
     encryption_public_key: &str,
     signing_public_key: &str,
-    signing_key_id: &str,
+    primary_key_fingerprint: &str,
 ) -> Result<bool, sqlx::Error> {
     let now = chrono::Utc::now();
     let q = sql("UPDATE users
          SET encryption_public_key = ?,
              signing_public_key = ?,
-             signing_key_id = ?,
+             primary_key_fingerprint = ?,
              updated_at = ?
          WHERE id = ?");
     #[cfg(not(feature = "postgres"))]
@@ -84,7 +89,7 @@ pub async fn update_user_keys(
     let result = sqlx::query(&q)
         .bind(encryption_public_key)
         .bind(signing_public_key)
-        .bind(signing_key_id)
+        .bind(primary_key_fingerprint)
         .bind(now_bind)
         .bind(id.as_str())
         .execute(pool)
@@ -154,24 +159,24 @@ pub async fn upsert_external_user(
     full_id: &str,
     encryption_public_key: &str,
     signing_public_key: &str,
-    signing_key_id: &str,
+    primary_key_fingerprint: &str,
 ) -> Result<(), sqlx::Error> {
     let q = sql(
-        "INSERT INTO users (id, encryption_public_key, signing_public_key, signing_key_id)
+        "INSERT INTO users (id, encryption_public_key, signing_public_key, primary_key_fingerprint)
          VALUES (?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
              encryption_public_key = ?,
              signing_public_key = ?,
-             signing_key_id = ?",
+             primary_key_fingerprint = ?",
     );
     sqlx::query(&q)
         .bind(full_id)
         .bind(encryption_public_key)
         .bind(signing_public_key)
-        .bind(signing_key_id)
+        .bind(primary_key_fingerprint)
         .bind(encryption_public_key)
         .bind(signing_public_key)
-        .bind(signing_key_id)
+        .bind(primary_key_fingerprint)
         .execute(pool)
         .await?;
     Ok(())

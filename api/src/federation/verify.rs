@@ -8,9 +8,9 @@ use crate::types::UserId;
 
 /// 外部ユーザの署名を検証し、AuthenticatedUserを返す。
 ///
-/// 1. signing_key_idでローカルDBから検索（外部ユーザは`user@domain`で保存済みの場合あり）
-/// 2. 見つかった → 公開鍵で署名検証を試行、成功すれば返却
-/// 3. PGP署名のSignersUserIDサブパケットからuser_id@domainを抽出
+/// 1. SignersUserIDサブパケットからuser_id@domainを抽出
+/// 2. ローカルDBで外部ユーザとして検索（キャッシュ済みの場合あり）
+/// 3. 見つかった → 公開鍵で署名検証を試行、成功すれば返却
 /// 4. ドメインの鍵取得エンドポイントにリクエスト（認証不要）
 /// 5. 取得した公開鍵をローカルusersテーブルにupsert
 /// 6. 公開鍵で署名検証 → AuthenticatedUser返却
@@ -20,10 +20,20 @@ pub async fn verify_or_fetch_external_user(
     dns_resolver: &DnsTxtResolver,
     auth_header_raw: &str,
     auth_header_decoded: &str,
-    signing_key_id: &str,
 ) -> Result<AuthenticatedUser, AppError> {
-    // 1. ローカルDBで外部ユーザとして検索
-    if let Some(user) = db::users::get_user_by_signing_key_id(pool, signing_key_id).await? {
+    // 1. SignersUserIDサブパケットからuser_id@domainを抽出
+    let signer_user_id = xrypton_common::keys::extract_signer_user_id(auth_header_decoded)
+        .map_err(|e| AppError::Unauthorized(format!("failed to extract signer user ID: {e}")))?;
+    tracing::debug!("extracted SignersUserID: {:?}", signer_user_id);
+
+    // ドメイン部分を解析
+    let (orig_local, orig_domain) = signer_user_id
+        .split_once('@')
+        .ok_or_else(|| AppError::Unauthorized("signer user ID has no domain".into()))?;
+
+    // 2. ローカルDBで外部ユーザとして検索（キャッシュ済み）
+    let cached_user_id = UserId(signer_user_id.clone());
+    if let Some(user) = db::users::get_user(pool, &cached_user_id).await? {
         let public_keys =
             xrypton_common::keys::PublicKeys::try_from(user.signing_public_key.as_str())
                 .map_err(|e| AppError::Unauthorized(format!("invalid signing key: {e}")))?;
@@ -34,31 +44,21 @@ pub async fn verify_or_fetch_external_user(
                 .map_err(|e| AppError::Unauthorized(format!("invalid auth payload: {e}")))?;
             validate_nonce_timestamp(&payload.nonce)?;
 
-            let user_id = UserId(user.id.clone());
-            let is_new = db::nonces::try_use_nonce(pool, &payload.nonce, user_id.as_str()).await?;
+            let is_new =
+                db::nonces::try_use_nonce(pool, &payload.nonce, cached_user_id.as_str()).await?;
             if !is_new {
                 return Err(AppError::Unauthorized("nonce already used".into()));
             }
 
             return Ok(AuthenticatedUser {
-                user_id,
-                signing_key_id: signing_key_id.to_string(),
+                user_id: cached_user_id,
+                primary_key_fingerprint: user.primary_key_fingerprint,
                 signing_public_key: user.signing_public_key,
                 raw_auth_header: auth_header_raw.to_string(),
             });
         }
         // 署名検証失敗 → 鍵更新の可能性、下のフローで再取得
     }
-
-    // 3. SignersUserIDサブパケットからuser_id@domainを抽出
-    let signer_user_id = xrypton_common::keys::extract_signer_user_id(auth_header_decoded)
-        .map_err(|e| AppError::Unauthorized(format!("failed to extract signer user ID: {e}")))?;
-    tracing::debug!("extracted SignersUserID: {:?}", signer_user_id);
-
-    // ドメイン部分を解析
-    let (orig_local, orig_domain) = signer_user_id
-        .split_once('@')
-        .ok_or_else(|| AppError::Unauthorized("signer user ID has no domain".into()))?;
 
     // DNS TXTレコードによるドメイン解決
     let (local_part, domain) = match dns_resolver.resolve(orig_domain, orig_local).await {
@@ -109,7 +109,7 @@ pub async fn verify_or_fetch_external_user(
 
         return Ok(AuthenticatedUser {
             user_id,
-            signing_key_id: signing_key_id.to_string(),
+            primary_key_fingerprint: user.primary_key_fingerprint,
             signing_public_key: user.signing_public_key,
             raw_auth_header: auth_header_raw.to_string(),
         });
@@ -124,16 +124,14 @@ pub async fn verify_or_fetch_external_user(
     let public_keys =
         xrypton_common::keys::PublicKeys::try_from(remote_keys.signing_public_key.as_str())
             .map_err(|e| AppError::Unauthorized(format!("invalid remote signing key: {e}")))?;
-    let remote_signing_key_id = public_keys
-        .get_signing_sub_key_id()
-        .map_err(|e| AppError::Unauthorized(format!("failed to get remote key id: {e}")))?;
+    let fingerprint = public_keys.get_primary_fingerprint();
 
     db::users::upsert_external_user(
         pool,
         &full_id,
         &remote_keys.encryption_public_key,
         &remote_keys.signing_public_key,
-        &remote_signing_key_id,
+        &fingerprint,
     )
     .await?;
 
@@ -154,7 +152,7 @@ pub async fn verify_or_fetch_external_user(
 
     Ok(AuthenticatedUser {
         user_id,
-        signing_key_id: remote_signing_key_id,
+        primary_key_fingerprint: fingerprint,
         signing_public_key: remote_keys.signing_public_key,
         raw_auth_header: auth_header_raw.to_string(),
     })
