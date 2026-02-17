@@ -4,6 +4,7 @@ export type AtprotoAccount = {
   atproto_did: string;
   atproto_handle: string | null;
   pds_url: string;
+  pubkey_post_uri: string | null;
   created_at: string;
   updated_at: string;
 };

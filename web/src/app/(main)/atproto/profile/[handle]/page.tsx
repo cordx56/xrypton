@@ -4,6 +4,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useRef,
   createElement,
   useMemo,
 } from "react";
@@ -13,24 +14,45 @@ import { useAtproto } from "@/contexts/AtprotoContext";
 import { useDialogs } from "@/contexts/DialogContext";
 import AtprotoHeader from "@/components/atproto/AtprotoHeader";
 import AtprotoProfile from "@/components/atproto/AtprotoProfile";
+import Timeline from "@/components/atproto/Timeline";
 import Dialog from "@/components/common/Dialog";
 import SignatureVerifier from "@/components/atproto/SignatureVerifier";
 import Spinner from "@/components/common/Spinner";
 import { useAtprotoSignatures } from "@/hooks/useAtprotoSignature";
+import { useScrollRestore } from "@/hooks/useScrollRestore";
 import type { AtprotoSignature } from "@/types/atproto";
+
+/** プロフィールページのデータキャッシュ */
+const profileCache = new Map<
+  string,
+  {
+    profile: AppBskyActorDefs.ProfileViewDetailed;
+    feed: AppBskyFeedDefs.FeedViewPost[];
+    cursor: string | undefined;
+    hasMore: boolean;
+  }
+>();
 
 export default function ProfilePage() {
   const params = useParams<{ handle: string }>();
   const { agent, isLoading: authLoading } = useAtproto();
   const { pushDialog } = useDialogs();
+  const scrollRef = useRef<HTMLDivElement>(null);
 
+  const cached = params.handle ? profileCache.get(params.handle) : undefined;
   const [profile, setProfile] =
-    useState<AppBskyActorDefs.ProfileViewDetailed | null>(null);
-  const [feed, setFeed] = useState<AppBskyFeedDefs.FeedViewPost[]>([]);
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [loading, setLoading] = useState(true);
+    useState<AppBskyActorDefs.ProfileViewDetailed | null>(
+      () => cached?.profile ?? null,
+    );
+  const [feed, setFeed] = useState<AppBskyFeedDefs.FeedViewPost[]>(
+    () => cached?.feed ?? [],
+  );
+  const [cursor, setCursor] = useState<string | undefined>(
+    () => cached?.cursor,
+  );
+  const [loading, setLoading] = useState(!cached);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
+  const [hasMore, setHasMore] = useState(() => cached?.hasMore ?? true);
 
   const targets = useMemo(
     () =>
@@ -43,8 +65,12 @@ export default function ProfilePage() {
   );
   const { signatureMap, verificationMap } = useAtprotoSignatures(targets);
 
+  useScrollRestore(`profile:${params.handle}`, scrollRef, !!profile);
+
+  // キャッシュがなければ初回フェッチ
   useEffect(() => {
     if (!agent || !params.handle) return;
+    if (profileCache.has(params.handle)) return;
 
     (async () => {
       setLoading(true);
@@ -64,6 +90,12 @@ export default function ProfilePage() {
       }
     })();
   }, [agent, params.handle]);
+
+  // 状態変更をキャッシュに反映
+  useEffect(() => {
+    if (!params.handle || !profile) return;
+    profileCache.set(params.handle, { profile, feed, cursor, hasMore });
+  }, [params.handle, profile, feed, cursor, hasMore]);
 
   const handleSignatureClick = useCallback(
     (signature: AtprotoSignature) => {
@@ -121,17 +153,20 @@ export default function ProfilePage() {
   return (
     <div className="h-full flex flex-col">
       <AtprotoHeader title={`@${profile.handle}`} />
-      <div className="flex-1 overflow-y-auto">
-        <AtprotoProfile
-          profile={profile}
-          feed={feed}
-          signatureMap={signatureMap}
-          verificationMap={verificationMap}
-          onLoadMore={handleLoadMore}
-          hasMore={hasMore}
-          isLoadingMore={loadingMore}
-          onSignatureClick={handleSignatureClick}
-        />
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <AtprotoProfile profile={profile} />
+        <div className="border-t border-accent/20">
+          <Timeline
+            posts={feed}
+            signatureMap={signatureMap}
+            verificationMap={verificationMap}
+            onLoadMore={handleLoadMore}
+            hasMore={hasMore}
+            isLoading={loadingMore}
+            onSignatureClick={handleSignatureClick}
+            scrollRoot={scrollRef}
+          />
+        </div>
       </div>
     </div>
   );

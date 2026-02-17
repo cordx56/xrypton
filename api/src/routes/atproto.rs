@@ -476,7 +476,7 @@ async fn link_account(
     auth: AuthenticatedUser,
     State(state): State<AppState>,
     Json(body): Json<LinkAccountRequest>,
-) -> Result<StatusCode, AppError> {
+) -> Result<(StatusCode, Json<db::models::AtprotoAccountRow>), AppError> {
     validate_did(&body.atproto_did)?;
 
     if !body.pds_url.starts_with("https://") {
@@ -495,11 +495,16 @@ async fn link_account(
     )
     .await?;
 
-    if existing.is_some() {
-        Ok(StatusCode::OK)
+    let account =
+        db::atproto::get_account(&state.pool, auth.user_id.as_str(), &body.atproto_did).await?;
+    let account =
+        account.ok_or_else(|| AppError::Internal("failed to retrieve linked account".into()))?;
+    let status = if existing.is_some() {
+        StatusCode::OK
     } else {
-        Ok(StatusCode::CREATED)
-    }
+        StatusCode::CREATED
+    };
+    Ok((status, Json(account)))
 }
 
 async fn list_accounts(

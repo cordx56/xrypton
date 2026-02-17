@@ -31,6 +31,7 @@ import Dialog from "@/components/common/Dialog";
 import SignatureVerifier from "@/components/atproto/SignatureVerifier";
 import Spinner from "@/components/common/Spinner";
 import { useAtprotoSignatures } from "@/hooks/useAtprotoSignature";
+import { useScrollRestore } from "@/hooks/useScrollRestore";
 import { useI18n } from "@/contexts/I18nContext";
 import type { AtprotoSignature } from "@/types/atproto";
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
@@ -43,16 +44,30 @@ const tabs: { id: Tab; icon: IconDefinition }[] = [
   { id: "search", icon: faMagnifyingGlass },
 ];
 
+/** ページ遷移をまたいでタイムラインの状態を保持するキャッシュ */
+let timelineCache: {
+  posts: AppBskyFeedDefs.FeedViewPost[];
+  cursor: string | undefined;
+  hasMore: boolean;
+} | null = null;
+
 /** タイムライン列（ホーム） */
 function HomeColumn() {
   const { agent } = useAtproto();
   const { pushDialog } = useDialogs();
-  const [posts, setPosts] = useState<AppBskyFeedDefs.FeedViewPost[]>([]);
-  const [cursor, setCursor] = useState<string | undefined>();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [posts, setPosts] = useState<AppBskyFeedDefs.FeedViewPost[]>(
+    () => timelineCache?.posts ?? [],
+  );
+  const [cursor, setCursor] = useState<string | undefined>(
+    () => timelineCache?.cursor,
+  );
   const [loading, setLoading] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
+  const [hasMore, setHasMore] = useState(() => timelineCache?.hasMore ?? true);
   const initialLoaded = useRef(false);
   const [replyTo, setReplyTo] = useState<AppBskyFeedDefs.PostView | null>(null);
+
+  useScrollRestore("home-timeline", scrollRef, posts.length > 0);
 
   const targets = useMemo(
     () =>
@@ -105,12 +120,22 @@ function HomeColumn() {
     [agent, loading],
   );
 
+  // キャッシュがなければ初回ロード
   useEffect(() => {
     if (agent && !initialLoaded.current) {
       initialLoaded.current = true;
-      loadTimeline();
+      if (!timelineCache?.posts.length) {
+        loadTimeline();
+      }
     }
   }, [agent, loadTimeline]);
+
+  // 状態変更をキャッシュに反映
+  useEffect(() => {
+    if (posts.length > 0) {
+      timelineCache = { posts, cursor, hasMore };
+    }
+  }, [posts, cursor, hasMore]);
 
   const handleLoadMore = useCallback(() => {
     if (cursor && !loading) loadTimeline(cursor);
@@ -122,16 +147,19 @@ function HomeColumn() {
 
   return (
     <>
-      <Timeline
-        posts={posts}
-        signatureMap={signatureMap}
-        verificationMap={verificationMap}
-        onLoadMore={handleLoadMore}
-        hasMore={hasMore}
-        isLoading={loading}
-        onSignatureClick={handleSignatureClick}
-        onReply={handleReply}
-      />
+      <div ref={scrollRef} className="h-full overflow-y-auto">
+        <Timeline
+          posts={posts}
+          signatureMap={signatureMap}
+          verificationMap={verificationMap}
+          onLoadMore={handleLoadMore}
+          hasMore={hasMore}
+          isLoading={loading}
+          onSignatureClick={handleSignatureClick}
+          onReply={handleReply}
+          scrollRoot={scrollRef}
+        />
+      </div>
       {replyTo && (
         <ReplyOverlay
           replyTo={replyTo}
@@ -147,17 +175,14 @@ function HomeColumn() {
 function Column({
   icon,
   children,
-  action,
 }: {
   icon: IconDefinition;
   children: React.ReactNode;
-  action?: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col h-full min-w-0">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-accent/30">
+      <div className="px-4 py-3 border-b border-accent/30">
         <FontAwesomeIcon icon={icon} className="text-lg text-muted" />
-        {action}
       </div>
       <div className="flex-1 overflow-hidden">{children}</div>
     </div>
@@ -293,14 +318,6 @@ export default function AtprotoPage() {
               <FontAwesomeIcon icon={tab.icon} className="text-lg" />
             </button>
           ))}
-          {/* 投稿ボタン */}
-          <button
-            type="button"
-            onClick={() => setShowCompose(true)}
-            className="py-3 px-3 text-muted hover:text-fg transition-colors"
-          >
-            <FontAwesomeIcon icon={faPenToSquare} className="text-lg" />
-          </button>
         </div>
 
         {/* コンテンツ */}
@@ -314,19 +331,7 @@ export default function AtprotoPage() {
       {/* --- PC: 3カラム横並び --- */}
       <div className="hidden md:flex h-full overflow-x-auto">
         <div className="flex-1 min-w-lg border-r border-accent/20">
-          <Column
-            icon={faHouse}
-            action={
-              <button
-                type="button"
-                onClick={() => setShowCompose(true)}
-                className="p-2 rounded-lg hover:bg-accent/20 transition-colors"
-                title={t("atproto.compose")}
-              >
-                <FontAwesomeIcon icon={faPenToSquare} />
-              </button>
-            }
-          >
+          <Column icon={faHouse}>
             <HomeColumn />
           </Column>
         </div>
@@ -341,6 +346,16 @@ export default function AtprotoPage() {
           </Column>
         </div>
       </div>
+
+      {/* 投稿FAB */}
+      <button
+        type="button"
+        onClick={() => setShowCompose(true)}
+        title={t("atproto.compose")}
+        className="fixed bottom-20 right-4 md:bottom-6 md:right-6 z-40 w-12 h-12 flex items-center justify-center rounded-2xl bg-accent text-white shadow-lg hover:brightness-110 active:scale-95 transition-all"
+      >
+        <FontAwesomeIcon icon={faPenToSquare} className="text-lg" />
+      </button>
 
       {/* 投稿オーバーレイ */}
       {showCompose && <ComposeOverlay onClose={() => setShowCompose(false)} />}

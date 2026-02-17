@@ -18,27 +18,25 @@ const SignatureBadge = ({ level, onClick }: Props) => {
 
   if (level === "none") return null;
 
-  if (level === "verified") {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        className="inline-flex items-center gap-1 text-xs text-green-400 hover:text-green-300 transition-colors"
-      >
-        <FontAwesomeIcon icon={faCircleCheck} />
-        <span>{t("atproto.signature_verified")}</span>
-      </button>
-    );
-  }
+  const isVerified = level === "verified";
+  const title = isVerified
+    ? t("atproto.signature_verified")
+    : t("atproto.signature_mismatch");
 
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors"
+      title={title}
+      className={`text-xs transition-colors ${
+        isVerified
+          ? "text-green-400 hover:text-green-300"
+          : "text-red-400 hover:text-red-300"
+      }`}
     >
-      <FontAwesomeIcon icon={faTriangleExclamation} />
-      <span>{t("atproto.signature_mismatch")}</span>
+      <FontAwesomeIcon
+        icon={isVerified ? faCircleCheck : faTriangleExclamation}
+      />
     </button>
   );
 };

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use tokio::time::{Duration, sleep};
 use xrypton_api::AppState;
 use xrypton_api::DidCache;
 use xrypton_api::config::AppConfig;
@@ -7,7 +8,6 @@ use xrypton_api::db;
 use xrypton_api::federation::dns::DnsTxtResolver;
 use xrypton_api::routes::build_router;
 use xrypton_api::storage::S3Storage;
-use tokio::time::{Duration, sleep};
 
 const NONCE_RETENTION_DAYS: i64 = 30;
 const NONCE_CLEANUP_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);

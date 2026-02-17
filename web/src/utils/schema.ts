@@ -196,6 +196,7 @@ export const AtprotoAccountSchema = z.object({
   atproto_did: z.string(),
   atproto_handle: z.string().nullable(),
   pds_url: z.string(),
+  pubkey_post_uri: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });

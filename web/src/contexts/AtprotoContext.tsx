@@ -48,7 +48,7 @@ type AtprotoContextType = {
   handle: string | null;
   agent: Agent | null;
   accounts: AtprotoAccount[];
-  /** OAuth認証直後で検証投稿がまだの場合 true */
+  /** 検証投稿が必要な場合 true */
   needsVerificationPost: boolean;
   completeVerification: () => void;
   login: (handle: string) => Promise<void>;
@@ -212,6 +212,15 @@ export const AtprotoProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [userId, getSignedMessage, showError, refreshAccounts]);
 
+  // 接続中のDIDに pubkey_post_uri が未設定なら検証投稿を要求する
+  useEffect(() => {
+    if (!did || accounts.length === 0) return;
+    const account = accounts.find((a) => a.atproto_did === did);
+    if (account && !account.pubkey_post_uri) {
+      setNeedsVerificationPost(true);
+    }
+  }, [did, accounts]);
+
   const login = useCallback(
     async (inputHandle: string) => {
       if (!oauthClient) throw new Error("OAuth client not initialized");
@@ -229,7 +238,8 @@ export const AtprotoProvider = ({ children }: { children: ReactNode }) => {
 
   const completeVerification = useCallback(() => {
     setNeedsVerificationPost(false);
-  }, []);
+    refreshAccounts();
+  }, [refreshAccounts]);
 
   return (
     <AtprotoContext.Provider

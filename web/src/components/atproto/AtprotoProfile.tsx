@@ -8,20 +8,13 @@ import {
   createElement,
 } from "react";
 import Link from "next/link";
-import {
-  AppBskyActorDefs,
-  AppBskyFeedDefs,
-  RichText,
-  Agent,
-} from "@atproto/api";
+import { AppBskyActorDefs, RichText, Agent } from "@atproto/api";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faUserPlus, faUserMinus } from "@fortawesome/free-solid-svg-icons";
 import { useAtproto } from "@/contexts/AtprotoContext";
 import { useDialogs } from "@/contexts/DialogContext";
-import PostCard from "@/components/atproto/PostCard";
 import Dialog from "@/components/common/Dialog";
 import Spinner from "@/components/common/Spinner";
-import type { AtprotoSignature, VerificationLevel } from "@/types/atproto";
 
 /** フォロー/フォロワー一覧 */
 function FollowList({
@@ -164,25 +157,11 @@ function DescriptionText({ text }: { text: string }) {
 
 type Props = {
   profile: AppBskyActorDefs.ProfileViewDetailed;
-  feed: AppBskyFeedDefs.FeedViewPost[];
-  signatureMap: Map<string, AtprotoSignature>;
-  verificationMap: Map<string, VerificationLevel>;
-  onLoadMore: () => void;
-  hasMore: boolean;
-  isLoadingMore: boolean;
-  onSignatureClick?: (signature: AtprotoSignature) => void;
 };
 
-const AtprotoProfile = ({
-  profile,
-  feed,
-  signatureMap,
-  verificationMap,
-  onLoadMore,
-  hasMore,
-  isLoadingMore,
-  onSignatureClick,
-}: Props) => {
+/** プロフィールヘッダ（バナー・アバター・bio・フォロー数）。
+ *  フィード一覧は親側で Timeline コンポーネントを使って描画する。 */
+const AtprotoProfile = ({ profile }: Props) => {
   const { agent } = useAtproto();
   const { pushDialog } = useDialogs();
   const [following, setFollowing] = useState(!!profile.viewer?.following);
@@ -301,34 +280,6 @@ const AtprotoProfile = ({
             <span className="text-muted">posts</span>
           </span>
         </div>
-      </div>
-
-      {/* User feed */}
-      <div className="border-t border-accent/20">
-        {feed.map((item, idx) => (
-          <PostCard
-            key={`${item.post.uri}-${idx}`}
-            post={item.post}
-            reason={
-              AppBskyFeedDefs.isReasonRepost(item.reason)
-                ? item.reason
-                : undefined
-            }
-            verificationLevel={verificationMap.get(item.post.uri) ?? "none"}
-            signature={signatureMap.get(item.post.uri)}
-            onSignatureClick={onSignatureClick}
-          />
-        ))}
-        {isLoadingMore && <Spinner />}
-        {hasMore && !isLoadingMore && (
-          <button
-            type="button"
-            onClick={onLoadMore}
-            className="w-full py-3 text-sm text-accent hover:bg-accent/5 transition-colors"
-          >
-            Load more
-          </button>
-        )}
       </div>
     </div>
   );

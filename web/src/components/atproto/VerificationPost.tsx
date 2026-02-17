@@ -21,7 +21,7 @@ const VerificationPost = () => {
     (typeof window !== "undefined" ? window.location.host : "localhost");
 
   const postText = useMemo(
-    () => `Xrypton at ${hostname} pubkey:\n${publicKeys ?? ""}`,
+    () => `Xrypton at ${hostname} pubkey:\n\n${publicKeys ?? ""}`,
     [hostname, publicKeys],
   );
 

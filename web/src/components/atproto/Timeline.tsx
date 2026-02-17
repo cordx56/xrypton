@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useCallback, useEffect } from "react";
+import { useRef, useCallback, useEffect, type RefObject } from "react";
 import { AppBskyFeedDefs } from "@atproto/api";
 import PostCard from "@/components/atproto/PostCard";
 import Spinner from "@/components/common/Spinner";
@@ -15,8 +15,12 @@ type Props = {
   isLoading: boolean;
   onSignatureClick?: (signature: AtprotoSignature) => void;
   onReply?: (post: AppBskyFeedDefs.PostView) => void;
+  /** IntersectionObserver の root 要素（親のスクロールコンテナ） */
+  scrollRoot?: RefObject<HTMLElement | null>;
 };
 
+/** ポスト一覧 + IntersectionObserver による無限スクロール。
+ *  自前のスクロールコンテナは持たず、親が用意したコンテナ内に描画する。 */
 const Timeline = ({
   posts,
   signatureMap,
@@ -26,8 +30,8 @@ const Timeline = ({
   isLoading,
   onSignatureClick,
   onReply,
+  scrollRoot,
 }: Props) => {
-  const containerRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   // 下方向スクロールで追加読み込み（IntersectionObserver）
@@ -44,16 +48,16 @@ const Timeline = ({
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
     const observer = new IntersectionObserver(handleIntersect, {
-      root: containerRef.current,
+      root: scrollRoot?.current ?? null,
       threshold: 0,
       rootMargin: "200px",
     });
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [handleIntersect]);
+  }, [handleIntersect, scrollRoot]);
 
   return (
-    <div ref={containerRef} className="h-full overflow-y-auto">
+    <>
       {posts.map((item, idx) => {
         const uri = item.post.uri;
         const replyParent =
@@ -83,7 +87,7 @@ const Timeline = ({
       {/* Sentinel for infinite scroll */}
       <div ref={sentinelRef} className="h-1" />
       {isLoading && <Spinner />}
-    </div>
+    </>
   );
 };
 
