@@ -14,7 +14,7 @@ use crate::types::UserId;
 /// Authenticated user extracted from the Authorization header.
 ///
 /// The header must contain a base64-encoded PGP-signed message whose plaintext is
-/// `{"nonce":"<iso8601>"}`.
+/// `{"nonce":{"random":"<random>","time":"<iso8601>"}}`.
 /// サーバーはnonceのタイムスタンプが現在時刻から前後1時間以内であることを検証する。
 /// The server extracts the signer user ID from the PGP SignersUserID subpacket,
 /// looks up the user, verifies the signature against the user's registered signing key,
@@ -60,9 +60,9 @@ pub(crate) async fn authenticate(
                 let payload: AuthPayload = serde_json::from_slice(&payload_bytes)
                     .map_err(|e| AppError::Unauthorized(format!("invalid auth payload: {e}")))?;
                 validate_nonce_timestamp(&payload.nonce)?;
+                let nonce_key = payload.nonce.replay_key();
 
-                let is_new =
-                    db::nonces::try_use_nonce(pool, &payload.nonce, user_id.as_str()).await?;
+                let is_new = db::nonces::try_use_nonce(pool, nonce_key, user_id.as_str()).await?;
                 if !is_new {
                     return Err(AppError::Unauthorized("nonce already used".into()));
                 }
@@ -116,12 +116,36 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
 
 #[derive(serde::Deserialize)]
 pub(crate) struct AuthPayload {
-    pub(crate) nonce: String,
+    pub(crate) nonce: AuthNonce,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+pub(crate) enum AuthNonce {
+    Legacy(String),
+    Structured { random: String, time: String },
+}
+
+impl AuthNonce {
+    pub(crate) fn replay_key(&self) -> &str {
+        match self {
+            Self::Legacy(value) => value,
+            Self::Structured { random, .. } => random,
+        }
+    }
+
+    fn timestamp(&self) -> &str {
+        match self {
+            Self::Legacy(value) => value,
+            Self::Structured { time, .. } => time,
+        }
+    }
 }
 
 /// nonceのISO 8601タイムスタンプが現在時刻から前後1時間以内か検証する。
-pub(crate) fn validate_nonce_timestamp(nonce: &str) -> Result<(), AppError> {
+pub(crate) fn validate_nonce_timestamp(nonce: &AuthNonce) -> Result<(), AppError> {
     let client_time: chrono::DateTime<chrono::Utc> = nonce
+        .timestamp()
         .parse()
         .map_err(|e| AppError::Unauthorized(format!("invalid nonce timestamp: {e}")))?;
     let diff = (chrono::Utc::now() - client_time).num_seconds().abs();

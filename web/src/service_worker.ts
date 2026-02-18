@@ -3,6 +3,7 @@ import init, { decrypt, sign } from "xrypton-wasm";
 import { Notification, WasmReturnValue } from "@/utils/schema";
 import { decodeBase64Url } from "@/utils/base64";
 import { getKey } from "@/utils/keyStore";
+import { buildAuthPayload } from "@/utils/authPayload";
 
 /** アクティブアカウントのプレフィックス付きキーを取得する */
 const getAccountKey = async (key: string): Promise<string | undefined> => {
@@ -53,10 +54,7 @@ const authenticatedFetch = async (
   subPassphrase: string,
 ): Promise<Response | null> => {
   try {
-    const payload = JSON.stringify({
-      nonce: crypto.randomUUID(),
-      timestamp: new Date().toISOString(),
-    });
+    const payload = buildAuthPayload();
     const encoded = new TextEncoder().encode(payload);
     const signResult = WasmReturnValue.safeParse(
       sign(privateKeys, subPassphrase, encoded),

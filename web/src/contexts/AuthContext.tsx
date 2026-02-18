@@ -16,6 +16,7 @@ import { WorkerCallMessage } from "@/utils/schema";
 import { getKey, setKey } from "@/utils/keyStore";
 import { fromBase64Url, toBase64Url } from "@/utils/base64";
 import { apiClient, authApiClient, ApiError } from "@/api/client";
+import { buildAuthPayload } from "@/utils/authPayload";
 import {
   migrateToMultiAccount,
   getActiveAccountId,
@@ -502,9 +503,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           call: "sign",
           keys: privateKeys,
           passphrase: subPassphrase,
-          payload: JSON.stringify({
-            nonce: new Date().toISOString(),
-          }),
+          payload: buildAuthPayload(),
         });
       });
       if (!signed) return false;
@@ -626,9 +625,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return null;
     }
 
-    const payload = JSON.stringify({
-      nonce: new Date().toISOString(),
-    });
+    const payload = buildAuthPayload();
 
     return new Promise((resolve) => {
       workerCtx.eventWaiter("sign", (result) => {

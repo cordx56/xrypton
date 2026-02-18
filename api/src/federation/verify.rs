@@ -43,9 +43,10 @@ pub async fn verify_or_fetch_external_user(
             let payload: AuthPayload = serde_json::from_slice(&payload_bytes)
                 .map_err(|e| AppError::Unauthorized(format!("invalid auth payload: {e}")))?;
             validate_nonce_timestamp(&payload.nonce)?;
+            let nonce_key = payload.nonce.replay_key();
 
             let is_new =
-                db::nonces::try_use_nonce(pool, &payload.nonce, cached_user_id.as_str()).await?;
+                db::nonces::try_use_nonce(pool, nonce_key, cached_user_id.as_str()).await?;
             if !is_new {
                 return Err(AppError::Unauthorized("nonce already used".into()));
             }
@@ -101,8 +102,9 @@ pub async fn verify_or_fetch_external_user(
         let payload: AuthPayload = serde_json::from_slice(&payload_bytes)
             .map_err(|e| AppError::Unauthorized(format!("invalid auth payload: {e}")))?;
         validate_nonce_timestamp(&payload.nonce)?;
+        let nonce_key = payload.nonce.replay_key();
 
-        let is_new = db::nonces::try_use_nonce(pool, &payload.nonce, user_id.as_str()).await?;
+        let is_new = db::nonces::try_use_nonce(pool, nonce_key, user_id.as_str()).await?;
         if !is_new {
             return Err(AppError::Unauthorized("nonce already used".into()));
         }
@@ -143,9 +145,10 @@ pub async fn verify_or_fetch_external_user(
     let payload: AuthPayload = serde_json::from_slice(&payload_bytes)
         .map_err(|e| AppError::Unauthorized(format!("invalid auth payload: {e}")))?;
     validate_nonce_timestamp(&payload.nonce)?;
+    let nonce_key = payload.nonce.replay_key();
 
     let user_id = UserId(full_id);
-    let is_new = db::nonces::try_use_nonce(pool, &payload.nonce, user_id.as_str()).await?;
+    let is_new = db::nonces::try_use_nonce(pool, nonce_key, user_id.as_str()).await?;
     if !is_new {
         return Err(AppError::Unauthorized("nonce already used".into()));
     }

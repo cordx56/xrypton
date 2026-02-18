@@ -9,6 +9,7 @@ import { useI18n } from "@/contexts/I18nContext";
 import { useDialogs } from "@/contexts/DialogContext";
 import { apiClient, authApiClient, ApiError } from "@/api/client";
 import { setAccountValue } from "@/utils/accountStore";
+import { buildAuthPayload } from "@/utils/authPayload";
 import Code from "@/components/Code";
 import QrDisplay from "@/components/QrDisplay";
 import QrReader from "@/components/QrReader";
@@ -348,7 +349,7 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
           call: "sign",
           keys: trimmedKey,
           passphrase: subPassphrase,
-          payload: JSON.stringify({ nonce: new Date().toISOString() }),
+          payload: buildAuthPayload(),
         });
       });
 
