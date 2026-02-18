@@ -13,6 +13,7 @@ import NotificationBanner from "@/components/common/NotificationBanner";
 type NotificationData = {
   displayName: string;
   iconUrl: string | null;
+  userId?: string;
   body: string;
 };
 
@@ -78,6 +79,7 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
         <NotificationBanner
           displayName={current.displayName}
           iconUrl={current.iconUrl}
+          userId={current.userId}
           body={current.body}
           fading={fading}
           onDismiss={dismiss}

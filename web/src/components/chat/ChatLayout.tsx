@@ -200,6 +200,7 @@ const NewGroupDialog: DialogComponent = ({ close, setOnClose }) => {
                   <Avatar
                     name={c.display_name}
                     iconUrl={c.icon_url}
+                    userId={c.contact_user_id}
                     size="sm"
                   />
                   <div className="min-w-0 flex-1">
@@ -379,7 +380,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           }
         }
 
-        showNotification({ displayName, iconUrl, body });
+        showNotification({ displayName, iconUrl, userId: senderId, body });
 
         // チャンネルとスレッドの更新日時を更新
         if (data.chat_id) {

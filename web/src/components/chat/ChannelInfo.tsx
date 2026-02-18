@@ -94,7 +94,11 @@ const ChannelInfo = ({ chatId }: Props) => {
                 href={`/profile/${m.userId}`}
                 className="flex items-center gap-3 px-4 py-3 border-b border-accent/10 hover:bg-accent/5 transition-colors"
               >
-                <Avatar name={m.displayName} iconUrl={m.iconUrl} />
+                <Avatar
+                  name={m.displayName}
+                  iconUrl={m.iconUrl}
+                  userId={m.userId}
+                />
                 <div className="min-w-0 flex-1">
                   <div className="font-medium truncate">{m.displayName}</div>
                   <div className="text-xs text-muted truncate">

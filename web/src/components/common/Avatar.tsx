@@ -3,13 +3,18 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { bytesToBase64, base64ToBytes } from "@/utils/base64";
+import { getCachedPublicKeys } from "@/utils/publicKeyCache";
+import { apiClient } from "@/api/client";
 
 export type VerifyState = "verified" | "warning" | "loading";
 
 type Props = {
   name: string;
   iconUrl?: string | null;
+  /** PGP署名鍵（直接指定） */
   publicKey?: string;
+  /** publicKey未指定時に署名鍵を自動取得するためのユーザID */
+  userId?: string;
   size?: "xs" | "sm" | "md" | "lg" | "xl";
   onVerifyStateChange?: (state: VerifyState) => void;
 };
@@ -34,6 +39,7 @@ const Avatar = ({
   name,
   iconUrl,
   publicKey,
+  userId,
   size = "md",
   onVerifyStateChange,
 }: Props) => {
@@ -70,8 +76,26 @@ const Avatar = ({
         const arrayBuf = await resp.arrayBuffer();
         const rawBytes = new Uint8Array(arrayBuf);
 
-        // publicKeyとworkerがある場合、PGP検証を試行
-        if (publicKey && worker) {
+        // publicKeyを解決: 直接渡されていなければ userId から IDB/API で取得
+        let resolvedKey = publicKey;
+        if (!resolvedKey && userId) {
+          const cached = await getCachedPublicKeys(userId);
+          if (cached) {
+            resolvedKey = cached.signing_public_key;
+          } else {
+            try {
+              const keys = await apiClient().user.getKeys(userId);
+              if (keys?.signing_public_key) {
+                resolvedKey = keys.signing_public_key;
+              }
+            } catch {
+              // 鍵取得失敗
+            }
+          }
+        }
+        if (cancelled) return;
+
+        if (resolvedKey && worker) {
           setVerifyState("loading");
           const dataBase64 = bytesToBase64(rawBytes);
 
@@ -88,7 +112,7 @@ const Avatar = ({
             });
             worker.postMessage({
               call: "verify_extract_bytes",
-              publicKey,
+              publicKey: resolvedKey!,
               data: dataBase64,
             });
           });
@@ -104,19 +128,13 @@ const Avatar = ({
             setResolvedUrl(url);
             setVerifyState("verified");
           } else {
-            // 検証失敗: 元のバイトをそのまま画像として表示（後方互換）+ 警告
-            const blob = new Blob([rawBytes.buffer as ArrayBuffer]);
-            const url = URL.createObjectURL(blob);
-            prevUrlRef.current = url;
-            setResolvedUrl(url);
+            // 検証失敗: 初期アバターにフォールバック
+            setResolvedUrl(null);
             setVerifyState("warning");
           }
         } else {
-          // publicKey/workerなし: 検証不可のため警告付き表示
-          const blob = new Blob([rawBytes.buffer as ArrayBuffer]);
-          const url = URL.createObjectURL(blob);
-          prevUrlRef.current = url;
-          setResolvedUrl(url);
+          // 鍵/workerなし: 初期アバターにフォールバック
+          setResolvedUrl(null);
           setVerifyState("warning");
         }
       } catch {
@@ -130,7 +148,7 @@ const Avatar = ({
     return () => {
       cancelled = true;
     };
-  }, [iconUrl, publicKey, auth.worker]);
+  }, [iconUrl, publicKey, userId, auth.worker]);
 
   if (resolvedUrl) {
     return (

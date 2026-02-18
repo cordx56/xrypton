@@ -14,6 +14,7 @@ type Props = {
   isOwn: boolean;
   displayName: string;
   iconUrl: string | null;
+  userId?: string;
   status?: string;
   onClickUser?: () => void;
   onDownloadFile?: (message: Message) => void;
@@ -86,6 +87,7 @@ const MessageBubble = ({
   isOwn,
   displayName,
   iconUrl,
+  userId,
   status,
   onClickUser,
   onDownloadFile,
@@ -103,7 +105,12 @@ const MessageBubble = ({
         className="cursor-pointer shrink-0"
         title={status || undefined}
       >
-        <Avatar name={displayName} iconUrl={iconUrl} size="sm" />
+        <Avatar
+          name={displayName}
+          iconUrl={iconUrl}
+          userId={userId}
+          size="sm"
+        />
       </button>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2 mb-0.5">

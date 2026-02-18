@@ -173,6 +173,7 @@ const ChatView = ({
                   (senderId ? displayUserId(senderId) : t("chat.deleted_user"))
                 }
                 iconUrl={profile?.icon_url ?? null}
+                userId={senderId ?? undefined}
                 status={profile?.status ?? ""}
                 onClickUser={
                   senderId
