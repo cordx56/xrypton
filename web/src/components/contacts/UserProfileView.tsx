@@ -98,6 +98,30 @@ const UserProfileView = ({ userId }: Props) => {
   const isOwnProfile = auth.userId === userId;
   const hasWorker = !!auth.worker;
 
+  // 同一オリジンの戻り先がなければ戻るボタンを非表示にする
+  const [canGoBack] = useState(() => {
+    if (typeof window === "undefined") return false;
+    // Navigation API で同一オリジンの履歴を確認（SPA 遷移に対応）
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nav = (window as any).navigation;
+      if (nav?.currentEntry) {
+        return nav.currentEntry.index > 0;
+      }
+    } catch {
+      // Navigation API 非対応
+    }
+    // フォールバック: referrer が同一オリジンか確認
+    try {
+      return (
+        !!document.referrer &&
+        new URL(document.referrer).origin === window.location.origin
+      );
+    } catch {
+      return false;
+    }
+  });
+
   // テキストフィールドとアイコンの検証状態を統合
   // アイコンがない場合はアイコン検証を無視する
   const iconFailed = !!iconUrl && iconVerifyState === "warning";
@@ -511,16 +535,18 @@ const UserProfileView = ({ userId }: Props) => {
 
   return (
     <div className="max-w-lg mx-auto p-4 space-y-6">
-      {/* 他者プロフィールの場合のみ戻るボタンを表示 */}
+      {/* 他者プロフィールの場合のみヘッダーを表示 */}
       {!isOwnProfile && (
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="p-2 hover:bg-accent/10 rounded"
-          >
-            <FontAwesomeIcon icon={faArrowLeft} />
-          </button>
+          {canGoBack && (
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="p-2 hover:bg-accent/10 rounded"
+            >
+              <FontAwesomeIcon icon={faArrowLeft} />
+            </button>
+          )}
           <h2 className="text-lg font-semibold flex-1">{t("tab.profile")}</h2>
           {isLoggedIn &&
             (isContact ? (
