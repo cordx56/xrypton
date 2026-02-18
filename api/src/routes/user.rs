@@ -387,16 +387,9 @@ async fn verify_pubkey_post(pool: &db::Db, uri: &str, pds_url: &str) -> bool {
     };
 
     // 4. 取得したレコードから署名対象を構築し、署名の平文と照合
-    let cid_str = output
-        .cid
-        .as_ref()
-        .and_then(|c| serde_json::to_value(c).ok())
-        .and_then(|v| v.get("$link").and_then(|s| s.as_str()).map(String::from));
-    let Some(cid_str) = cid_str else {
-        tracing::warn!(
-            uri,
-            "verify_pubkey_post: failed to extract CID from getRecord response"
-        );
+    // atrium の Cid 型はプレーンな文字列としてシリアライズされる
+    let Some(cid_str) = output.cid.as_ref().map(|c| c.as_ref().to_string()) else {
+        tracing::warn!(uri, "verify_pubkey_post: getRecord response has no CID");
         return false;
     };
     let Ok(record_value) = serde_json::to_value(&output.value) else {
