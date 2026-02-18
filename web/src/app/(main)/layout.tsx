@@ -23,17 +23,24 @@ export default function MainLayout({
   // 鍵またはユーザIDがない、または未登録の場合は生成画面を表示
   if (!auth.privateKeys || !auth.userId || !auth.isRegistered) {
     return (
-      <div className="h-dvh overflow-y-auto">
-        <div className="min-h-full flex flex-col items-center justify-center p-6">
-          <GenerateKey mode="init" />
-          {auth.accountIds.length > 0 && (
-            <div className="mt-8 w-full max-w-lg">
-              <h3 className="text-sm font-medium text-muted mb-2 px-4">
-                {t("account.logged_in")}
-              </h3>
-              <AccountList accountIds={auth.accountIds} />
-            </div>
-          )}
+      <div className="h-dvh flex flex-col">
+        <header className="border-b border-accent/30 bg-bg shrink-0">
+          <div className="flex items-center px-4 py-2 max-w-[1400px] mx-auto w-full">
+            <span className="font-bold text-sm tracking-wide">Xrypton</span>
+          </div>
+        </header>
+        <div className="flex-1 overflow-y-auto">
+          <div className="min-h-full flex flex-col items-center justify-center p-6">
+            <GenerateKey mode="init" />
+            {auth.accountIds.length > 0 && (
+              <div className="mt-8 w-full max-w-lg">
+                <h3 className="text-sm font-medium text-muted mb-2 px-4">
+                  {t("account.logged_in")}
+                </h3>
+                <AccountList accountIds={auth.accountIds} />
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );

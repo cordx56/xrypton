@@ -145,9 +145,20 @@ pub struct AtprotoSignatureWithKeyRow {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExternalAccount {
     Atproto {
-        validated: bool,
         did: String,
         handle: Option<String>,
         pds_url: String,
+        pubkey_post_uri: Option<String>,
     },
+}
+
+impl From<AtprotoAccountRow> for ExternalAccount {
+    fn from(a: AtprotoAccountRow) -> Self {
+        Self::Atproto {
+            did: a.atproto_did,
+            handle: a.atproto_handle,
+            pds_url: a.pds_url,
+            pubkey_post_uri: a.pubkey_post_uri,
+        }
+    }
 }

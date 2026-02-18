@@ -75,7 +75,7 @@ type AuthContextType = {
   ) => Promise<void>;
   /** WebAuthn登録を行う */
   registerWebAuthn: (userName?: string) => Promise<boolean>;
-  /** 既存のWebAuthnクレデンシャルで検証を行う */
+  /** 既存のWebAuthnクレデンシャルで検証を行う（discoverable credentials） */
   verifyWebAuthn: () => Promise<boolean>;
   /** サーバ登録済みとしてマークする */
   markRegistered: () => Promise<void>;
@@ -123,7 +123,6 @@ const AuthContext = createContext<AuthContextType>({
   isInitialized: false,
 });
 
-const WEBAUTHN_CRED_KEY = "webauthnCredentialId";
 const WEBAUTHN_USER_HANDLE_KEY = "webauthnUserHandle";
 const REAUTH_POLICY_KEY = "reauthPolicyDays";
 const LAST_REAUTH_AT_KEY = "lastReauthAt";
@@ -256,12 +255,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
 
         // アクティブアカウントのデータを読み込み
-        const [pk, sp, reg, policy, cred] = await Promise.all([
+        const [pk, sp, reg, policy, lastReauth] = await Promise.all([
           getAccountValue(activeId, "privateKeys"),
           getAccountValue(activeId, "subPassphrase"),
           getAccountValue(activeId, "isRegistered"),
           getAccountValue(activeId, REAUTH_POLICY_KEY),
-          getAccountValue(activeId, WEBAUTHN_CRED_KEY),
+          getAccountValue(activeId, LAST_REAUTH_AT_KEY),
         ]);
 
         setUserIdState(activeId);
@@ -269,7 +268,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setSubPassphraseState(sp);
         setIsRegistered(reg === "true");
         setReauthPolicyDaysState(parsePolicyDays(policy));
-        setHasWebAuthnCredential(!!cred);
+        setHasWebAuthnCredential(!!lastReauth);
 
         // テーマ・言語設定をアカウント別に同期
         const [acctColor, acctMode, acctLocale] = await Promise.all([
@@ -361,10 +360,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         if (!credential) return false;
 
-        const credentialId = toBase64Url(new Uint8Array(credential.rawId));
         const now = Date.now().toString();
         await Promise.all([
-          setWebAuthnKey(WEBAUTHN_CRED_KEY, credentialId),
           setWebAuthnKey(WEBAUTHN_USER_HANDLE_KEY, toBase64Url(userIdBytes)),
           setWebAuthnKey(LAST_REAUTH_AT_KEY, now),
         ]);
@@ -382,24 +379,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return false;
     }
     try {
-      const credentialId = await getWebAuthnKey(WEBAUTHN_CRED_KEY);
-
-      // ローカルにcredential IDがあれば指定、なければ省略して
-      // プラットフォーム同期済みパスキーの提示を許可する
-      const allowCredentials: PublicKeyCredentialDescriptor[] | undefined =
-        credentialId
-          ? [
-              {
-                type: "public-key",
-                id: toArrayBuffer(fromBase64Url(credentialId)),
-              },
-            ]
-          : undefined;
-
+      // 常にdiscoverable credentialsを使用し、パスワードマネージャ等の
+      // 同期パスキーを含むすべてのパスキーを提示する
       const assertion = (await navigator.credentials.get({
         publicKey: {
           challenge: toArrayBuffer(randomBytes(32)),
-          ...(allowCredentials ? { allowCredentials } : {}),
           timeout: 60_000,
           userVerification: "required",
         },
@@ -407,18 +391,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (!assertion) return false;
 
-      // 別端末からの同期パスキー利用時にcredential IDをローカルに保存
-      const assertedCredId = toBase64Url(new Uint8Array(assertion.rawId));
-      await Promise.all([
-        setWebAuthnKey(WEBAUTHN_CRED_KEY, assertedCredId),
-        setWebAuthnKey(LAST_REAUTH_AT_KEY, Date.now().toString()),
-      ]);
+      await setWebAuthnKey(LAST_REAUTH_AT_KEY, Date.now().toString());
       setHasWebAuthnCredential(true);
       return true;
     } catch {
       return false;
     }
-  }, [getWebAuthnKey, setWebAuthnKey]);
+  }, [setWebAuthnKey]);
 
   const ensureRecentReauth = useCallback(
     async (
@@ -445,18 +424,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (withinWindow) return true;
 
-      const hasCredential = !!(await getWebAuthnKey(WEBAUTHN_CRED_KEY));
-      setHasWebAuthnCredential(hasCredential);
-      if (!hasCredential) {
-        if (allowRegister) {
-          // 新規登録が許可されている場合は直接登録に進む。
-          // verifyWebAuthn → registerWebAuthn と連続呼び出しすると、
-          // 最初の認証でtransient activationが失効しcreate()が失敗するため。
-          return registerWebAuthn(userName);
-        }
-        // ローカルに未登録でも、同期パスキーがあるかもしれないので検証を試みる
-        return verifyWebAuthn();
+      const hasPasskey = !!(await getWebAuthnKey(LAST_REAUTH_AT_KEY));
+      setHasWebAuthnCredential(hasPasskey);
+      if (!hasPasskey && allowRegister) {
+        // パスキー未登録かつ新規登録が許可されている場合は直接登録に進む
+        return registerWebAuthn(userName);
       }
+      // discoverable credentialsで検証（パスワードマネージャの同期パスキーを含む）
       return verifyWebAuthn();
     },
     [reauthPolicyDays, registerWebAuthn, verifyWebAuthn, getWebAuthnKey],

@@ -1,6 +1,3 @@
-use atrium_api::client::AtpServiceClient;
-use atrium_api::com::atproto::repo::get_record;
-use atrium_api::types::string::{Did, Nsid, RecordKey};
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Multipart, Path, State};
 use axum::http::{HeaderMap, header};
@@ -282,137 +279,13 @@ async fn delete_user(
 }
 
 /// ATProtoアカウント等から外部アカウント情報を構築する。
-/// 公開鍵投稿の署名を検証し、成功した場合のみ validated=true にする。
 async fn build_external_accounts(state: &AppState, user_id: &str) -> Vec<ExternalAccount> {
-    let accounts = db::atproto::list_accounts(&state.pool, user_id)
+    db::atproto::list_accounts(&state.pool, user_id)
         .await
-        .unwrap_or_default();
-
-    let mut result = Vec::with_capacity(accounts.len());
-    for a in accounts {
-        let validated = match &a.pubkey_post_uri {
-            Some(uri) => verify_pubkey_post(&state.pool, uri, &a.pds_url).await,
-            None => false,
-        };
-        result.push(ExternalAccount::Atproto {
-            validated,
-            did: a.atproto_did,
-            handle: a.atproto_handle,
-            pds_url: a.pds_url,
-        });
-    }
-    result
-}
-
-/// AT URIをパースして (Did, Nsid, RecordKey) に分解する
-fn parse_at_uri(uri: &str) -> Option<(Did, Nsid, RecordKey)> {
-    let rest = uri.strip_prefix("at://")?;
-    let mut parts = rest.splitn(3, '/');
-    let did: Did = parts.next()?.parse().ok()?;
-    let collection: Nsid = parts.next()?.parse().ok()?;
-    let rkey: RecordKey = parts.next()?.parse().ok()?;
-    Some((did, collection, rkey))
-}
-
-/// 公開鍵投稿をPDSから実際に取得し、DB上の署名と照合して検証する
-async fn verify_pubkey_post(pool: &db::Db, uri: &str, pds_url: &str) -> bool {
-    // 1. DB から署名を取得
-    let sigs = match db::atproto::get_signatures_by_uri(pool, uri, None).await {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!(uri, "verify_pubkey_post: DB query failed: {e}");
-            return false;
-        }
-    };
-    let Some(sig) = sigs.first() else {
-        tracing::warn!(uri, "verify_pubkey_post: no signature found in DB");
-        return false;
-    };
-
-    // 2. PGP署名を検証
-    let Ok(public_keys) =
-        xrypton_common::keys::PublicKeys::try_from(sig.signing_public_key.as_str())
-    else {
-        tracing::warn!(uri, "verify_pubkey_post: failed to parse public key");
-        return false;
-    };
-    let Ok(payload_bytes) = public_keys.verify_and_extract(&sig.signature) else {
-        tracing::warn!(uri, "verify_pubkey_post: PGP signature verification failed");
-        return false;
-    };
-    let Ok(payload_text) = String::from_utf8(payload_bytes) else {
-        tracing::warn!(uri, "verify_pubkey_post: payload is not valid UTF-8");
-        return false;
-    };
-
-    // 3. AT URIをパースしてPDSから実際のレコードを取得
-    let Some((did, collection, rkey)) = parse_at_uri(uri) else {
-        tracing::warn!(uri, "verify_pubkey_post: failed to parse AT URI");
-        return false;
-    };
-
-    // SSRF防止: PDSのURLがプライベートIPでないことを検証
-    if let Err(e) = super::atproto::validate_url_not_private(pds_url).await {
-        tracing::warn!(uri, pds_url, "verify_pubkey_post: SSRF check failed: {e}");
-        return false;
-    }
-
-    let Ok(http_client) = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-    else {
-        tracing::warn!(uri, "verify_pubkey_post: failed to build HTTP client");
-        return false;
-    };
-    let client = AtpServiceClient::new(
-        atrium_xrpc_client::reqwest::ReqwestClientBuilder::new(pds_url)
-            .client(http_client)
-            .build(),
-    );
-    let params: get_record::Parameters = get_record::ParametersData {
-        repo: did.into(),
-        collection,
-        rkey,
-        cid: None,
-    }
-    .into();
-    let Ok(output) = client.service.com.atproto.repo.get_record(params).await else {
-        tracing::warn!(
-            uri,
-            pds_url,
-            "verify_pubkey_post: getRecord from PDS failed"
-        );
-        return false;
-    };
-
-    // 4. 取得したレコードから署名対象を構築し、署名の平文と照合
-    // atrium の Cid 型はプレーンな文字列としてシリアライズされる
-    let Some(cid_str) = output.cid.as_ref().map(|c| c.as_ref().to_string()) else {
-        tracing::warn!(uri, "verify_pubkey_post: getRecord response has no CID");
-        return false;
-    };
-    let Ok(record_value) = serde_json::to_value(&output.value) else {
-        tracing::warn!(
-            uri,
-            "verify_pubkey_post: failed to serialize record to JSON"
-        );
-        return false;
-    };
-    let target = serde_json::json!({
-        "cid": cid_str,
-        "record": record_value,
-        "uri": uri,
-    });
-    let expected = super::atproto::canonicalize_json(&target);
-    if payload_text != expected {
-        tracing::warn!(
-            uri,
-            "verify_pubkey_post: canonicalized mismatch\n  payload:  {payload_text}\n  expected: {expected}"
-        );
-        return false;
-    }
-    true
+        .unwrap_or_default()
+        .into_iter()
+        .map(ExternalAccount::from)
+        .collect()
 }
 
 async fn get_profile(

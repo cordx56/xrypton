@@ -192,16 +192,19 @@ function HomeColumn() {
 function Column({
   icon,
   children,
+  extra,
 }: {
   icon: IconDefinition;
   children: React.ReactNode;
+  extra?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col h-full min-w-0">
+    <div className="relative flex flex-col h-full min-w-0">
       <div className="px-4 py-3 border-b border-accent/30">
         <FontAwesomeIcon icon={icon} className="text-lg text-muted" />
       </div>
       <div className="flex-1 overflow-hidden">{children}</div>
+      {extra}
     </div>
   );
 }
@@ -295,6 +298,27 @@ export default function AtprotoPage() {
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [showCompose, setShowCompose] = useState(false);
 
+  // Nキーで新規投稿画面を開く
+  useEffect(() => {
+    if (!isConnected || needsVerificationPost) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 入力フィールドにフォーカスがある場合は無視
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        (e.target as HTMLElement)?.isContentEditable
+      )
+        return;
+      if (e.key === "n" || e.key === "N") {
+        e.preventDefault();
+        setShowCompose(true);
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isConnected, needsVerificationPost]);
+
   if (authLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -345,31 +369,43 @@ export default function AtprotoPage() {
         </div>
       </div>
 
-      {/* --- PC: 3カラム横並び --- */}
-      <div className="hidden md:flex h-full overflow-x-auto">
-        <div className="flex-1 min-w-lg border-r border-accent/20">
-          <Column icon={faHouse}>
+      {/* --- PC: 3カラム横並び（各カラム max-w-lg、中央寄せ） --- */}
+      <div className="hidden md:flex justify-center h-full overflow-x-auto">
+        <div className="w-full max-w-lg border-r border-accent/20">
+          <Column
+            icon={faHouse}
+            extra={
+              <button
+                type="button"
+                onClick={() => setShowCompose(true)}
+                title={t("atproto.compose")}
+                className="absolute bottom-4 right-4 z-40 w-14 h-14 flex items-center justify-center rounded-2xl bg-accent text-white shadow-lg hover:brightness-110 active:scale-95 transition-all"
+              >
+                <FontAwesomeIcon icon={faPenToSquare} className="text-2xl" />
+              </button>
+            }
+          >
             <HomeColumn />
           </Column>
         </div>
-        <div className="flex-1 min-w-lg border-r border-accent/20">
+        <div className="w-full max-w-lg border-r border-accent/20">
           <Column icon={faBell}>
             <NotificationList />
           </Column>
         </div>
-        <div className="flex-1 min-w-lg">
+        <div className="w-full max-w-lg">
           <Column icon={faMagnifyingGlass}>
             <SearchPanel />
           </Column>
         </div>
       </div>
 
-      {/* 投稿FAB */}
+      {/* 投稿FAB（モバイル） */}
       <button
         type="button"
         onClick={() => setShowCompose(true)}
         title={t("atproto.compose")}
-        className="fixed bottom-20 right-4 md:bottom-6 md:right-6 z-40 w-12 h-12 flex items-center justify-center rounded-2xl bg-accent text-white shadow-lg hover:brightness-110 active:scale-95 transition-all"
+        className="fixed bottom-20 right-4 z-40 w-14 h-14 flex items-center justify-center rounded-2xl bg-accent text-white shadow-lg hover:brightness-110 active:scale-95 transition-all md:hidden"
       >
         <FontAwesomeIcon icon={faPenToSquare} className="text-2xl" />
       </button>

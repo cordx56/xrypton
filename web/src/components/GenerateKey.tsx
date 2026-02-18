@@ -326,11 +326,13 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
         return;
       }
 
-      // WebAuthn登録（サーバ通信前に実施）
-      // verifyWebAuthn + registerWebAuthn を連続呼び出しすると、
-      // 最初の認証でtransient activationが失効し create() が失敗するため、
-      // 登録のみ行う
-      const webauthnOk = await auth.registerWebAuthn(address);
+      // WebAuthn: discoverable credentialsで検証を試みる。
+      // パスワードマネージャの同期パスキーがあればそれを再利用できる。
+      // パスキーがない場合のみ新規作成にフォールバック。
+      let webauthnOk = await auth.verifyWebAuthn();
+      if (!webauthnOk) {
+        webauthnOk = await auth.registerWebAuthn(address);
+      }
       if (!webauthnOk) {
         showError(t("error.webauthn_failed"));
         setProcessing(false);

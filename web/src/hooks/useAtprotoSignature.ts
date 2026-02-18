@@ -30,8 +30,9 @@ export function useAtprotoSignatures(targets: AtprotoSignatureTarget[]): {
   >(new Map());
   const [isLoading, setIsLoading] = useState(false);
 
-  // メモリキャッシュ: uri+cid 単位で検証結果を保持
-  const cacheRef = useRef<Map<string, VerificationLevel>>(new Map());
+  // メモリキャッシュ: uri+cid 単位で検証結果と署名データを保持
+  const verCacheRef = useRef<Map<string, VerificationLevel>>(new Map());
+  const sigCacheRef = useRef<Map<string, AtprotoSignature>>(new Map());
   const runIdRef = useRef(0);
 
   const verify = useCallback(
@@ -88,13 +89,11 @@ export function useAtprotoSignatures(targets: AtprotoSignatureTarget[]): {
       `${target.uri}::${target.cid}`;
     const targetByUri = new Map(targets.map((t) => [t.uri, t] as const));
     const uncheckedTargets = targets.filter(
-      (target) => !cacheRef.current.has(cacheKeyOf(target)),
+      (target) => !verCacheRef.current.has(cacheKeyOf(target)),
     );
 
     (async () => {
       try {
-        const newSigMap = new Map<string, AtprotoSignature>();
-
         if (uncheckedTargets.length > 0) {
           // バッチ取得（最大100件ずつ）
           const uriBatches: string[][] = [];
@@ -116,13 +115,13 @@ export function useAtprotoSignatures(targets: AtprotoSignatureTarget[]): {
 
               const sigs = sigsBatch[uri];
               if (!sigs || sigs.length === 0) {
-                cacheRef.current.set(cacheKey, "none");
+                verCacheRef.current.set(cacheKey, "none");
                 continue;
               }
 
               // 最新の署名を使用
               const sig = sigs[0];
-              newSigMap.set(uri, sig);
+              sigCacheRef.current.set(cacheKey, sig);
 
               const expectedTarget = buildSignatureTarget(
                 target.uri,
@@ -131,21 +130,20 @@ export function useAtprotoSignatures(targets: AtprotoSignatureTarget[]): {
               );
               const level = await verify(sig, expectedTarget);
               if (runIdRef.current !== runId) return;
-              cacheRef.current.set(cacheKey, level);
+              verCacheRef.current.set(cacheKey, level);
             }
           }
         }
 
-        // 現在表示中のターゲットに対応する map を構築
+        // 現在表示中のターゲットに対応する map を構築（キャッシュから復元）
         const currentVerMap = new Map<string, VerificationLevel>();
         const currentSigMap = new Map<string, AtprotoSignature>();
         for (const target of targets) {
           const key = cacheKeyOf(target);
-          const level = cacheRef.current.get(key) ?? "none";
-          currentVerMap.set(target.uri, level);
-
-          if (newSigMap.has(target.uri)) {
-            currentSigMap.set(target.uri, newSigMap.get(target.uri)!);
+          currentVerMap.set(target.uri, verCacheRef.current.get(key) ?? "none");
+          const cachedSig = sigCacheRef.current.get(key);
+          if (cachedSig) {
+            currentSigMap.set(target.uri, cachedSig);
           }
         }
 
@@ -155,20 +153,26 @@ export function useAtprotoSignatures(targets: AtprotoSignatureTarget[]): {
       } catch {
         // 署名取得失敗時は未検証分を "none" とする
         for (const target of uncheckedTargets) {
-          cacheRef.current.set(cacheKeyOf(target), "none");
+          verCacheRef.current.set(cacheKeyOf(target), "none");
         }
 
-        const fallbackMap = new Map<string, VerificationLevel>();
+        const fallbackVerMap = new Map<string, VerificationLevel>();
+        const fallbackSigMap = new Map<string, AtprotoSignature>();
         for (const target of targets) {
-          fallbackMap.set(
+          const key = cacheKeyOf(target);
+          fallbackVerMap.set(
             target.uri,
-            cacheRef.current.get(cacheKeyOf(target)) ?? "none",
+            verCacheRef.current.get(key) ?? "none",
           );
+          const cachedSig = sigCacheRef.current.get(key);
+          if (cachedSig) {
+            fallbackSigMap.set(target.uri, cachedSig);
+          }
         }
 
         if (runIdRef.current !== runId) return;
-        setVerificationMap(fallbackMap);
-        setSignatureMap(new Map());
+        setVerificationMap(fallbackVerMap);
+        setSignatureMap(fallbackSigMap);
       } finally {
         if (runIdRef.current !== runId) return;
         setIsLoading(false);

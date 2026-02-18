@@ -1,4 +1,4 @@
-// Xrypton server-side account linking information
+// Xrypton server-side account linking information (accounts API)
 export type AtprotoAccount = {
   user_id: string;
   atproto_did: string;
@@ -7,6 +7,15 @@ export type AtprotoAccount = {
   pubkey_post_uri: string | null;
   created_at: string;
   updated_at: string;
+};
+
+// Profile API の external_accounts に含まれるATProtoアカウント情報
+export type ExternalAtprotoAccount = {
+  type: "atproto";
+  did: string;
+  handle: string | null;
+  pds_url: string;
+  pubkey_post_uri: string | null;
 };
 
 // Xrypton server-side signature record

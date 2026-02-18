@@ -170,7 +170,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col max-w-lg mx-auto w-full">
       <AtprotoHeader title={`@${profile.handle}`} />
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <PullIndicator

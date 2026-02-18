@@ -34,6 +34,8 @@ import QrDisplay from "@/components/QrDisplay";
 import AccountList from "@/components/layout/AccountList";
 import { setCachedProfile } from "@/utils/accountStore";
 import { linkify } from "@/utils/linkify";
+import { verifyPubkeyPostOnPds } from "@/utils/atprotoVerify";
+import type { ExternalAtprotoAccount } from "@/types/atproto";
 import { bytesToBase64 } from "@/utils/base64";
 import {
   useSignatureVerifier,
@@ -45,14 +47,6 @@ type Props = {
   userId: string;
 };
 
-type ExternalAccount = {
-  type: "atproto";
-  validated: boolean;
-  did: string;
-  handle: string | null;
-  pds_url: string;
-};
-
 type VerificationState = "pending" | "verified" | "unverified";
 
 // プロフィールAPIレスポンスのセッション中キャッシュ
@@ -61,7 +55,7 @@ type ProfileResponse = {
   status?: string;
   bio?: string;
   icon_url?: string | null;
-  external_accounts?: ExternalAccount[];
+  external_accounts?: ExternalAtprotoAccount[];
 };
 const profileCache = new Map<string, ProfileResponse>();
 
@@ -86,8 +80,12 @@ const UserProfileView = ({ userId }: Props) => {
   const [iconUrl, setIconUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAccounts, setShowAccounts] = useState(false);
-  const [externalAccounts, setExternalAccounts] = useState<ExternalAccount[]>(
-    [],
+  const [externalAccounts, setExternalAtprotoAccounts] = useState<
+    ExternalAtprotoAccount[]
+  >([]);
+  /** ATProtoアカウントごとの検証結果（did → verified） */
+  const [atprotoVerified, setAtprotoVerified] = useState<Map<string, boolean>>(
+    new Map(),
   );
   const [isContact, setIsContact] = useState(false);
   const [addingContact, setAddingContact] = useState(false);
@@ -214,7 +212,7 @@ const UserProfileView = ({ userId }: Props) => {
       const rawDn = profile.display_name ?? "";
       const rawSt = profile.status ?? "";
       const rawBi = profile.bio ?? "";
-      setExternalAccounts(profile.external_accounts ?? []);
+      setExternalAtprotoAccounts(profile.external_accounts ?? []);
 
       // 署名済みフィールドがあるか判定
       const hasSigned =
@@ -470,6 +468,32 @@ const UserProfileView = ({ userId }: Props) => {
     return () => window.removeEventListener("profile-updated", handleUpdate);
   }, [isOwnProfile, fetchProfile, userId]);
 
+  // ATProtoアカウントの公開鍵投稿を検証
+  useEffect(() => {
+    if (externalAccounts.length === 0 || !auth.worker) return;
+    let cancelled = false;
+    (async () => {
+      const results = new Map<string, boolean>();
+      for (const account of externalAccounts) {
+        if (account.pubkey_post_uri) {
+          const valid = await verifyPubkeyPostOnPds(
+            account.pubkey_post_uri,
+            account.pds_url,
+            userId,
+            auth.worker!,
+          );
+          results.set(account.did, valid);
+        } else {
+          results.set(account.did, false);
+        }
+      }
+      if (!cancelled) setAtprotoVerified(results);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [externalAccounts, userId, auth.worker]);
+
   // 他ユーザの場合、連絡先に追加済みか確認（ログイン時のみ）
   useEffect(() => {
     if (isOwnProfile || !isLoggedIn) return;
@@ -626,7 +650,9 @@ const UserProfileView = ({ userId }: Props) => {
                 target="_blank"
                 rel="noopener noreferrer"
                 className={`inline-flex items-center gap-1.5 text-sm hover:underline ${
-                  account.validated ? "text-muted" : "text-red-500"
+                  atprotoVerified.get(account.did) === false
+                    ? "text-red-500"
+                    : "text-muted"
                 }`}
                 title={account.did}
               >

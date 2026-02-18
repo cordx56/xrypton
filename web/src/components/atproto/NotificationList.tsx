@@ -113,18 +113,17 @@ const NotificationList = () => {
     Map<string, AppBskyFeedDefs.PostView>
   >(new Map());
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [hasMore, setHasMore] = useState(true);
   const initialLoaded = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
-  /** 通知と対象ポストを取得 */
-  const fetchNotifications = useCallback(async () => {
-    if (!agent) return;
-    try {
-      const res = await agent.listNotifications({ limit: 50 });
-      const notifs = res.data.notifications;
-      setNotifications(notifs);
-
-      // like/repost/quote の対象ポストURIを収集して一括取得
+  /** 通知に含まれる対象ポストを一括取得して subjectPosts に追加 */
+  const fetchSubjectPosts = useCallback(
+    async (notifs: NotifItem[]) => {
+      if (!agent) return;
       const subjectUris = [
         ...new Set(
           notifs
@@ -138,23 +137,57 @@ const NotificationList = () => {
             .map((n) => n.reasonSubject!),
         ),
       ];
+      if (subjectUris.length === 0) return;
 
-      if (subjectUris.length > 0) {
-        // getPosts は最大25件ずつ
-        const posts = new Map<string, AppBskyFeedDefs.PostView>();
-        for (let i = 0; i < subjectUris.length; i += 25) {
-          const chunk = subjectUris.slice(i, i + 25);
-          const postsRes = await agent.getPosts({ uris: chunk });
-          for (const p of postsRes.data.posts) {
-            posts.set(p.uri, p);
-          }
+      const posts = new Map<string, AppBskyFeedDefs.PostView>();
+      for (let i = 0; i < subjectUris.length; i += 25) {
+        const chunk = subjectUris.slice(i, i + 25);
+        const postsRes = await agent.getPosts({ uris: chunk });
+        for (const p of postsRes.data.posts) {
+          posts.set(p.uri, p);
         }
-        setSubjectPosts(posts);
       }
+      setSubjectPosts((prev) => {
+        const merged = new Map(prev);
+        for (const [k, v] of posts) merged.set(k, v);
+        return merged;
+      });
+    },
+    [agent],
+  );
+
+  /** 先頭から通知を取得（プルリフレッシュ用） */
+  const fetchNotifications = useCallback(async () => {
+    if (!agent) return;
+    try {
+      const res = await agent.listNotifications({ limit: 50 });
+      const notifs = res.data.notifications;
+      setNotifications(notifs);
+      setCursor(res.data.cursor);
+      setHasMore(!!res.data.cursor);
+      await fetchSubjectPosts(notifs);
     } catch {
       // エラー時は空リスト
     }
-  }, [agent]);
+  }, [agent, fetchSubjectPosts]);
+
+  /** 続きの通知を取得（無限スクロール用） */
+  const loadMore = useCallback(async () => {
+    if (!agent || !cursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await agent.listNotifications({ limit: 50, cursor });
+      const notifs = res.data.notifications;
+      setNotifications((prev) => [...prev, ...notifs]);
+      setCursor(res.data.cursor);
+      setHasMore(!!res.data.cursor);
+      await fetchSubjectPosts(notifs);
+    } catch {
+      setHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [agent, cursor, loadingMore, fetchSubjectPosts]);
 
   useEffect(() => {
     if (!agent || initialLoaded.current) return;
@@ -165,6 +198,28 @@ const NotificationList = () => {
       setLoading(false);
     })();
   }, [agent, fetchNotifications]);
+
+  // 下方向スクロールで追加読み込み（IntersectionObserver）
+  const handleIntersect = useCallback(
+    (entries: IntersectionObserverEntry[]) => {
+      if (entries[0]?.isIntersecting && hasMore && !loadingMore) {
+        loadMore();
+      }
+    },
+    [loadMore, hasMore, loadingMore],
+  );
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(handleIntersect, {
+      root: scrollRef.current,
+      threshold: 0,
+      rootMargin: "200px",
+    });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [handleIntersect]);
 
   const { pullDistance, refreshing, threshold } = usePullToRefresh(
     scrollRef,
@@ -251,6 +306,8 @@ const NotificationList = () => {
           </div>
         );
       })}
+      <div ref={sentinelRef} className="h-1" />
+      {loadingMore && <Spinner />}
     </div>
   );
 };

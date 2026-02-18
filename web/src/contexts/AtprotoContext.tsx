@@ -6,6 +6,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useRef,
   ReactNode,
 } from "react";
 import { Agent } from "@atproto/api";
@@ -15,7 +16,8 @@ import {
 } from "@atproto/oauth-client-browser";
 import { useAuth } from "@/contexts/AuthContext";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
-import { apiClient, authApiClient, ApiError } from "@/api/client";
+import { authApiClient, ApiError } from "@/api/client";
+import { verifyPubkeyPostOnPds } from "@/utils/atprotoVerify";
 import type { AtprotoAccount } from "@/types/atproto";
 
 /** BrowserOAuthClientが要求するHandleResolverインターフェースの自前実装。
@@ -53,7 +55,7 @@ type AtprotoContextType = {
   completeVerification: () => void;
   login: (handle: string) => Promise<void>;
   logout: () => Promise<void>;
-  refreshAccounts: () => Promise<void>;
+  refreshAccounts: () => Promise<AtprotoAccount[]>;
 };
 
 const AtprotoContext = createContext<AtprotoContextType>({
@@ -67,7 +69,7 @@ const AtprotoContext = createContext<AtprotoContextType>({
   completeVerification: () => {},
   login: async () => {},
   logout: async () => {},
-  refreshAccounts: async () => {},
+  refreshAccounts: async () => [],
 });
 
 function getHostname(): string {
@@ -85,8 +87,10 @@ function getApiBaseUrl(): string {
 }
 
 export const AtprotoProvider = ({ children }: { children: ReactNode }) => {
-  const { userId, getSignedMessage } = useAuth();
+  const { userId, getSignedMessage, worker } = useAuth();
   const { showError } = useErrorToast();
+  const workerRef = useRef(worker);
+  workerRef.current = worker;
 
   const [oauthClient, setOauthClient] = useState<BrowserOAuthClient | null>(
     null,
@@ -98,17 +102,19 @@ export const AtprotoProvider = ({ children }: { children: ReactNode }) => {
   const [accounts, setAccounts] = useState<AtprotoAccount[]>([]);
   const [needsVerificationPost, setNeedsVerificationPost] = useState(false);
 
-  const refreshAccounts = useCallback(async () => {
-    if (!userId) return;
+  const refreshAccounts = useCallback(async (): Promise<AtprotoAccount[]> => {
+    if (!userId) return [];
     try {
       const signed = await getSignedMessage();
-      if (!signed) return;
+      if (!signed) return [];
       const result = await authApiClient(
         signed.signedMessage,
       ).atproto.getAccounts();
       setAccounts(result);
+      return result;
     } catch {
       // アカウント取得失敗は致命的ではない
+      return [];
     }
   }, [userId, getSignedMessage]);
 
@@ -187,15 +193,33 @@ export const AtprotoProvider = ({ children }: { children: ReactNode }) => {
                 showError(e.message);
               }
             }
-            // 検証投稿を要求
-            setNeedsVerificationPost(true);
           }
 
           // セッションイベントリスナー
           client.addEventListener("deleted", onDeleted);
         }
 
-        await refreshAccounts();
+        // アカウント情報を取得し、公開鍵投稿の検証をフロントエンドで実行
+        const loadedAccounts = await refreshAccounts();
+        if (result?.session) {
+          const sessionDid = result.session.did;
+          const account = loadedAccounts.find(
+            (a) => a.atproto_did === sessionDid,
+          );
+          const currentWorker = workerRef.current;
+          if (account?.pubkey_post_uri && currentWorker) {
+            const valid = await verifyPubkeyPostOnPds(
+              account.pubkey_post_uri,
+              account.pds_url,
+              userId!,
+              currentWorker,
+            );
+            setNeedsVerificationPost(!valid);
+          } else if (account) {
+            // pubkey_post_uri未設定またはWorker未初期化 → 検証投稿が必要
+            setNeedsVerificationPost(true);
+          }
+        }
       } catch (e) {
         console.error("ATproto init failed:", e);
       } finally {
@@ -211,41 +235,6 @@ export const AtprotoProvider = ({ children }: { children: ReactNode }) => {
       }
     };
   }, [userId, getSignedMessage, showError, refreshAccounts]);
-
-  // 接続中のDIDが未検証（pubkey_post_uri未設定 or 検証投稿が削除済み）なら検証投稿を要求する
-  useEffect(() => {
-    if (!did || !userId || accounts.length === 0) return;
-    const account = accounts.find((a) => a.atproto_did === did);
-    if (!account) return;
-
-    if (!account.pubkey_post_uri) {
-      setNeedsVerificationPost(true);
-      return;
-    }
-
-    // プロフィールAPIの validated フィールドで検証投稿の存在を確認
-    apiClient()
-      .user.getProfile(userId)
-      .then(
-        (profile: {
-          external_accounts?: {
-            type: string;
-            did: string;
-            validated: boolean;
-          }[];
-        }) => {
-          const ext = profile.external_accounts?.find(
-            (a) => a.type === "atproto" && a.did === did,
-          );
-          if (ext && !ext.validated) {
-            setNeedsVerificationPost(true);
-          }
-        },
-      )
-      .catch(() => {
-        // プロフィール取得失敗は無視
-      });
-  }, [did, userId, accounts]);
 
   const login = useCallback(
     async (inputHandle: string) => {

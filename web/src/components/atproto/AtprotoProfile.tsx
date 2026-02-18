@@ -233,7 +233,14 @@ const AtprotoProfile = ({ profile }: Props) => {
             <h2 className="text-lg font-bold">
               {profile.displayName ?? profile.handle}
             </h2>
-            <p className="text-sm text-muted">@{profile.handle}</p>
+            <p className="text-sm text-muted">
+              @{profile.handle}
+              {profile.viewer?.followedBy && (
+                <span className="ml-2 inline-block text-xs bg-accent/15 text-muted px-1.5 py-0.5 rounded">
+                  Follows you
+                </span>
+              )}
+            </p>
           </div>
           <button
             type="button"
