@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import {
   AppBskyNotificationListNotifications,
@@ -18,6 +18,8 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { useAtproto } from "@/contexts/AtprotoContext";
 import Spinner from "@/components/common/Spinner";
+import PullIndicator from "@/components/common/PullIndicator";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 
 type NotifItem = AppBskyNotificationListNotifications.Notification;
 
@@ -112,51 +114,62 @@ const NotificationList = () => {
   >(new Map());
   const [loading, setLoading] = useState(true);
   const initialLoaded = useRef(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  /** 通知と対象ポストを取得 */
+  const fetchNotifications = useCallback(async () => {
+    if (!agent) return;
+    try {
+      const res = await agent.listNotifications({ limit: 50 });
+      const notifs = res.data.notifications;
+      setNotifications(notifs);
+
+      // like/repost/quote の対象ポストURIを収集して一括取得
+      const subjectUris = [
+        ...new Set(
+          notifs
+            .filter(
+              (n) =>
+                (n.reason === "like" ||
+                  n.reason === "repost" ||
+                  n.reason === "quote") &&
+                n.reasonSubject,
+            )
+            .map((n) => n.reasonSubject!),
+        ),
+      ];
+
+      if (subjectUris.length > 0) {
+        // getPosts は最大25件ずつ
+        const posts = new Map<string, AppBskyFeedDefs.PostView>();
+        for (let i = 0; i < subjectUris.length; i += 25) {
+          const chunk = subjectUris.slice(i, i + 25);
+          const postsRes = await agent.getPosts({ uris: chunk });
+          for (const p of postsRes.data.posts) {
+            posts.set(p.uri, p);
+          }
+        }
+        setSubjectPosts(posts);
+      }
+    } catch {
+      // エラー時は空リスト
+    }
+  }, [agent]);
 
   useEffect(() => {
     if (!agent || initialLoaded.current) return;
     initialLoaded.current = true;
 
     (async () => {
-      try {
-        const res = await agent.listNotifications({ limit: 50 });
-        const notifs = res.data.notifications;
-        setNotifications(notifs);
-
-        // like/repost/quote の対象ポストURIを収集して一括取得
-        const subjectUris = [
-          ...new Set(
-            notifs
-              .filter(
-                (n) =>
-                  (n.reason === "like" ||
-                    n.reason === "repost" ||
-                    n.reason === "quote") &&
-                  n.reasonSubject,
-              )
-              .map((n) => n.reasonSubject!),
-          ),
-        ];
-
-        if (subjectUris.length > 0) {
-          // getPosts は最大25件ずつ
-          const posts = new Map<string, AppBskyFeedDefs.PostView>();
-          for (let i = 0; i < subjectUris.length; i += 25) {
-            const chunk = subjectUris.slice(i, i + 25);
-            const postsRes = await agent.getPosts({ uris: chunk });
-            for (const p of postsRes.data.posts) {
-              posts.set(p.uri, p);
-            }
-          }
-          setSubjectPosts(posts);
-        }
-      } catch {
-        // エラー時は空リスト
-      } finally {
-        setLoading(false);
-      }
+      await fetchNotifications();
+      setLoading(false);
     })();
-  }, [agent]);
+  }, [agent, fetchNotifications]);
+
+  const { pullDistance, refreshing, threshold } = usePullToRefresh(
+    scrollRef,
+    fetchNotifications,
+  );
 
   if (loading) return <Spinner />;
 
@@ -169,7 +182,12 @@ const NotificationList = () => {
   }
 
   return (
-    <div className="overflow-y-auto h-full">
+    <div ref={scrollRef} className="overflow-y-auto h-full">
+      <PullIndicator
+        pullDistance={pullDistance}
+        refreshing={refreshing}
+        threshold={threshold}
+      />
       {notifications.map((notif) => {
         const { icon, color } = notifIcon(notif.reason);
         const subjectPost = notif.reasonSubject

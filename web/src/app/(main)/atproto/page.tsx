@@ -32,6 +32,8 @@ import SignatureVerifier from "@/components/atproto/SignatureVerifier";
 import Spinner from "@/components/common/Spinner";
 import { useAtprotoSignatures } from "@/hooks/useAtprotoSignature";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
+import PullIndicator from "@/components/common/PullIndicator";
 import { useI18n } from "@/contexts/I18nContext";
 import type { AtprotoSignature } from "@/types/atproto";
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
@@ -137,6 +139,16 @@ function HomeColumn() {
     }
   }, [posts, cursor, hasMore]);
 
+  const handleRefresh = useCallback(async () => {
+    timelineCache = null;
+    await loadTimeline();
+  }, [loadTimeline]);
+
+  const { pullDistance, refreshing, threshold } = usePullToRefresh(
+    scrollRef,
+    handleRefresh,
+  );
+
   const handleLoadMore = useCallback(() => {
     if (cursor && !loading) loadTimeline(cursor);
   }, [cursor, loading, loadTimeline]);
@@ -148,6 +160,11 @@ function HomeColumn() {
   return (
     <>
       <div ref={scrollRef} className="h-full overflow-y-auto">
+        <PullIndicator
+          pullDistance={pullDistance}
+          refreshing={refreshing}
+          threshold={threshold}
+        />
         <Timeline
           posts={posts}
           signatureMap={signatureMap}
@@ -354,7 +371,7 @@ export default function AtprotoPage() {
         title={t("atproto.compose")}
         className="fixed bottom-20 right-4 md:bottom-6 md:right-6 z-40 w-12 h-12 flex items-center justify-center rounded-2xl bg-accent text-white shadow-lg hover:brightness-110 active:scale-95 transition-all"
       >
-        <FontAwesomeIcon icon={faPenToSquare} className="text-lg" />
+        <FontAwesomeIcon icon={faPenToSquare} className="text-2xl" />
       </button>
 
       {/* 投稿オーバーレイ */}

@@ -20,6 +20,8 @@ import SignatureVerifier from "@/components/atproto/SignatureVerifier";
 import Spinner from "@/components/common/Spinner";
 import { useAtprotoSignatures } from "@/hooks/useAtprotoSignature";
 import { useScrollRestore } from "@/hooks/useScrollRestore";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
+import PullIndicator from "@/components/common/PullIndicator";
 import type { AtprotoSignature } from "@/types/atproto";
 
 /** プロフィールページのデータキャッシュ */
@@ -66,6 +68,23 @@ export default function ProfilePage() {
   const { signatureMap, verificationMap } = useAtprotoSignatures(targets);
 
   useScrollRestore(`profile:${params.handle}`, scrollRef, !!profile);
+
+  const handleRefresh = useCallback(async () => {
+    if (!agent || !params.handle) return;
+    const [profileRes, feedRes] = await Promise.all([
+      agent.getProfile({ actor: params.handle }),
+      agent.getAuthorFeed({ actor: params.handle, limit: 50 }),
+    ]);
+    setProfile(profileRes.data);
+    setFeed(feedRes.data.feed);
+    setCursor(feedRes.data.cursor);
+    setHasMore(!!feedRes.data.cursor);
+  }, [agent, params.handle]);
+
+  const { pullDistance, refreshing, threshold } = usePullToRefresh(
+    scrollRef,
+    handleRefresh,
+  );
 
   // キャッシュがなければ初回フェッチ
   useEffect(() => {
@@ -154,6 +173,11 @@ export default function ProfilePage() {
     <div className="h-full flex flex-col">
       <AtprotoHeader title={`@${profile.handle}`} />
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <PullIndicator
+          pullDistance={pullDistance}
+          refreshing={refreshing}
+          threshold={threshold}
+        />
         <AtprotoProfile profile={profile} />
         <div className="border-t border-accent/20">
           <Timeline

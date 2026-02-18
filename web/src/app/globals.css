@@ -22,7 +22,7 @@
 
 /* --- Dark mode --- */
 [data-mode="dark"] {
-  --background: #1a1a1a;
+  --background: #121212;
   --foreground: #ededed;
   --muted: #9ca3af;
   --accent: #6c8ebf;
