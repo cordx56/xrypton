@@ -45,10 +45,11 @@ const ProfileEditView = () => {
   };
 
   useEffect(() => {
-    if (!auth.userId || !auth.publicKeys) return;
+    const userId = auth.userId;
+    if (!userId) return;
     (async () => {
       try {
-        const profile = await apiClient().user.getProfile(auth.userId!);
+        const profile = await apiClient().user.getProfile(userId);
         // 署名済みフィールドは検証して平文に戻す
         const [dn, st, bi] = await Promise.all([
           extractField(profile.display_name ?? ""),
@@ -59,9 +60,9 @@ const ProfileEditView = () => {
         setStatus(st);
         setBio(bi);
         const resolvedIconUrl = profile.icon_url
-          ? `${getApiBaseUrl()}${profile.icon_url}`
+          ? `${getApiBaseUrl()}${profile.icon_url}?t=${Date.now()}`
           : undefined;
-        if (resolvedIconUrl) setIconUrl(resolvedIconUrl);
+        setIconUrl(resolvedIconUrl);
       } catch {
         showError(t("error.unknown"));
       }
