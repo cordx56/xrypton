@@ -14,7 +14,7 @@ type Props = {
   isOwn: boolean;
   displayName: string;
   iconUrl: string | null;
-  userId?: string;
+  publicKey?: string;
   status?: string;
   onClickUser?: () => void;
   onDownloadFile?: (message: Message) => void;
@@ -87,7 +87,7 @@ const MessageBubble = ({
   isOwn,
   displayName,
   iconUrl,
-  userId,
+  publicKey,
   status,
   onClickUser,
   onDownloadFile,
@@ -108,7 +108,7 @@ const MessageBubble = ({
         <Avatar
           name={displayName}
           iconUrl={iconUrl}
-          userId={userId}
+          publicKey={publicKey}
           size="sm"
         />
       </button>

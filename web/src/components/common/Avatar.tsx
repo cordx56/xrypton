@@ -3,18 +3,13 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { bytesToBase64, base64ToBytes } from "@/utils/base64";
-import { getCachedPublicKeys } from "@/utils/publicKeyCache";
-import { apiClient } from "@/api/client";
 
 export type VerifyState = "verified" | "warning" | "loading";
 
 type Props = {
   name: string;
   iconUrl?: string | null;
-  /** PGP署名鍵（直接指定） */
   publicKey?: string;
-  /** publicKey未指定時に署名鍵を自動取得するためのユーザID */
-  userId?: string;
   size?: "xs" | "sm" | "md" | "lg" | "xl";
   onVerifyStateChange?: (state: VerifyState) => void;
 };
@@ -39,7 +34,6 @@ const Avatar = ({
   name,
   iconUrl,
   publicKey,
-  userId,
   size = "md",
   onVerifyStateChange,
 }: Props) => {
@@ -76,26 +70,7 @@ const Avatar = ({
         const arrayBuf = await resp.arrayBuffer();
         const rawBytes = new Uint8Array(arrayBuf);
 
-        // publicKeyを解決: 直接渡されていなければ userId から IDB/API で取得
-        let resolvedKey = publicKey;
-        if (!resolvedKey && userId) {
-          const cached = await getCachedPublicKeys(userId);
-          if (cached) {
-            resolvedKey = cached.signing_public_key;
-          } else {
-            try {
-              const keys = await apiClient().user.getKeys(userId);
-              if (keys?.signing_public_key) {
-                resolvedKey = keys.signing_public_key;
-              }
-            } catch {
-              // 鍵取得失敗
-            }
-          }
-        }
-        if (cancelled) return;
-
-        if (resolvedKey && worker) {
+        if (publicKey && worker) {
           setVerifyState("loading");
           const dataBase64 = bytesToBase64(rawBytes);
 
@@ -112,7 +87,7 @@ const Avatar = ({
             });
             worker.postMessage({
               call: "verify_extract_bytes",
-              publicKey: resolvedKey!,
+              publicKey,
               data: dataBase64,
             });
           });
@@ -148,7 +123,7 @@ const Avatar = ({
     return () => {
       cancelled = true;
     };
-  }, [iconUrl, publicKey, userId, auth.worker]);
+  }, [iconUrl, publicKey, auth.worker]);
 
   if (resolvedUrl) {
     return (

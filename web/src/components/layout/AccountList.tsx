@@ -94,11 +94,7 @@ const AccountList = ({ accountIds, activeId, showAdd = false }: Props) => {
             onClick={() => handleClick(p.userId)}
             className="w-full flex items-center gap-3 px-4 py-3 border-b border-accent/10 hover:bg-accent/5 transition-colors text-left"
           >
-            <Avatar
-              name={p.displayName || p.userId}
-              iconUrl={p.iconUrl}
-              userId={p.userId}
-            />
+            <Avatar name={p.displayName || p.userId} iconUrl={p.iconUrl} />
             <div className="min-w-0 flex-1">
               <div className="font-medium truncate">
                 {p.displayName || displayUserId(p.userId)}

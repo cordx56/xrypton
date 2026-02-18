@@ -38,7 +38,6 @@ const GlobalHeader = () => {
             <Avatar
               name={profile?.displayName || auth.userId || "?"}
               iconUrl={profile?.iconUrl}
-              userId={auth.userId ?? undefined}
               publicKey={auth.publicKeys ?? undefined}
               size="sm"
             />

@@ -200,7 +200,6 @@ const NewGroupDialog: DialogComponent = ({ close, setOnClose }) => {
                   <Avatar
                     name={c.display_name}
                     iconUrl={c.icon_url}
-                    userId={c.contact_user_id}
                     size="sm"
                   />
                   <div className="min-w-0 flex-1">
@@ -261,6 +260,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   type MemberProfile = {
     display_name: string;
     icon_url: string | null;
+    signing_public_key: string | null;
     status: string;
   };
   const [memberProfiles, setMemberProfiles] = useState<
@@ -380,7 +380,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           }
         }
 
-        showNotification({ displayName, iconUrl, userId: senderId, body });
+        showNotification({ displayName, iconUrl, body });
 
         // チャンネルとスレッドの更新日時を更新
         if (data.chat_id) {
@@ -532,6 +532,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       const fingerprintMap: Record<string, string> = {};
       const profiles: Record<string, MemberProfile> = {};
       for (const member of data.members ?? []) {
+        let signingKey: string | null = null;
         try {
           const resolved = await resolveKeys(member.user_id);
           if (resolved) {
@@ -541,6 +542,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
             };
             encPubKeys.push(resolved.encryption_public_key);
             fingerprintMap[resolved.primary_key_fingerprint] = member.user_id;
+            signingKey = resolved.signing_public_key;
           }
         } catch {
           // 公開鍵を取得できないメンバーはスキップ
@@ -556,12 +558,14 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
             icon_url: profile.icon_url
               ? `${getApiBaseUrl()}${profile.icon_url}`
               : null,
+            signing_public_key: signingKey,
             status: profile.status ?? "",
           };
         } catch {
           profiles[member.user_id] = {
             display_name: member.user_id,
             icon_url: null,
+            signing_public_key: signingKey,
             status: "",
           };
         }

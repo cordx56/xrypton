@@ -157,11 +157,7 @@ const ContactsView = () => {
                   href={`/profile/${c.userId}`}
                   className="flex items-center gap-3 min-w-0 flex-1"
                 >
-                  <Avatar
-                    name={c.displayName}
-                    iconUrl={c.iconUrl}
-                    userId={c.userId}
-                  />
+                  <Avatar name={c.displayName} iconUrl={c.iconUrl} />
                   <div className="min-w-0 flex-1">
                     <div className="font-medium truncate">{c.displayName}</div>
                     <div className="text-xs text-muted truncate">
