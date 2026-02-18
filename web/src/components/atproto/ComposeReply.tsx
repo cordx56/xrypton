@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { AppBskyFeedDefs, AppBskyFeedPost } from "@atproto/api";
+import { AppBskyFeedDefs, AppBskyFeedPost, RichText } from "@atproto/api";
 import { useAtproto } from "@/contexts/AtprotoContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useI18n } from "@/contexts/I18nContext";
@@ -55,8 +55,13 @@ const ComposeReply = ({ replyTo, onClose, onPosted }: Props) => {
           }
         : parentRef;
 
+      // リンク・メンション・タグを自動検出
+      const rt = new RichText({ text: text.trim() });
+      await rt.detectFacets(agent);
+
       const response = await agent.post({
-        text: text.trim(),
+        text: rt.text,
+        facets: rt.facets,
         langs: ["ja"],
         reply: {
           root: rootRef,

@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faImage, faTimes } from "@fortawesome/free-solid-svg-icons";
+import { RichText } from "@atproto/api";
 import { useAtproto } from "@/contexts/AtprotoContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useI18n } from "@/contexts/I18nContext";
@@ -76,9 +77,14 @@ const ComposePost = ({ onClose }: Props) => {
         };
       }
 
+      // リンク・メンション・タグを自動検出
+      const rt = new RichText({ text: text.trim() });
+      await rt.detectFacets(agent);
+
       // ATprotoに投稿
       const response = await agent.post({
-        text: text.trim(),
+        text: rt.text,
+        facets: rt.facets,
         langs: ["ja"],
         ...(embed ? { embed } : {}),
       } as Parameters<typeof agent.post>[0]);

@@ -15,7 +15,7 @@ import {
 } from "@atproto/oauth-client-browser";
 import { useAuth } from "@/contexts/AuthContext";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
-import { authApiClient, ApiError } from "@/api/client";
+import { apiClient, authApiClient, ApiError } from "@/api/client";
 import type { AtprotoAccount } from "@/types/atproto";
 
 /** BrowserOAuthClientが要求するHandleResolverインターフェースの自前実装。
@@ -212,14 +212,40 @@ export const AtprotoProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [userId, getSignedMessage, showError, refreshAccounts]);
 
-  // 接続中のDIDに pubkey_post_uri が未設定なら検証投稿を要求する
+  // 接続中のDIDが未検証（pubkey_post_uri未設定 or 検証投稿が削除済み）なら検証投稿を要求する
   useEffect(() => {
-    if (!did || accounts.length === 0) return;
+    if (!did || !userId || accounts.length === 0) return;
     const account = accounts.find((a) => a.atproto_did === did);
-    if (account && !account.pubkey_post_uri) {
+    if (!account) return;
+
+    if (!account.pubkey_post_uri) {
       setNeedsVerificationPost(true);
+      return;
     }
-  }, [did, accounts]);
+
+    // プロフィールAPIの validated フィールドで検証投稿の存在を確認
+    apiClient()
+      .user.getProfile(userId)
+      .then(
+        (profile: {
+          external_accounts?: {
+            type: string;
+            did: string;
+            validated: boolean;
+          }[];
+        }) => {
+          const ext = profile.external_accounts?.find(
+            (a) => a.type === "atproto" && a.did === did,
+          );
+          if (ext && !ext.validated) {
+            setNeedsVerificationPost(true);
+          }
+        },
+      )
+      .catch(() => {
+        // プロフィール取得失敗は無視
+      });
+  }, [did, userId, accounts]);
 
   const login = useCallback(
     async (inputHandle: string) => {

@@ -73,6 +73,10 @@ function RichTextRenderer({
     text,
     facets: facets as AppBskyFeedPost.Record["facets"],
   });
+  // facetsが無いポストでもURL・メンション・タグを自動検出
+  if (!facets || facets.length === 0) {
+    rt.detectFacetsWithoutResolution();
+  }
 
   const segments: React.ReactNode[] = [];
   let i = 0;

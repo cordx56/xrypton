@@ -44,8 +44,10 @@ const VerificationPost = () => {
     [hostname, userId],
   );
 
+  // Long Key ID: フィンガープリント末尾16文字を4文字区切りで表示
   const formattedFingerprint = useMemo(
-    () => (fingerprint ? fingerprint.replace(/(.{4})(?=.)/g, "$1 ") : ""),
+    () =>
+      fingerprint ? fingerprint.slice(-16).replace(/(.{4})(?=.)/g, "$1 ") : "",
     [fingerprint],
   );
 
