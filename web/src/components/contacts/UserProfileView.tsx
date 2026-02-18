@@ -99,7 +99,6 @@ const UserProfileView = ({ userId }: Props) => {
   const [signingPublicKey, setSigningPublicKey] = useState<string | undefined>(
     undefined,
   );
-  const fetchedForRef = useRef<string | null>(null);
   const isFetchingRef = useRef(false);
 
   const isLoggedIn = !!auth.userId && auth.isRegistered;
@@ -203,15 +202,10 @@ const UserProfileView = ({ userId }: Props) => {
     isFetchingRef.current = true;
     setLoading(true);
     try {
-      // プロフィールAPIレスポンスをキャッシュから取得、なければフェッチ
-      let profile: ProfileResponse;
-      const cached = profileCache.get(userId);
-      if (cached) {
-        profile = cached;
-      } else {
-        profile = await apiClient().user.getProfile(userId);
-        profileCache.set(userId, profile);
-      }
+      // プロフィールページを開いたタイミングでは常に最新を取得する
+      const profile: ProfileResponse =
+        await apiClient().user.getProfile(userId);
+      profileCache.set(userId, profile);
       const rawDn = profile.display_name ?? "";
       const rawSt = profile.status ?? "";
       const rawBi = profile.bio ?? "";
@@ -420,8 +414,6 @@ const UserProfileView = ({ userId }: Props) => {
 
       // 検証失敗の警告ダイアログが出ている場合、閉じるまでローディングを維持
       if (warningPromise) await warningPromise;
-
-      fetchedForRef.current = userId;
     } catch {
       showError(t("error.unknown"));
     } finally {
@@ -446,8 +438,6 @@ const UserProfileView = ({ userId }: Props) => {
     if (!auth.isInitialized || !hasWorker) return;
     // 自分のプロフィールで公開鍵の導出がまだなら待つ
     if (isOwnProfile && auth.privateKeys && !auth.publicKeys) return;
-    // 同一ユーザについて再フェッチしない
-    if (fetchedForRef.current === userId) return;
     fetchProfile();
   }, [
     fetchProfile,
@@ -464,7 +454,6 @@ const UserProfileView = ({ userId }: Props) => {
     if (!isOwnProfile) return;
     const handleUpdate = () => {
       profileCache.delete(userId);
-      fetchedForRef.current = null;
       fetchProfile();
     };
     window.addEventListener("profile-updated", handleUpdate);

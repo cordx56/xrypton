@@ -174,15 +174,12 @@ const ProfileEditView = () => {
           onClick={handleIconClick}
           className="cursor-pointer"
         >
-          {iconUrl ? (
-            <img
-              src={iconUrl}
-              alt="avatar"
-              className="w-20 h-20 rounded-full object-cover"
-            />
-          ) : (
-            <Avatar name={displayName || "?"} size="lg" />
-          )}
+          <Avatar
+            name={displayName || "?"}
+            iconUrl={iconUrl ?? null}
+            publicKey={auth.publicKeys}
+            size="xl"
+          />
         </button>
         <input
           ref={fileInputRef}
