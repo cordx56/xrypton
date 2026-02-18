@@ -183,6 +183,25 @@ const SettingsPanel = () => {
         </label>
       </section>
 
+      {/* Notifications */}
+      <section>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={auth.notificationsEnabled}
+            onChange={async (e) => {
+              const requested = e.target.checked;
+              const enabled = await auth.setNotificationsEnabled(requested);
+              if (requested && !enabled) {
+                showError(t("settings.notifications_blocked"));
+              }
+            }}
+            className="accent-accent"
+          />
+          <span className="text-sm">{t("settings.push_notifications")}</span>
+        </label>
+      </section>
+
       {/* Account */}
       <section>
         <h3 className="font-medium mb-2">{t("settings.account")}</h3>

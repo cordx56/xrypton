@@ -18,6 +18,17 @@ export type ExternalAtprotoAccount = {
   pubkey_post_uri: string | null;
 };
 
+// Profile API の external_accounts に含まれるXアカウント情報
+export type ExternalXAccount = {
+  type: "x";
+  handle: string;
+  author_url: string;
+  post_url: string;
+};
+
+// 外部アカウントのunion型
+export type ExternalAccount = ExternalAtprotoAccount | ExternalXAccount;
+
 // Xrypton server-side signature record
 export type AtprotoSignature = {
   id: string;

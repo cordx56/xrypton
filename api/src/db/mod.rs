@@ -8,6 +8,7 @@ pub mod nonces;
 pub mod push;
 pub mod threads;
 pub mod users;
+pub mod x;
 
 #[cfg(not(feature = "postgres"))]
 pub type Db = sqlx::SqlitePool;

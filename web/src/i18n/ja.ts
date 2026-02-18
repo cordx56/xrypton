@@ -39,6 +39,9 @@ export const ja: TranslationKeys = {
   "settings.setup_webauthn": "WebAuthnを設定",
   "settings.days": "日",
   "settings.unlimited": "無期限",
+  "settings.push_notifications": "プッシュ通知を有効化",
+  "settings.notifications_blocked":
+    "通知が許可されていません。ブラウザ設定で通知を許可してください。",
   "common.cancel": "キャンセル",
   "common.ok": "OK",
   "common.close": "閉じる",
@@ -200,4 +203,15 @@ export const ja: TranslationKeys = {
   "realtime.active": "リアルタイムチャット中",
   "realtime.placeholder": "リアルタイムメッセージを入力...",
   "error.realtime_connection_failed": "リアルタイム接続に失敗しました。",
+  "x.link_account": "X（Twitter）アカウントを連携",
+  "x.verification_title": "Xアカウント認証",
+  "x.verification_desc":
+    "下のボタンからポストし、ポストのURLをペーストして認証してください。",
+  "x.post_url_placeholder": "https://x.com/username/status/...",
+  "x.verify": "認証",
+  "x.verifying": "認証中...",
+  "x.unlink_account": "連携解除",
+  "profile.external_accounts": "外部アカウント",
+  "error.x_verification_failed": "Xアカウントの認証に失敗しました。",
+  "error.x_invalid_url": "無効なXのポストURLです。",
 };

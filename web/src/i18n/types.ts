@@ -37,6 +37,8 @@ export type TranslationKeys = {
   "settings.setup_webauthn": string;
   "settings.days": string;
   "settings.unlimited": string;
+  "settings.push_notifications": string;
+  "settings.notifications_blocked": string;
   "common.cancel": string;
   "common.ok": string;
   "common.close": string;
@@ -174,6 +176,16 @@ export type TranslationKeys = {
   "realtime.active": string;
   "realtime.placeholder": string;
   "error.realtime_connection_failed": string;
+  "x.link_account": string;
+  "x.verification_title": string;
+  "x.verification_desc": string;
+  "x.post_url_placeholder": string;
+  "x.verify": string;
+  "x.verifying": string;
+  "x.unlink_account": string;
+  "profile.external_accounts": string;
+  "error.x_verification_failed": string;
+  "error.x_invalid_url": string;
 };
 
 export type Locale = "en" | "ja";

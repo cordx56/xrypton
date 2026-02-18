@@ -245,6 +245,23 @@ export const AtprotoSignatureListResponse = z.object({
   total: z.number(),
 });
 
+// --- X (Twitter) API schemas ---
+
+export const XAccountSchema = z.object({
+  user_id: z.string(),
+  x_handle: z.string(),
+  x_author_url: z.string(),
+  x_post_url: z.string(),
+  proof_json: z.string(),
+  signature: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+export const XLinkAccountResponse = z.object({
+  handle: z.string(),
+});
+
 // Old
 export const Contacts = z.record(
   z.string(),

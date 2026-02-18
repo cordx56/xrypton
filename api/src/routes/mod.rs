@@ -8,6 +8,7 @@ mod notification;
 mod realtime;
 mod thread;
 mod user;
+mod x;
 
 use axum::Router;
 use tower_http::cors::CorsLayer;
@@ -27,6 +28,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(notification::routes())
         .merge(federation::routes())
         .merge(atproto::routes())
+        .merge(x::routes())
         .merge(realtime::routes());
 
     Router::new()

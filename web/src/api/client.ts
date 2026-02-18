@@ -5,6 +5,8 @@ import {
   AtprotoSignatureBatchResponse,
   AtprotoSignatureListResponse,
   AtprotoSaveSignatureResponse,
+  XAccountSchema,
+  XLinkAccountResponse,
 } from "@/utils/schema";
 
 export class ApiError extends Error {
@@ -489,6 +491,35 @@ export function authApiClient(signedMessage: string) {
           auth,
         );
         return AtprotoSaveSignatureResponse.parse(await resp.json());
+      },
+    },
+    x: {
+      linkAccount: async (body: {
+        author_url: string;
+        post_url: string;
+        proof_json: string;
+        signature: string;
+      }) => {
+        const resp = await apiFetch(
+          "/v1/x/account",
+          { method: "POST", body: JSON.stringify(body) },
+          auth,
+        );
+        return XLinkAccountResponse.parse(await resp.json());
+      },
+      getAccounts: async () => {
+        const resp = await apiFetch("/v1/x/account", {}, auth);
+        const json = await resp.json();
+        return XAccountSchema.array().parse(
+          Array.isArray(json) ? json : (json.accounts ?? json),
+        );
+      },
+      unlinkAccount: async (handle: string) => {
+        await apiFetch(
+          `/v1/x/account/${encodeURIComponent(handle)}`,
+          { method: "DELETE" },
+          auth,
+        );
       },
     },
   };

@@ -14,6 +14,7 @@ import {
 } from "@/api/client";
 import { displayUserId } from "@/utils/schema";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faXTwitter } from "@fortawesome/free-brands-svg-icons";
 import {
   faArrowLeft,
   faAt,
@@ -35,7 +36,8 @@ import AccountList from "@/components/layout/AccountList";
 import { setCachedProfile } from "@/utils/accountStore";
 import { linkify } from "@/utils/linkify";
 import { verifyPubkeyPostOnPds } from "@/utils/atprotoVerify";
-import type { ExternalAtprotoAccount } from "@/types/atproto";
+import { verifyXPost } from "@/utils/xVerify";
+import type { ExternalAccount } from "@/types/atproto";
 import { bytesToBase64 } from "@/utils/base64";
 import {
   useSignatureVerifier,
@@ -48,6 +50,7 @@ type Props = {
 };
 
 type VerificationState = "pending" | "verified" | "unverified";
+type ExternalVerificationState = "pending" | "verified" | "unverified";
 
 // プロフィールAPIレスポンスのセッション中キャッシュ
 type ProfileResponse = {
@@ -55,7 +58,7 @@ type ProfileResponse = {
   status?: string;
   bio?: string;
   icon_url?: string | null;
-  external_accounts?: ExternalAtprotoAccount[];
+  external_accounts?: ExternalAccount[];
 };
 const profileCache = new Map<string, ProfileResponse>();
 
@@ -80,13 +83,13 @@ const UserProfileView = ({ userId }: Props) => {
   const [iconUrl, setIconUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAccounts, setShowAccounts] = useState(false);
-  const [externalAccounts, setExternalAtprotoAccounts] = useState<
-    ExternalAtprotoAccount[]
-  >([]);
-  /** ATProtoアカウントごとの検証結果（did → verified） */
-  const [atprotoVerified, setAtprotoVerified] = useState<Map<string, boolean>>(
-    new Map(),
+  const [externalAccounts, setExternalAccounts] = useState<ExternalAccount[]>(
+    [],
   );
+  /** 外部アカウントごとの検証結果（キー → 検証状態） */
+  const [externalVerified, setExternalVerified] = useState<
+    Map<string, ExternalVerificationState>
+  >(new Map());
   const [isContact, setIsContact] = useState(false);
   const [addingContact, setAddingContact] = useState(false);
   const [textVerificationState, setTextVerificationState] =
@@ -212,7 +215,7 @@ const UserProfileView = ({ userId }: Props) => {
       const rawDn = profile.display_name ?? "";
       const rawSt = profile.status ?? "";
       const rawBi = profile.bio ?? "";
-      setExternalAtprotoAccounts(profile.external_accounts ?? []);
+      setExternalAccounts(profile.external_accounts ?? []);
 
       // 署名済みフィールドがあるか判定
       const hasSigned =
@@ -468,26 +471,45 @@ const UserProfileView = ({ userId }: Props) => {
     return () => window.removeEventListener("profile-updated", handleUpdate);
   }, [isOwnProfile, fetchProfile, userId]);
 
-  // ATProtoアカウントの公開鍵投稿を検証
+  // 外部アカウントの公開鍵投稿を検証（ATProto + X）
   useEffect(() => {
-    if (externalAccounts.length === 0 || !auth.worker) return;
+    if (externalAccounts.length === 0) return;
     let cancelled = false;
     (async () => {
-      const results = new Map<string, boolean>();
+      const toKey = (account: ExternalAccount) =>
+        account.type === "atproto" ? account.did : `x:${account.handle}`;
+
+      const pending = new Map<string, ExternalVerificationState>(
+        externalAccounts.map((account) => [toKey(account), "pending"]),
+      );
+      if (!cancelled) setExternalVerified(pending);
+
+      if (!auth.worker) return;
+      const results = new Map<string, ExternalVerificationState>();
       for (const account of externalAccounts) {
-        if (account.pubkey_post_uri) {
-          const valid = await verifyPubkeyPostOnPds(
-            account.pubkey_post_uri,
-            account.pds_url,
+        if (account.type === "atproto") {
+          if (account.pubkey_post_uri) {
+            const valid = await verifyPubkeyPostOnPds(
+              account.pubkey_post_uri,
+              account.pds_url,
+              userId,
+              auth.worker!,
+            );
+            results.set(account.did, valid ? "verified" : "unverified");
+          } else {
+            results.set(account.did, "unverified");
+          }
+        } else if (account.type === "x") {
+          const valid = await verifyXPost(
+            account.post_url,
             userId,
+            account.author_url,
             auth.worker!,
           );
-          results.set(account.did, valid);
-        } else {
-          results.set(account.did, false);
+          results.set(`x:${account.handle}`, valid ? "verified" : "unverified");
         }
       }
-      if (!cancelled) setAtprotoVerified(results);
+      if (!cancelled) setExternalVerified(results);
     })();
     return () => {
       cancelled = true;
@@ -639,27 +661,55 @@ const UserProfileView = ({ userId }: Props) => {
       {externalAccounts.length > 0 && (
         <div className="flex flex-wrap gap-2 justify-center">
           {externalAccounts.map((account) => {
-            const label = account.handle ?? account.did;
-            const href = account.handle
-              ? `https://bsky.app/profile/${account.handle}`
-              : `https://bsky.app/profile/${account.did}`;
-            return (
-              <a
-                key={account.did}
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`inline-flex items-center gap-1.5 text-sm hover:underline ${
-                  atprotoVerified.get(account.did) === false
-                    ? "text-red-500"
-                    : "text-muted"
-                }`}
-                title={account.did}
-              >
-                <FontAwesomeIcon icon={faAt} />
-                {label}
-              </a>
-            );
+            if (account.type === "atproto") {
+              const label = account.handle ?? account.did;
+              const href = account.handle
+                ? `https://bsky.app/profile/${account.handle}`
+                : `https://bsky.app/profile/${account.did}`;
+              const state = externalVerified.get(account.did) ?? "pending";
+              return (
+                <a
+                  key={account.did}
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`inline-flex items-center gap-1.5 text-sm hover:underline ${
+                    state === "unverified"
+                      ? "text-red-500"
+                      : state === "verified"
+                        ? "text-green-500"
+                        : "text-muted"
+                  }`}
+                  title={account.did}
+                >
+                  <FontAwesomeIcon icon={faAt} />
+                  {label}
+                </a>
+              );
+            }
+            if (account.type === "x") {
+              const state =
+                externalVerified.get(`x:${account.handle}`) ?? "pending";
+              return (
+                <a
+                  key={`x:${account.handle}`}
+                  href={account.author_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`inline-flex items-center gap-1.5 text-sm hover:underline ${
+                    state === "unverified"
+                      ? "text-red-500"
+                      : state === "verified"
+                        ? "text-green-500"
+                        : "text-muted"
+                  }`}
+                  title={`@${account.handle}`}
+                >
+                  <FontAwesomeIcon icon={faXTwitter} />@{account.handle}
+                </a>
+              );
+            }
+            return null;
           })}
         </div>
       )}

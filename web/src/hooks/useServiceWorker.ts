@@ -51,7 +51,7 @@ export const useServiceWorker = (
 
   const subscribe = useCallback(
     async (signedMessage: string) => {
-      if (!registration) return;
+      if (!registration) return false;
       try {
         const key = await apiClient().notification.publicKey();
         const subscription = await registration.pushManager.subscribe({
@@ -59,8 +59,10 @@ export const useServiceWorker = (
           applicationServerKey: fromBase64Url(key).buffer as ArrayBuffer,
         });
         await authApiClient(signedMessage).notification.subscribe(subscription);
+        return true;
       } catch {
         // push subscription failed
+        return false;
       }
     },
     [registration],

@@ -39,6 +39,9 @@ export const en: TranslationKeys = {
   "settings.setup_webauthn": "Set up WebAuthn",
   "settings.days": "day(s)",
   "settings.unlimited": "Unlimited",
+  "settings.push_notifications": "Enable push notifications",
+  "settings.notifications_blocked":
+    "Notification permission was not granted. Please allow notifications in your browser settings.",
   "common.cancel": "Cancel",
   "common.ok": "OK",
   "common.close": "Close",
@@ -197,4 +200,15 @@ export const en: TranslationKeys = {
   "realtime.placeholder": "Type a real-time message...",
   "error.realtime_connection_failed":
     "Failed to establish real-time connection.",
+  "x.link_account": "Link X (Twitter) Account",
+  "x.verification_title": "X Account Verification",
+  "x.verification_desc":
+    "Post via the button below, then paste the post URL to verify.",
+  "x.post_url_placeholder": "https://x.com/username/status/...",
+  "x.verify": "Verify",
+  "x.verifying": "Verifying...",
+  "x.unlink_account": "Unlink",
+  "profile.external_accounts": "External Accounts",
+  "error.x_verification_failed": "X account verification failed.",
+  "error.x_invalid_url": "Invalid X post URL.",
 };

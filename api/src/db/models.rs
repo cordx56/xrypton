@@ -138,9 +138,23 @@ pub struct AtprotoSignatureWithKeyRow {
     pub signing_public_key: String,
 }
 
+// --- X (Twitter) アカウント ---
+
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct XAccountRow {
+    pub user_id: String,
+    pub x_handle: String,
+    pub x_author_url: String,
+    pub x_post_url: String,
+    pub proof_json: String,
+    pub signature: String,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
 // --- 外部アカウント ---
 
-/// プロフィールレスポンスに含める外部アカウント情報（今後バリアントを追加予定）
+/// プロフィールレスポンスに含める外部アカウント情報
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExternalAccount {
@@ -149,6 +163,11 @@ pub enum ExternalAccount {
         handle: Option<String>,
         pds_url: String,
         pubkey_post_uri: Option<String>,
+    },
+    X {
+        handle: String,
+        author_url: String,
+        post_url: String,
     },
 }
 
@@ -159,6 +178,16 @@ impl From<AtprotoAccountRow> for ExternalAccount {
             handle: a.atproto_handle,
             pds_url: a.pds_url,
             pubkey_post_uri: a.pubkey_post_uri,
+        }
+    }
+}
+
+impl From<XAccountRow> for ExternalAccount {
+    fn from(a: XAccountRow) -> Self {
+        Self::X {
+            handle: a.x_handle,
+            author_url: a.x_author_url,
+            post_url: a.x_post_url,
         }
     }
 }

@@ -52,6 +52,10 @@ type AuthContextType = {
   /** WebAuthn再認証ポリシー（日、0 = 無期限） */
   reauthPolicyDays: 0 | 1 | 3 | 7 | 30;
   setReauthPolicyDays: (days: 0 | 1 | 3 | 7 | 30) => Promise<void>;
+  /** Push通知の有効状態 */
+  notificationsEnabled: boolean;
+  /** Push通知の有効状態を切り替える。戻り値は最終的に有効になったか。 */
+  setNotificationsEnabled: (enabled: boolean) => Promise<boolean>;
   /** 高リスク操作などの前に再認証を要求する */
   ensureRecentReauth: (
     force?: boolean,
@@ -107,6 +111,8 @@ const AuthContext = createContext<AuthContextType>({
   updateKeys: async () => {},
   reauthPolicyDays: 7,
   setReauthPolicyDays: async () => {},
+  notificationsEnabled: true,
+  setNotificationsEnabled: async () => false,
   ensureRecentReauth: async () => false,
   hasWebAuthnCredential: false,
   getSignedMessage: async () => null,
@@ -119,7 +125,7 @@ const AuthContext = createContext<AuthContextType>({
   isAddingAccount: false,
   cancelAddAccount: () => {},
   worker: null,
-  serviceWorker: { registration: undefined, subscribe: async () => {} },
+  serviceWorker: { registration: undefined, subscribe: async () => false },
   isInitialized: false,
 });
 
@@ -170,6 +176,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     0 | 1 | 3 | 7 | 30
   >(DEFAULT_REAUTH_DAYS);
   const [hasWebAuthnCredential, setHasWebAuthnCredential] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabledState] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
   const [accountIds, setAccountIdsState] = useState<string[]>([]);
   const [isAddingAccount, setIsAddingAccount] = useState(false);
@@ -255,13 +262,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
 
         // アクティブアカウントのデータを読み込み
-        const [pk, sp, reg, policy, lastReauth] = await Promise.all([
-          getAccountValue(activeId, "privateKeys"),
-          getAccountValue(activeId, "subPassphrase"),
-          getAccountValue(activeId, "isRegistered"),
-          getAccountValue(activeId, REAUTH_POLICY_KEY),
-          getAccountValue(activeId, LAST_REAUTH_AT_KEY),
-        ]);
+        const [pk, sp, reg, policy, lastReauth, notifEnabled] =
+          await Promise.all([
+            getAccountValue(activeId, "privateKeys"),
+            getAccountValue(activeId, "subPassphrase"),
+            getAccountValue(activeId, "isRegistered"),
+            getAccountValue(activeId, REAUTH_POLICY_KEY),
+            getAccountValue(activeId, LAST_REAUTH_AT_KEY),
+            getAccountValue(activeId, "notificationsEnabled"),
+          ]);
 
         setUserIdState(activeId);
         setPrivateKeysState(pk);
@@ -269,6 +278,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setIsRegistered(reg === "true");
         setReauthPolicyDaysState(parsePolicyDays(policy));
         setHasWebAuthnCredential(!!lastReauth);
+        setNotificationsEnabledState(notifEnabled !== "false");
 
         // テーマ・言語設定をアカウント別に同期
         const [acctColor, acctMode, acctLocale] = await Promise.all([
@@ -459,24 +469,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // 通知許可を取得し、Push購読を行う共通ヘルパー
   // requestPermission=true の場合、未許可ならプロンプトを表示する
   const ensurePushSubscription = useCallback(
-    async (requestPermission: boolean) => {
-      if (!("Notification" in window)) return;
+    async (requestPermission: boolean, force = false): Promise<boolean> => {
+      if (!force && !notificationsEnabled) return false;
+      if (!("Notification" in window)) return false;
       if (!privateKeys || !subPassphrase || !userId || !workerCtx.worker)
-        return;
+        return false;
 
       if (requestPermission) {
         const permission = await Notification.requestPermission();
-        if (permission !== "granted") return;
+        if (permission !== "granted") return false;
       } else {
         // 既に許可済みでなければ何もしない
-        if (Notification.permission !== "granted") return;
+        if (Notification.permission !== "granted") return false;
       }
 
       // 既にアクティブな購読があればスキップ
       const reg = serviceWorker.registration;
       if (reg) {
         const existing = await reg.pushManager.getSubscription();
-        if (existing) return;
+        if (existing) return true;
       }
 
       const signed = await new Promise<string | null>((resolve) => {
@@ -496,11 +507,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           }),
         });
       });
-      if (signed) {
-        await serviceWorker.subscribe(signed);
-      }
+      if (!signed) return false;
+      return serviceWorker.subscribe(signed);
     },
     [
+      notificationsEnabled,
       privateKeys,
       subPassphrase,
       userId,
@@ -509,6 +520,40 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       workerCtx.postMessage,
       serviceWorker,
     ],
+  );
+
+  const setNotificationsEnabled = useCallback(
+    async (enabled: boolean): Promise<boolean> => {
+      setNotificationsEnabledState(enabled);
+      if (userId) {
+        await setAccountValue(userId, "notificationsEnabled", String(enabled));
+      }
+
+      if (!enabled) {
+        const reg = serviceWorker.registration;
+        if (reg) {
+          try {
+            const subscription = await reg.pushManager.getSubscription();
+            if (subscription) {
+              await subscription.unsubscribe();
+            }
+          } catch {
+            // ignore unsubscribe failures
+          }
+        }
+        return false;
+      }
+
+      const subscribed = await ensurePushSubscription(true, true);
+      if (!subscribed) {
+        setNotificationsEnabledState(false);
+        if (userId) {
+          await setAccountValue(userId, "notificationsEnabled", "false");
+        }
+      }
+      return subscribed;
+    },
+    [userId, serviceWorker.registration, ensurePushSubscription],
   );
 
   // サーバに公開鍵を登録する
@@ -539,15 +584,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     // 登録成功後、通知許可を求めてPush購読を行う
     try {
-      await ensurePushSubscription(true);
+      if (notificationsEnabled) {
+        await ensurePushSubscription(true, true);
+      }
     } catch {
       // push subscription after register failed
     }
-  }, [publicKeys, userId, ensureRecentReauth, ensurePushSubscription]);
+  }, [
+    publicKeys,
+    userId,
+    ensureRecentReauth,
+    ensurePushSubscription,
+    notificationsEnabled,
+  ]);
 
   // 既登録ユーザが新しいデバイスや購読切れの場合に自動で再購読する
   useEffect(() => {
     if (!isInitialized || !isRegistered) return;
+    if (!notificationsEnabled) return;
     if (!privateKeys || !subPassphrase || !userId || !workerCtx.worker) return;
 
     // 許可済みの場合のみ自動購読（プロンプトは出さない）
@@ -555,6 +609,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [
     isInitialized,
     isRegistered,
+    notificationsEnabled,
     privateKeys,
     subPassphrase,
     userId,
@@ -693,11 +748,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       await setAccountValue(userId, "isRegistered", "true");
     }
     try {
-      await ensurePushSubscription(true);
+      if (notificationsEnabled) {
+        await ensurePushSubscription(true, true);
+      }
     } catch {
       // push subscription failed
     }
-  }, [userId, ensurePushSubscription]);
+  }, [userId, ensurePushSubscription, notificationsEnabled]);
 
   const cancelAddAccount = useCallback(async () => {
     // アカウント追加モードを終了し、前のアクティブアカウントに戻す
@@ -727,6 +784,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         updateKeys,
         reauthPolicyDays,
         setReauthPolicyDays,
+        notificationsEnabled,
+        setNotificationsEnabled,
         ensureRecentReauth,
         hasWebAuthnCredential,
         getSignedMessage: getSignedMessageInternal,

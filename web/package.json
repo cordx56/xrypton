@@ -16,6 +16,7 @@
     "@atproto/api": "^0.18.21",
     "@atproto/oauth-client-browser": "^0.3.40",
     "@fortawesome/fontawesome-svg-core": "^7.2.0",
+    "@fortawesome/free-brands-svg-icons": "^7.2.0",
     "@fortawesome/free-regular-svg-icons": "^7.2.0",
     "@fortawesome/free-solid-svg-icons": "^7.2.0",
     "@fortawesome/react-fontawesome": "^3.2.0",
@@ -24,13 +25,13 @@
     "@next/mdx": "^16.1.6",
     "@tailwindcss/typography": "^0.5.19",
     "@types/mdx": "^2.0.13",
-    "xrypton-wasm": "file:../wasm/pkg",
     "next": "16.0.10",
     "qr-scanner": "^1.4.2",
     "qrcode.react": "^4.2.0",
     "react": "19.2.1",
     "react-dom": "19.2.1",
     "remark-gfm": "^4.0.1",
+    "xrypton-wasm": "file:../wasm/pkg",
     "zod": "^4.1.13"
   },
   "devDependencies": {

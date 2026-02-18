@@ -18,6 +18,8 @@ import {
   isSignedMessage,
 } from "@/hooks/useSignatureVerifier";
 import { bytesToBase64, base64ToBytes } from "@/utils/base64";
+import { useDialogs } from "@/contexts/DialogContext";
+import XVerificationDialog from "@/components/x/XVerificationDialog";
 
 /** プロフィール編集画面 */
 const ProfileEditView = () => {
@@ -25,6 +27,7 @@ const ProfileEditView = () => {
   const router = useRouter();
   const { t } = useI18n();
   const { showError } = useErrorToast();
+  const { pushDialog } = useDialogs();
   const { verifyExtract } = useSignatureVerifier();
 
   const [displayName, setDisplayName] = useState("");
@@ -220,6 +223,20 @@ const ProfileEditView = () => {
             rows={3}
             className="w-full border border-accent/30 rounded px-3 py-2 bg-transparent resize-none"
           />
+        </div>
+
+        {/* 外部アカウント連携 */}
+        <div>
+          <label className="block text-sm text-muted mb-2">
+            {t("profile.external_accounts")}
+          </label>
+          <button
+            type="button"
+            onClick={() => pushDialog((p) => <XVerificationDialog {...p} />)}
+            className="w-full py-2 rounded border border-accent/30 hover:bg-accent/10 text-sm"
+          >
+            {t("x.link_account")}
+          </button>
         </div>
 
         <div className="flex gap-2">

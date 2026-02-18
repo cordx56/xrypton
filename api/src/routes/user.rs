@@ -278,14 +278,22 @@ async fn delete_user(
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
-/// ATProtoアカウント等から外部アカウント情報を構築する。
+/// ATProto・Xアカウント等から外部アカウント情報を構築する。
 async fn build_external_accounts(state: &AppState, user_id: &str) -> Vec<ExternalAccount> {
-    db::atproto::list_accounts(&state.pool, user_id)
+    let mut accounts: Vec<ExternalAccount> = db::atproto::list_accounts(&state.pool, user_id)
         .await
         .unwrap_or_default()
         .into_iter()
         .map(ExternalAccount::from)
-        .collect()
+        .collect();
+    accounts.extend(
+        db::x::list_accounts(&state.pool, user_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(ExternalAccount::from),
+    );
+    accounts
 }
 
 async fn get_profile(
