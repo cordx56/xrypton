@@ -65,6 +65,13 @@ type ProfileResponse = {
 };
 const profileCache = new Map<string, ProfileResponse>();
 
+// プロフィール更新時にキャッシュをクリア（コンポーネント未マウントでも動作）
+if (typeof window !== "undefined") {
+  window.addEventListener("profile-updated", () => {
+    profileCache.clear();
+  });
+}
+
 const UserProfileView = ({ userId }: Props) => {
   const auth = useAuth();
   const router = useRouter();

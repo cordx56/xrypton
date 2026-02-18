@@ -92,7 +92,10 @@ async fn upload_file(
                 .map_err(|e| AppError::BadRequest(format!("invalid signing key: {e}")))?;
         let content_fingerprint = xrypton_common::keys::extract_issuer_fingerprint(content)
             .map_err(|e| AppError::BadRequest(format!("invalid message format: {e}")))?;
-        if content_fingerprint != auth.primary_key_fingerprint {
+        let expected_fingerprint = content_public_keys
+            .get_signing_sub_key_fingerprint()
+            .map_err(|e| AppError::BadRequest(format!("invalid signing key: {e}")))?;
+        if content_fingerprint != expected_fingerprint {
             return Err(AppError::BadRequest("content signer mismatch".into()));
         }
         content_public_keys

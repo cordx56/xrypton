@@ -225,6 +225,11 @@ impl PublicKeys {
         format!("{:X}", self.keys.fingerprint())
     }
 
+    /// 署名サブキーのフィンガープリントを大文字16進文字列で返す。
+    pub fn get_signing_sub_key_fingerprint(&self) -> Result<String, XryptonError> {
+        Ok(format!("{:X}", self.signing_public()?.fingerprint()))
+    }
+
     /// PGP公開鍵のプライマリユーザIDからアドレス（`user@domain`）を抽出する。
     pub fn get_primary_user_address(&self) -> Result<String, XryptonError> {
         let uid_str = self
