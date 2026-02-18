@@ -34,6 +34,7 @@ import QrDisplay from "@/components/QrDisplay";
 import AccountList from "@/components/layout/AccountList";
 import { setCachedProfile } from "@/utils/accountStore";
 import { linkify } from "@/utils/linkify";
+import { bytesToBase64 } from "@/utils/base64";
 import {
   useSignatureVerifier,
   isSignedMessage,
@@ -192,6 +193,9 @@ const UserProfileView = ({ userId }: Props) => {
 
       // 検証失敗時の警告ダイアログを閉じるまでローディングを維持するための Promise
       let warningPromise: Promise<void> | null = null;
+      // アイコン検証で使うためローカルに追跡する
+      let localSigningKey: string | undefined;
+      let localDisplayName = "";
 
       if (!hasSigned) {
         // 未署名データ（レガシー）
@@ -199,10 +203,12 @@ const UserProfileView = ({ userId }: Props) => {
         setStatus(rawSt);
         setBio(rawBi);
         setTextVerificationState("pending");
+        localDisplayName = rawDn;
       } else if (isOwnProfile) {
         // 自分のプロフィール: auth.publicKeys で検証
         const signingKey = auth.publicKeys ?? null;
         setSigningPublicKey(signingKey ?? undefined);
+        localSigningKey = signingKey ?? undefined;
         if (signingKey) {
           const [dnResult, stResult, biResult] = await Promise.all([
             verifyField(signingKey, rawDn),
@@ -212,6 +218,7 @@ const UserProfileView = ({ userId }: Props) => {
           setDisplayName(dnResult.text);
           setStatus(stResult.text);
           setBio(biResult.text);
+          localDisplayName = dnResult.text;
           const allVerified =
             dnResult.verified && stResult.verified && biResult.verified;
           setTextVerificationState(allVerified ? "verified" : "unverified");
@@ -220,6 +227,7 @@ const UserProfileView = ({ userId }: Props) => {
           setDisplayName(rawDn);
           setStatus(rawSt);
           setBio(rawBi);
+          localDisplayName = rawDn;
           setTextVerificationState("unverified");
           warningPromise = showWarning(userId);
         }
@@ -232,6 +240,7 @@ const UserProfileView = ({ userId }: Props) => {
           userId,
           async (signingKey) => {
             setSigningPublicKey(signingKey);
+            localSigningKey = signingKey;
             try {
               return await verifyAllFields(signingKey, rawDn, rawSt, rawBi);
             } catch (e) {
@@ -250,6 +259,7 @@ const UserProfileView = ({ userId }: Props) => {
           setDisplayName(fields.dnResult.text);
           setStatus(fields.stResult.text);
           setBio(fields.biResult.text);
+          localDisplayName = fields.dnResult.text;
           const allVerified =
             fields.dnResult.verified &&
             fields.stResult.verified &&
@@ -260,6 +270,7 @@ const UserProfileView = ({ userId }: Props) => {
           setDisplayName(rawDn);
           setStatus(rawSt);
           setBio(rawBi);
+          localDisplayName = rawDn;
           setTextVerificationState("unverified");
         }
         if (needsWarning) warningPromise = showWarning(userId);
@@ -270,6 +281,7 @@ const UserProfileView = ({ userId }: Props) => {
           const signingKey = keysRaw?.signing_public_key;
           if (signingKey) {
             setSigningPublicKey(signingKey);
+            localSigningKey = signingKey;
             const [dnResult, stResult, biResult] = await Promise.all([
               verifyField(signingKey, rawDn),
               verifyField(signingKey, rawSt),
@@ -278,6 +290,7 @@ const UserProfileView = ({ userId }: Props) => {
             setDisplayName(dnResult.text);
             setStatus(stResult.text);
             setBio(biResult.text);
+            localDisplayName = dnResult.text;
             const allVerified =
               dnResult.verified && stResult.verified && biResult.verified;
             setTextVerificationState(allVerified ? "verified" : "unverified");
@@ -287,6 +300,7 @@ const UserProfileView = ({ userId }: Props) => {
             setDisplayName(rawDn);
             setStatus(rawSt);
             setBio(rawBi);
+            localDisplayName = rawDn;
             setTextVerificationState("unverified");
             warningPromise = showWarning(userId);
           }
@@ -294,6 +308,7 @@ const UserProfileView = ({ userId }: Props) => {
           setDisplayName(rawDn);
           setStatus(rawSt);
           setBio(rawBi);
+          localDisplayName = rawDn;
           setTextVerificationState("unverified");
           warningPromise = showWarning(userId);
         }
@@ -303,6 +318,60 @@ const UserProfileView = ({ userId }: Props) => {
         ? `${getApiBaseUrl()}${profile.icon_url}?t=${Date.now()}`
         : null;
       setIconUrl(resolvedIconUrl);
+
+      // アイコンの PGP 検証（テキストと合わせて警告判定するため fetchProfile 内で実施）
+      const worker = auth.worker;
+      if (resolvedIconUrl && localSigningKey && worker) {
+        try {
+          const resp = await fetch(resolvedIconUrl);
+          if (resp.ok) {
+            const arrayBuf = await resp.arrayBuffer();
+            const rawBytes = new Uint8Array(arrayBuf);
+            const dataBase64 = bytesToBase64(rawBytes);
+
+            const iconResult = await new Promise<{ success: boolean }>(
+              (resolve) => {
+                worker.eventWaiter("verify_extract_bytes", (r) => {
+                  resolve({ success: r.success });
+                });
+                worker.postMessage({
+                  call: "verify_extract_bytes",
+                  publicKey: localSigningKey!,
+                  data: dataBase64,
+                });
+              },
+            );
+
+            if (!iconResult.success) {
+              setIconVerifyState("warning");
+              if (!warningPromise)
+                warningPromise = showWarning(
+                  userId,
+                  localDisplayName || undefined,
+                );
+            } else {
+              setIconVerifyState("verified");
+            }
+          } else {
+            setIconVerifyState("warning");
+            if (!warningPromise)
+              warningPromise = showWarning(
+                userId,
+                localDisplayName || undefined,
+              );
+          }
+        } catch {
+          setIconVerifyState("warning");
+          if (!warningPromise)
+            warningPromise = showWarning(userId, localDisplayName || undefined);
+        }
+      } else if (resolvedIconUrl) {
+        // 鍵またはWorkerなし: アイコン検証不可
+        setIconVerifyState("warning");
+        if (!warningPromise)
+          warningPromise = showWarning(userId, localDisplayName || undefined);
+      }
+
       // 自分のプロフィールの場合、アカウントセレクタ表示用にキャッシュ（平文を保存）
       if (isOwnProfile) {
         let resolvedDn = rawDn;
