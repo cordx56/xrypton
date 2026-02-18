@@ -14,6 +14,9 @@ export const WorkerResultCallList = {
   get_primary_fingerprint: "get_primary_fingerprint",
   sign: "sign",
   sign_bytes: "sign_bytes",
+  sign_detached: "sign_detached",
+  certify_key_bytes: "certify_key_bytes",
+  verify_detached_signature: "verify_detached_signature",
   validate_passphrases: "validate_passphrases",
   get_private_key_user_ids: "get_private_key_user_ids",
   verify_extract_string: "verify_extract_string",
@@ -349,6 +352,24 @@ export const WorkerCallMessage = z.union([
     payload: z.base64(),
   }),
   z.object({
+    call: z.literal(WorkerResultCallList["sign_detached"]),
+    keys: z.string(),
+    passphrase: z.string(),
+    payload: z.base64(),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["certify_key_bytes"]),
+    privateKey: z.string(),
+    targetPublicKey: z.string(),
+    passphrase: z.string(),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["verify_detached_signature"]),
+    publicKey: z.string(),
+    signature: z.string(),
+    data: z.base64(),
+  }),
+  z.object({
     call: z.literal(WorkerResultCallList["validate_passphrases"]),
     privateKeys: z.string(),
     mainPassphrase: z.string(),
@@ -442,6 +463,18 @@ export const WorkerResultMessage = z.union([
   z.object({
     call: z.literal(WorkerResultCallList["sign_bytes"]),
     result: WorkerResult(z.object({ data: z.string() })),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["sign_detached"]),
+    result: WorkerResult(z.object({ signature: z.string() })),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["certify_key_bytes"]),
+    result: WorkerResult(z.object({ data: z.base64() })),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["verify_detached_signature"]),
+    result: WorkerResult(z.object({})),
   }),
   z.object({
     call: z.literal(WorkerResultCallList["validate_passphrases"]),

@@ -8,6 +8,7 @@ pub mod nonces;
 pub mod push;
 pub mod threads;
 pub mod users;
+pub mod wot;
 pub mod x;
 
 #[cfg(not(feature = "postgres"))]
@@ -103,8 +104,8 @@ pub async fn migrate_user_ids(pool: &Db, server_hostname: &str) -> Result<(), sq
         }
     }
 
-    // FK制約なしのテーブル（0006で制約が削除済み）
-    let q = sql("UPDATE used_nonces SET user_id = user_id || ? WHERE user_id NOT LIKE ?");
+    // FK制約なしのテーブル
+    let q = sql("UPDATE nonces SET user_id = user_id || ? WHERE user_id NOT LIKE ?");
     sqlx::query(&q)
         .bind(&suffix)
         .bind(like_pattern)

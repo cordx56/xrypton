@@ -152,6 +152,18 @@ pub struct XAccountRow {
     pub updated_at: Timestamp,
 }
 
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct WotSignatureRow {
+    pub id: String,
+    pub target_fingerprint: String,
+    pub signer_fingerprint: String,
+    pub signature_b64: String,
+    pub signature_hash: String,
+    pub signature_created_at: Timestamp,
+    pub received_at: Timestamp,
+    pub revoked: bool,
+}
+
 // --- 外部アカウント ---
 
 /// プロフィールレスポンスに含める外部アカウント情報

@@ -11,7 +11,7 @@ Then, add the following TXT record to `_xrypton.[your-domain]` for your domain `
 
 `"user=[ID]@[host-domain]"`
 
-Important: Make sure to include the `"` in the TXT record value.
+An important point: be sure to include the `"` characters in the TXT record value.
 
 ## Generate and Register a PGP Key
 

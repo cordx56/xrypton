@@ -598,7 +598,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   }, [handlePushEvent]);
 
   // iOS SafariではSWからのpostMessageが届かない場合があるため、
-  // 可視化・フォーカス復帰時と定期的にデータを再取得するフォールバック
+  // 可視化・フォーカス復帰時にデータを再取得するフォールバック
   useEffect(() => {
     const refreshFromServer = async () => {
       if (document.visibilityState !== "visible") return;
@@ -643,16 +643,10 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     window.addEventListener("focus", onFocus);
     window.addEventListener("pageshow", onPageShow);
 
-    // SWイベント未達の環境向けフォールバックポーリング
-    const intervalId = window.setInterval(() => {
-      void refreshFromServer();
-    }, 15000);
-
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("pageshow", onPageShow);
-      window.clearInterval(intervalId);
     };
   }, [
     auth.getSignedMessage,

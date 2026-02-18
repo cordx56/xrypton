@@ -3,7 +3,7 @@ use chrono::Timelike;
 use pgp::{
     composed::*,
     crypto,
-    packet::{Subpacket, SubpacketData},
+    packet::{PacketTrait, SignatureConfig, SignatureType, Subpacket, SubpacketData},
     types::{CompressionAlgorithm, KeyDetails, *},
 };
 use rand::rngs::OsRng;
@@ -154,6 +154,81 @@ impl PrivateKeys {
     #[tracing::instrument]
     pub fn sign_bytes(&self, passphrase: &str, data: Vec<u8>) -> Result<Vec<u8>, Error> {
         self.build_sign(passphrase, data, |b| b.to_vec(OsRng))
+    }
+
+    /// detached signature（armored）を生成する。
+    #[tracing::instrument]
+    pub fn sign_detached(&self, passphrase: &str, data: Vec<u8>) -> Result<String, Error> {
+        let cfg = SignatureConfig {
+            typ: SignatureType::Binary,
+            pub_alg: self.signing_secret().key.algorithm(),
+            hash_alg: crypto::hash::HashAlgorithm::Sha512,
+            hashed_subpackets: match self.sign_subpacket_config()? {
+                SubpacketConfig::UserDefined { hashed, .. } => hashed,
+                _ => Vec::new(),
+            },
+            unhashed_subpackets: match self.sign_subpacket_config()? {
+                SubpacketConfig::UserDefined { unhashed, .. } => unhashed,
+                _ => Vec::new(),
+            },
+            version_specific: pgp::packet::SignatureVersionSpecific::V4,
+        };
+        let sig = cfg
+            .sign(
+                &self.signing_secret().key,
+                &Password::from(passphrase),
+                std::io::Cursor::new(data),
+            )
+            .map_err(|e| Error::SigningError(e.to_string()))?;
+
+        DetachedSignature::new(sig)
+            .to_armored_string(ArmorOptions::default())
+            .map_err(|e| Error::SigningError(e.to_string()))
+    }
+
+    /// 対象公開鍵の最初のUser IDに対する certification 署名パケット(raw)を返す。
+    #[tracing::instrument]
+    pub fn certify_key_bytes(
+        &self,
+        passphrase: &str,
+        target_public_key: &str,
+    ) -> Result<Vec<u8>, Error> {
+        let (target, _) = SignedPublicKey::from_string(target_public_key)
+            .map_err(|e| Error::KeyFormatError(e.to_string()))?;
+        let target_uid = target
+            .details
+            .users
+            .first()
+            .ok_or_else(|| Error::SigningError("target key has no user id".into()))?;
+
+        let signer_key = &self.signing_secret().key;
+        let subpackets = self.sign_subpacket_config()?;
+        let (hashed_subpackets, unhashed_subpackets) = match subpackets {
+            SubpacketConfig::UserDefined { hashed, unhashed } => (hashed, unhashed),
+            _ => (Vec::new(), Vec::new()),
+        };
+        let cfg = SignatureConfig {
+            typ: SignatureType::CertGeneric,
+            pub_alg: signer_key.algorithm(),
+            hash_alg: crypto::hash::HashAlgorithm::Sha512,
+            hashed_subpackets,
+            unhashed_subpackets,
+            version_specific: pgp::packet::SignatureVersionSpecific::V4,
+        };
+        let sig = cfg
+            .sign_certification_third_party(
+                signer_key,
+                &Password::from(passphrase),
+                &target,
+                pgp::types::Tag::UserId,
+                &target_uid.id,
+            )
+            .map_err(|e| Error::SigningError(e.to_string()))?;
+
+        let mut out = Vec::new();
+        sig.to_writer_with_header(&mut out)
+            .map_err(|e| Error::SigningError(e.to_string()))?;
+        Ok(out)
     }
     /// 主鍵のパスフレーズを検証する。
     pub fn validate_main_passphrase(&self, passphrase: &str) -> Result<(), Error> {

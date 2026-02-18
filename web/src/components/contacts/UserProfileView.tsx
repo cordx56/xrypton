@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDialogs } from "@/contexts/DialogContext";
@@ -8,6 +8,7 @@ import { useI18n } from "@/contexts/I18nContext";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
 import {
   ApiError,
+  WotGraphResponse,
   apiClient,
   authApiClient,
   getApiBaseUrl,
@@ -38,12 +39,21 @@ import { linkify } from "@/utils/linkify";
 import { verifyPubkeyPostOnPds } from "@/utils/atprotoVerify";
 import { verifyXPost } from "@/utils/xVerify";
 import type { ExternalAccount } from "@/types/atproto";
-import { bytesToBase64 } from "@/utils/base64";
+import {
+  bytesToBase64,
+  decodeBase64Url,
+  fromBase64Url,
+  toBase64Url,
+} from "@/utils/base64";
+import { canonicalize } from "@/utils/canonicalize";
 import {
   useSignatureVerifier,
   isSignedMessage,
 } from "@/hooks/useSignatureVerifier";
 import { usePublicKeyResolver } from "@/hooks/usePublicKeyResolver";
+import { useResolvedProfiles } from "@/hooks/useResolvedProfiles";
+import WotGraphDialog from "@/components/contacts/WotGraphDialog";
+import QrReader from "@/components/QrReader";
 
 type Props = {
   userId: string;
@@ -51,6 +61,46 @@ type Props = {
 
 type VerificationState = "pending" | "verified" | "unverified";
 type ExternalVerificationState = "pending" | "verified" | "unverified";
+type WotQrPayload = {
+  v: number;
+  type: "xrypton-wot";
+  fingerprint: string;
+  key_server: string;
+  nonce: {
+    random: string;
+    time: string;
+  };
+};
+type WotSignRequest = {
+  keyServerBase: string;
+  targetFingerprint: string;
+  targetUserId: string;
+  targetPublicKey: string;
+  qrNonce: WotQrPayload["nonce"];
+};
+
+function normalizeKeyServerBaseUrl(raw: string): string {
+  const url = new URL(raw);
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("invalid key_server protocol");
+  }
+  if (
+    url.protocol === "http:" &&
+    url.hostname !== "localhost" &&
+    url.hostname !== "127.0.0.1" &&
+    url.hostname !== "::1"
+  ) {
+    throw new Error("insecure key_server is not allowed");
+  }
+  const base = `${url.origin}${url.pathname}`.replace(/\/+$/, "");
+  return base.length > 0 ? base : url.origin;
+}
+
+function getOwnKeyServerBaseUrl(): string {
+  if (typeof window === "undefined") return getApiBaseUrl();
+  const url = new URL(getApiBaseUrl(), window.location.origin);
+  return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
+}
 
 // プロフィールAPIレスポンスのセッション中キャッシュ
 type ProfileResponse = {
@@ -91,6 +141,7 @@ const UserProfileView = ({ userId }: Props) => {
     Map<string, ExternalVerificationState>
   >(new Map());
   const [isContact, setIsContact] = useState(false);
+  const [contactUserIds, setContactUserIds] = useState<string[]>([]);
   const [addingContact, setAddingContact] = useState(false);
   const [textVerificationState, setTextVerificationState] =
     useState<VerificationState>("pending");
@@ -99,6 +150,13 @@ const UserProfileView = ({ userId }: Props) => {
   const [signingPublicKey, setSigningPublicKey] = useState<string | undefined>(
     undefined,
   );
+  const [targetFingerprint, setTargetFingerprint] = useState<string | null>(
+    null,
+  );
+  const [trustGraph, setTrustGraph] = useState<WotGraphResponse | null>(null);
+  const [trustGraphTruncated, setTrustGraphTruncated] = useState(false);
+  const [scanResult, setScanResult] = useState("");
+  const [scanProcessing, setScanProcessing] = useState(false);
   const isFetchingRef = useRef(false);
 
   const isLoggedIn = !!auth.userId && auth.isRegistered;
@@ -514,9 +572,331 @@ const UserProfileView = ({ userId }: Props) => {
       const contacts: { contact_user_id: string }[] = await authApiClient(
         signed.signedMessage,
       ).contacts.list();
+      setContactUserIds(contacts.map((c) => c.contact_user_id));
       setIsContact(contacts.some((c) => c.contact_user_id === userId));
     })();
   }, [userId, isOwnProfile, isLoggedIn]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const signed = isLoggedIn ? await auth.getSignedMessage() : null;
+        const keys = signed
+          ? await authApiClient(signed.signedMessage).user.getKeys(userId)
+          : await apiClient().user.getKeys(userId);
+        if (!cancelled) {
+          setTargetFingerprint(keys?.primary_key_fingerprint ?? null);
+        }
+      } catch {
+        if (!cancelled) setTargetFingerprint(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth, isLoggedIn, userId]);
+
+  useEffect(() => {
+    if (!isLoggedIn || isOwnProfile || !targetFingerprint) {
+      setTrustGraph(null);
+      setTrustGraphTruncated(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const signed = await auth.getSignedMessage();
+      if (!signed) return;
+      try {
+        const graph = await authApiClient(
+          signed.signedMessage,
+        ).wot.getSignaturesByFingerprint(targetFingerprint, {
+          direction: "inbound",
+          max_depth: 4,
+        });
+        if (!cancelled) {
+          setTrustGraph(graph);
+          setTrustGraphTruncated(graph.meta.truncated);
+        }
+      } catch {
+        if (!cancelled) {
+          setTrustGraph(null);
+          setTrustGraphTruncated(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth, isLoggedIn, isOwnProfile, targetFingerprint]);
+
+  const submitWotSignature = useCallback(
+    async (request: WotSignRequest) => {
+      if (!auth.worker || !auth.privateKeys || !auth.subPassphrase) {
+        showError(t("error.unauthorized"));
+        return;
+      }
+      setScanProcessing(true);
+      try {
+        const signaturePacketB64 = await new Promise<string | null>(
+          (resolve) => {
+            auth.worker!.eventWaiter("certify_key_bytes", (result) => {
+              if (result.success) resolve(result.data.data);
+              else resolve(null);
+            });
+            auth.worker!.postMessage({
+              call: "certify_key_bytes",
+              privateKey: auth.privateKeys!,
+              targetPublicKey: request.targetPublicKey,
+              passphrase: auth.subPassphrase!,
+            });
+          },
+        );
+        if (!signaturePacketB64) throw new Error("certification sign failed");
+
+        const signed = await auth.getSignedMessage();
+        if (!signed) throw new Error("authorization failed");
+        await authApiClient(
+          signed.signedMessage,
+        ).wot.postSignatureByFingerprint(
+          request.targetFingerprint,
+          {
+            signature_b64: signaturePacketB64,
+            signature_type: "certification",
+            hash_algo: "sha256",
+            qr_nonce: request.qrNonce,
+          },
+          request.keyServerBase,
+        );
+        router.push(`/profile/${encodeURIComponent(request.targetUserId)}`);
+      } catch (e) {
+        showError(e instanceof Error ? e.message : t("error.unknown"));
+      } finally {
+        setScanProcessing(false);
+      }
+    },
+    [auth, router, showError, t],
+  );
+
+  const openWotSignatureConfirmDialog = useCallback(
+    (request: WotSignRequest) => {
+      const suffix = `${request.targetFingerprint.slice(-8, -4)} ${request.targetFingerprint.slice(-4)}`;
+      pushDialog((p) => (
+        <Dialog {...p} title={t("wot.confirm_sign_title")}>
+          <div className="space-y-3">
+            <p className="text-sm text-muted">
+              {t("wot.confirm_sign_message")}
+            </p>
+            <div>
+              <p className="text-xs text-muted">
+                {t("wot.confirm_sign_server")}
+              </p>
+              <Code code={request.keyServerBase} />
+            </div>
+            <div>
+              <p className="text-xs text-muted">
+                {t("wot.confirm_sign_target")}
+              </p>
+              <p className="text-sm select-all">{request.targetUserId}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted">
+                {t("wot.confirm_sign_fingerprint_suffix")}
+              </p>
+              <p className="text-sm font-mono">{suffix}</p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={p.close}
+                className="px-3 py-1.5 rounded border border-accent/30 text-sm hover:bg-accent/10"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  p.close();
+                  void submitWotSignature(request);
+                }}
+                className="px-3 py-1.5 rounded bg-accent/20 text-sm hover:bg-accent/30"
+              >
+                {t("common.ok")}
+              </button>
+            </div>
+          </div>
+        </Dialog>
+      ));
+    },
+    [pushDialog, submitWotSignature, t],
+  );
+
+  useEffect(() => {
+    if (!scanResult || scanProcessing || !isLoggedIn || !auth.worker) return;
+    let cancelled = false;
+    setScanProcessing(true);
+
+    (async () => {
+      try {
+        const split = scanResult.split(".");
+        if (split.length !== 2) throw new Error("invalid qr payload");
+        const [sigB64u, payloadB64u] = split;
+        const payloadText = decodeBase64Url(payloadB64u);
+        const payload = JSON.parse(payloadText) as WotQrPayload;
+        if (payload.type !== "xrypton-wot" || payload.v !== 1) {
+          throw new Error("invalid qr version/type");
+        }
+        if (typeof payload.key_server !== "string" || !payload.key_server) {
+          throw new Error("invalid key_server");
+        }
+        const keyServerBase = normalizeKeyServerBaseUrl(payload.key_server);
+        const fp = payload.fingerprint;
+        if (!/^[A-F0-9]{40,128}$/.test(fp) || fp.length % 2 !== 0) {
+          throw new Error("invalid fingerprint");
+        }
+        const nonceTime = new Date(payload.nonce.time).getTime();
+        if (!Number.isFinite(nonceTime)) throw new Error("invalid nonce time");
+        if (Math.abs(Date.now() - nonceTime) > 5 * 60 * 1000) {
+          throw new Error("qr expired");
+        }
+
+        const keyResp = await apiClient().wot.getKeyByFingerprint(
+          fp,
+          keyServerBase,
+        );
+        const targetPrimaryFingerprint = keyResp.fingerprint;
+        if (
+          !/^[A-F0-9]{40,128}$/.test(targetPrimaryFingerprint) ||
+          targetPrimaryFingerprint.length % 2 !== 0
+        ) {
+          throw new Error("invalid response fingerprint");
+        }
+        if (targetPrimaryFingerprint !== fp) {
+          throw new Error("fingerprint mismatch");
+        }
+        const payloadBytes = new TextEncoder().encode(canonicalize(payload));
+        const signatureArmored = new TextDecoder().decode(
+          fromBase64Url(sigB64u),
+        );
+        const verifyOk = await new Promise<boolean>((resolve) => {
+          auth.worker!.eventWaiter("verify_detached_signature", (result) => {
+            resolve(result.success);
+          });
+          auth.worker!.postMessage({
+            call: "verify_detached_signature",
+            publicKey: keyResp.armored_public_key,
+            signature: signatureArmored,
+            data: bytesToBase64(payloadBytes),
+          });
+        });
+        if (!verifyOk) throw new Error("qr signature verify failed");
+
+        if (!cancelled) {
+          openWotSignatureConfirmDialog({
+            keyServerBase,
+            targetFingerprint: targetPrimaryFingerprint,
+            targetUserId: keyResp.user_id,
+            targetPublicKey: keyResp.armored_public_key,
+            qrNonce: payload.nonce,
+          });
+        }
+      } catch (e) {
+        if (!cancelled) {
+          showError(e instanceof Error ? e.message : t("error.unknown"));
+        }
+      } finally {
+        if (!cancelled) {
+          setScanProcessing(false);
+          setScanResult("");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    auth,
+    isLoggedIn,
+    openWotSignatureConfirmDialog,
+    scanProcessing,
+    scanResult,
+    showError,
+    t,
+  ]);
+
+  const trustedByUserId = useMemo(
+    () => new Set(contactUserIds),
+    [contactUserIds],
+  );
+  const trustedPathUserIds = useMemo(() => {
+    if (!trustGraph || !targetFingerprint || trustedByUserId.size === 0)
+      return [];
+
+    const userByFingerprint = new Map<string, string>();
+    const revokedFingerprints = new Set<string>();
+    for (const node of trustGraph.nodes) {
+      if (node.revoked) {
+        revokedFingerprints.add(node.fingerprint);
+        continue;
+      }
+      if (node.user_id) {
+        userByFingerprint.set(node.fingerprint, node.user_id);
+      }
+    }
+    if (revokedFingerprints.has(targetFingerprint)) return [];
+
+    const adjacency = new Map<string, string[]>();
+    for (const edge of trustGraph.edges) {
+      if (
+        edge.revoked ||
+        revokedFingerprints.has(edge.from_fingerprint) ||
+        revokedFingerprints.has(edge.to_fingerprint)
+      ) {
+        continue;
+      }
+      const list = adjacency.get(edge.from_fingerprint) ?? [];
+      list.push(edge.to_fingerprint);
+      adjacency.set(edge.from_fingerprint, list);
+    }
+
+    const target = targetFingerprint;
+    const matched = new Set<string>();
+
+    for (const [fp, uid] of userByFingerprint.entries()) {
+      if (!trustedByUserId.has(uid)) continue;
+      const seen = new Set<string>();
+      const queue = [fp];
+      let found = false;
+      while (queue.length > 0 && !found) {
+        const cur = queue.shift()!;
+        if (cur === target) {
+          found = true;
+          break;
+        }
+        if (seen.has(cur)) continue;
+        seen.add(cur);
+        for (const next of adjacency.get(cur) ?? []) {
+          if (!seen.has(next)) queue.push(next);
+        }
+      }
+      if (found) {
+        matched.add(uid);
+      }
+    }
+
+    return Array.from(matched);
+  }, [targetFingerprint, trustGraph, trustedByUserId]);
+
+  const { profiles: trustedProfiles } = useResolvedProfiles(trustedPathUserIds);
+  const trustedProfilesByUserId = useMemo(
+    () =>
+      Object.fromEntries(trustedProfiles.map((p) => [p.userId, p])) as Record<
+        string,
+        (typeof trustedProfiles)[number]
+      >,
+    [trustedProfiles],
+  );
 
   const handleAddContact = async () => {
     const signed = await auth.getSignedMessage();
@@ -525,6 +905,9 @@ const UserProfileView = ({ userId }: Props) => {
     try {
       await authApiClient(signed.signedMessage).contacts.add(userId);
       setIsContact(true);
+      setContactUserIds((prev) =>
+        prev.includes(userId) ? prev : [...prev, userId],
+      );
     } catch (e) {
       if (e instanceof ApiError) {
         if (e.status === 409) setIsContact(true);
@@ -567,6 +950,141 @@ const UserProfileView = ({ userId }: Props) => {
     }
   };
 
+  const showWotQr = async () => {
+    if (
+      !auth.worker ||
+      !auth.publicKeys ||
+      !auth.privateKeys ||
+      !auth.subPassphrase
+    ) {
+      showError(t("error.unauthorized"));
+      return;
+    }
+    const fingerprint = await new Promise<string | null>((resolve) => {
+      auth.worker!.eventWaiter("get_primary_fingerprint", (result) => {
+        if (result.success) resolve(result.data.fingerprint);
+        else resolve(null);
+      });
+      auth.worker!.postMessage({
+        call: "get_primary_fingerprint",
+        publicKeys: auth.publicKeys!,
+      });
+    });
+    if (!fingerprint) {
+      showError(t("error.unknown"));
+      return;
+    }
+
+    const payload: WotQrPayload = {
+      v: 1,
+      type: "xrypton-wot",
+      fingerprint,
+      key_server: getOwnKeyServerBaseUrl(),
+      nonce: {
+        random: crypto.randomUUID(),
+        time: new Date().toISOString(),
+      },
+    };
+    const canonical = canonicalize(payload);
+    const payloadBytes = new TextEncoder().encode(canonical);
+    const detached = await new Promise<string | null>((resolve) => {
+      auth.worker!.eventWaiter("sign_detached", (result) => {
+        if (result.success) resolve(result.data.signature);
+        else resolve(null);
+      });
+      auth.worker!.postMessage({
+        call: "sign_detached",
+        keys: auth.privateKeys!,
+        passphrase: auth.subPassphrase!,
+        payload: bytesToBase64(payloadBytes),
+      });
+    });
+    if (!detached) {
+      showError(t("error.unknown"));
+      return;
+    }
+    const qrText = `${toBase64Url(new TextEncoder().encode(detached))}.${toBase64Url(
+      payloadBytes,
+    )}`;
+    const suffix = `${fingerprint.slice(-8, -4)} ${fingerprint.slice(-4)}`;
+    pushDialog((p) => (
+      <Dialog {...p} title="Web of Trust QR">
+        <div className="space-y-3">
+          <QrDisplay data={qrText} />
+          <p className="text-xs text-center text-muted">FP suffix: {suffix}</p>
+          <Code code={qrText} />
+        </div>
+      </Dialog>
+    ));
+  };
+
+  const openWotScanner = () => {
+    setScanResult("");
+    pushDialog((p) => (
+      <Dialog {...p} title="Scan Web of Trust QR">
+        <div className="space-y-3">
+          <QrReader
+            setData={(data) => {
+              setScanResult(data);
+              p.close();
+            }}
+          />
+        </div>
+      </Dialog>
+    ));
+  };
+
+  const openTrustGraphDialog = () => {
+    if (!trustGraph || !targetFingerprint) return;
+    const activeFingerprints = new Set(
+      trustGraph.nodes.filter((n) => !n.revoked).map((n) => n.fingerprint),
+    );
+    const activeNodes = trustGraph.nodes.filter((n) => !n.revoked);
+    const activeEdges = trustGraph.edges.filter(
+      (e) =>
+        !e.revoked &&
+        activeFingerprints.has(e.from_fingerprint) &&
+        activeFingerprints.has(e.to_fingerprint),
+    );
+    const userIdByFingerprint = Object.fromEntries(
+      activeNodes.map((n) => [n.fingerprint, n.user_id]),
+    ) as Record<string, string | null>;
+
+    const profileMap = Object.fromEntries(
+      trustedProfiles.map((p) => [
+        p.userId,
+        { displayName: p.displayName, iconUrl: p.iconUrl },
+      ]),
+    ) as Record<string, { displayName: string; iconUrl: string | null }>;
+
+    const rootFingerprint =
+      activeNodes.find((n) => n.user_id === auth.userId)?.fingerprint ??
+      targetFingerprint;
+
+    pushDialog((p) => (
+      <Dialog {...p} title={t("wot.trust_graph")}>
+        <WotGraphDialog
+          rootFingerprint={rootFingerprint}
+          targetFingerprint={targetFingerprint}
+          nodes={activeNodes.map((n) => ({
+            fingerprint: n.fingerprint,
+            userId: n.user_id,
+          }))}
+          edges={activeEdges.map((e) => ({
+            from: e.from_fingerprint,
+            to: e.to_fingerprint,
+          }))}
+          profiles={profileMap}
+          userIdByFingerprint={userIdByFingerprint}
+          onOpenProfile={(nextUserId) => {
+            p.close();
+            router.push(`/profile/${encodeURIComponent(nextUserId)}`);
+          }}
+        />
+      </Dialog>
+    ));
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -574,6 +1092,12 @@ const UserProfileView = ({ userId }: Props) => {
       </div>
     );
   }
+
+  const trustedPreview = trustedPathUserIds.slice(0, 3);
+  const trustedOverflow = Math.max(
+    0,
+    trustedPathUserIds.length - trustedPreview.length,
+  );
 
   return (
     <div className="max-w-lg mx-auto p-4 space-y-6">
@@ -644,6 +1168,39 @@ const UserProfileView = ({ userId }: Props) => {
               ? t("profile.verified")
               : t("profile.unverified")}
           </span>
+        )}
+
+        {!isOwnProfile && trustedPathUserIds.length > 0 && (
+          <div className="mt-3 flex flex-col items-center gap-2">
+            <p className="text-xs text-muted">{t("wot.trusted_by_contacts")}</p>
+            <button
+              type="button"
+              onClick={openTrustGraphDialog}
+              className="flex items-center gap-2 hover:opacity-90"
+            >
+              {trustedPreview.map((trustedUserId) => {
+                const profile = trustedProfilesByUserId[trustedUserId];
+                return (
+                  <Avatar
+                    key={trustedUserId}
+                    name={profile?.displayName ?? trustedUserId}
+                    iconUrl={profile?.iconUrl}
+                    size="sm"
+                  />
+                );
+              })}
+              {trustedOverflow > 0 && (
+                <span className="text-xs text-muted border rounded-full px-2 py-1">
+                  +{trustedOverflow}
+                </span>
+              )}
+            </button>
+            {trustGraphTruncated && (
+              <p className="text-[10px] text-muted">
+                {t("wot.results_truncated")}
+              </p>
+            )}
+          </div>
         )}
       </div>
 
@@ -723,6 +1280,16 @@ const UserProfileView = ({ userId }: Props) => {
             <FontAwesomeIcon icon={faKey} />
             {t("profile.public_keys")}
           </button>
+          {isLoggedIn && (
+            <button
+              type="button"
+              onClick={openWotScanner}
+              disabled={scanProcessing || !hasWorker}
+              className="w-full py-2 rounded border border-accent/30 hover:bg-accent/10 text-sm disabled:opacity-50"
+            >
+              {t("wot.scan_sign")}
+            </button>
+          )}
         </div>
       )}
 
@@ -747,6 +1314,14 @@ const UserProfileView = ({ userId }: Props) => {
             >
               <FontAwesomeIcon icon={faKey} />
               {t("profile.public_keys")}
+            </button>
+            <button
+              type="button"
+              onClick={showWotQr}
+              disabled={!hasWorker || !auth.publicKeys}
+              className="w-full py-2 rounded border border-accent/30 hover:bg-accent/10 text-sm disabled:opacity-50"
+            >
+              {t("wot.show_qr")}
             </button>
 
             {auth.accountIds.length > 0 && (

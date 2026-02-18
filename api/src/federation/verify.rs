@@ -2,6 +2,7 @@ use crate::auth::{AuthPayload, AuthenticatedUser, validate_nonce_timestamp};
 use crate::config::AppConfig;
 use crate::db;
 use crate::db::Db;
+use crate::db::nonces::NonceType;
 use crate::error::AppError;
 use crate::federation::dns::{DnsTxtResolver, ResolvedDomain};
 use crate::types::UserId;
@@ -42,11 +43,18 @@ pub async fn verify_or_fetch_external_user(
         if let Ok(payload_bytes) = public_keys.verify_and_extract(auth_header_decoded) {
             let payload: AuthPayload = serde_json::from_slice(&payload_bytes)
                 .map_err(|e| AppError::Unauthorized(format!("invalid auth payload: {e}")))?;
-            validate_nonce_timestamp(&payload.nonce)?;
+            let nonce_time = validate_nonce_timestamp(&payload.nonce)?;
             let nonce_key = payload.nonce.replay_key();
+            let expires_at = nonce_time + chrono::Duration::hours(1);
 
-            let is_new =
-                db::nonces::try_use_nonce(pool, nonce_key, cached_user_id.as_str()).await?;
+            let is_new = db::nonces::try_use_nonce(
+                pool,
+                NonceType::Auth,
+                nonce_key,
+                cached_user_id.as_str(),
+                expires_at,
+            )
+            .await?;
             if !is_new {
                 return Err(AppError::Unauthorized("nonce already used".into()));
             }
@@ -101,10 +109,18 @@ pub async fn verify_or_fetch_external_user(
 
         let payload: AuthPayload = serde_json::from_slice(&payload_bytes)
             .map_err(|e| AppError::Unauthorized(format!("invalid auth payload: {e}")))?;
-        validate_nonce_timestamp(&payload.nonce)?;
+        let nonce_time = validate_nonce_timestamp(&payload.nonce)?;
         let nonce_key = payload.nonce.replay_key();
+        let expires_at = nonce_time + chrono::Duration::hours(1);
 
-        let is_new = db::nonces::try_use_nonce(pool, nonce_key, user_id.as_str()).await?;
+        let is_new = db::nonces::try_use_nonce(
+            pool,
+            NonceType::Auth,
+            nonce_key,
+            user_id.as_str(),
+            expires_at,
+        )
+        .await?;
         if !is_new {
             return Err(AppError::Unauthorized("nonce already used".into()));
         }
@@ -144,11 +160,19 @@ pub async fn verify_or_fetch_external_user(
 
     let payload: AuthPayload = serde_json::from_slice(&payload_bytes)
         .map_err(|e| AppError::Unauthorized(format!("invalid auth payload: {e}")))?;
-    validate_nonce_timestamp(&payload.nonce)?;
+    let nonce_time = validate_nonce_timestamp(&payload.nonce)?;
     let nonce_key = payload.nonce.replay_key();
+    let expires_at = nonce_time + chrono::Duration::hours(1);
 
     let user_id = UserId(full_id);
-    let is_new = db::nonces::try_use_nonce(pool, nonce_key, user_id.as_str()).await?;
+    let is_new = db::nonces::try_use_nonce(
+        pool,
+        NonceType::Auth,
+        nonce_key,
+        user_id.as_str(),
+        expires_at,
+    )
+    .await?;
     if !is_new {
         return Err(AppError::Unauthorized("nonce already used".into()));
     }

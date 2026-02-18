@@ -1,5 +1,6 @@
 use pgp::composed::*;
-use pgp::types::{KeyDetails, PublicKeyTrait};
+use pgp::packet::{Packet, PacketParser, Signature};
+use pgp::types::{KeyDetails, PublicKeyTrait, SignedUser, SignedUserAttribute, Tag};
 
 use crate::error::XryptonError;
 
@@ -169,7 +170,6 @@ pub fn extract_issuer_key_id_from_bytes(data: &[u8]) -> Result<String, XryptonEr
 ///
 /// CompressedData パケットがあれば展開してから内部パケットを走査する。
 pub fn extract_issuer_fingerprint_from_bytes(data: &[u8]) -> Result<String, XryptonError> {
-    use pgp::packet::{Packet, PacketParser};
     use std::io::{BufReader, Read};
 
     let parser = PacketParser::new(BufReader::new(data));
@@ -198,6 +198,95 @@ pub fn extract_issuer_fingerprint_from_bytes(data: &[u8]) -> Result<String, Xryp
     Err(XryptonError::Verification(
         "no issuer fingerprint found in message".into(),
     ))
+}
+
+#[derive(Debug, Clone)]
+pub struct CertificationSignatureInfo {
+    pub issuer_fingerprint: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub is_certification: bool,
+}
+
+fn first_signature_from_bytes(data: &[u8]) -> Result<Signature, XryptonError> {
+    use std::io::{BufReader, Read};
+
+    let parser = PacketParser::new(BufReader::new(data));
+    for result in parser.flatten() {
+        match result {
+            Packet::Signature(sig) => return Ok(sig),
+            Packet::CompressedData(cd) => {
+                let mut decompressed = Vec::new();
+                cd.decompress()
+                    .map_err(|e| XryptonError::Verification(format!("decompress failed: {e}")))?
+                    .read_to_end(&mut decompressed)
+                    .map_err(|e| {
+                        XryptonError::Verification(format!("decompress read failed: {e}"))
+                    })?;
+                return first_signature_from_bytes(&decompressed);
+            }
+            _ => {}
+        }
+    }
+
+    Err(XryptonError::Verification(
+        "no signature packet found".into(),
+    ))
+}
+
+pub fn parse_certification_signature_info_from_bytes(
+    data: &[u8],
+) -> Result<CertificationSignatureInfo, XryptonError> {
+    let sig = first_signature_from_bytes(data)?;
+    let issuer_fingerprint = sig
+        .issuer_fingerprint()
+        .first()
+        .map(|fp| format!("{fp:X}"))
+        .ok_or_else(|| XryptonError::Verification("missing issuer fingerprint".into()))?;
+    let created_at = *sig
+        .created()
+        .ok_or_else(|| XryptonError::Verification("missing signature creation time".into()))?;
+
+    Ok(CertificationSignatureInfo {
+        issuer_fingerprint,
+        created_at,
+        is_certification: sig.is_certification(),
+    })
+}
+
+fn verify_against_users(
+    sig: &Signature,
+    target_key: &SignedPublicKey,
+    signer_key: &SignedPublicKey,
+) -> bool {
+    let verify_user = |u: &SignedUser| {
+        sig.verify_third_party_certification(target_key, signer_key, Tag::UserId, &u.id)
+            .is_ok()
+    };
+    let verify_attr = |a: &SignedUserAttribute| {
+        sig.verify_third_party_certification(target_key, signer_key, Tag::UserAttribute, &a.attr)
+            .is_ok()
+    };
+
+    target_key.details.users.iter().any(verify_user)
+        || target_key.details.user_attributes.iter().any(verify_attr)
+}
+
+pub fn verify_certification_signature_for_target(
+    signer_public_key: &str,
+    target_public_key: &str,
+    signature_bytes: &[u8],
+) -> Result<bool, XryptonError> {
+    let (signer_key, _) = SignedPublicKey::from_string(signer_public_key)
+        .map_err(|e| XryptonError::KeyFormat(e.to_string()))?;
+    let (target_key, _) = SignedPublicKey::from_string(target_public_key)
+        .map_err(|e| XryptonError::KeyFormat(e.to_string()))?;
+
+    let sig = first_signature_from_bytes(signature_bytes)?;
+    if !sig.is_certification() {
+        return Ok(false);
+    }
+
+    Ok(verify_against_users(&sig, &target_key, &signer_key))
 }
 
 /// Server-side public key holder for signature verification.

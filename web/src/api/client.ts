@@ -9,6 +9,46 @@ import {
   XLinkAccountResponse,
 } from "@/utils/schema";
 
+export type WotNode = {
+  fingerprint: string;
+  user_id: string | null;
+  revoked: boolean;
+};
+
+export type WotEdge = {
+  signature_id: string;
+  from_fingerprint: string;
+  to_fingerprint: string;
+  signature_b64: string;
+  signature_hash: string;
+  received_at: string;
+  revoked: boolean;
+};
+
+export type WotGraphResponse = {
+  root_fingerprint: string;
+  query: {
+    max_depth: number;
+    max_nodes: number;
+    max_edges: number;
+    direction: "inbound" | "outbound" | "both";
+  };
+  nodes: WotNode[];
+  edges: WotEdge[];
+  meta: {
+    server_time: string;
+    truncated: boolean;
+    next_cursor: string | null;
+    limits_applied: {
+      depth_capped: boolean;
+      node_capped: boolean;
+      edge_capped: boolean;
+      time_budget_ms: number;
+    };
+    data_freshness_sec: number;
+  };
+};
+
 export class ApiError extends Error {
   readonly status: number;
   readonly errorMessage: string;
@@ -37,8 +77,9 @@ async function apiFetch(
   path: string,
   options: RequestInit = {},
   auth?: { signedMessage: string },
+  baseUrlOverride?: string,
 ): Promise<Response> {
-  const baseUrl = getApiBaseUrl();
+  const baseUrl = baseUrlOverride ?? getApiBaseUrl();
 
   const headers = new Headers(options.headers);
   if (auth) {
@@ -52,10 +93,11 @@ async function apiFetch(
     headers.set("Content-Type", "application/json");
   }
 
-  // 相対パスの場合はそのまま連結、絶対URLの場合はURL constructorを使用
-  const url = baseUrl.startsWith("/")
-    ? `${baseUrl}${path}`
-    : new URL(path, baseUrl).toString();
+  // baseUrlにパスプレフィクスが含まれる場合を考慮し、単純連結でURLを構築する。
+  const normalizedBaseUrl = baseUrl.endsWith("/")
+    ? baseUrl.slice(0, -1)
+    : baseUrl;
+  const url = `${normalizedBaseUrl}${path}`;
 
   const resp = await fetch(url, {
     ...options,
@@ -106,6 +148,20 @@ export function apiClient() {
       getKeys: async (userId: string) => {
         const resp = await apiFetch(
           `/v1/user/${encodeURIComponent(userId)}/keys`,
+        );
+        return resp.json();
+      },
+    },
+    wot: {
+      getKeyByFingerprint: async (
+        fingerprint: string,
+        baseUrlOverride?: string,
+      ) => {
+        const resp = await apiFetch(
+          `/v1/keys/${encodeURIComponent(fingerprint)}`,
+          {},
+          undefined,
+          baseUrlOverride,
         );
         return resp.json();
       },
@@ -390,6 +446,51 @@ export function authApiClient(signedMessage: string) {
           `/v1/contacts/${encodeURIComponent(contactUserId)}`,
           { method: "DELETE" },
           auth,
+        );
+        return resp.json();
+      },
+    },
+    wot: {
+      getSignaturesByFingerprint: async (
+        fingerprint: string,
+        params?: {
+          max_depth?: number;
+          max_nodes?: number;
+          max_edges?: number;
+          direction?: "inbound" | "outbound" | "both";
+        },
+      ): Promise<WotGraphResponse> => {
+        const search = new URLSearchParams();
+        if (params?.max_depth)
+          search.set("max_depth", String(params.max_depth));
+        if (params?.max_nodes)
+          search.set("max_nodes", String(params.max_nodes));
+        if (params?.max_edges)
+          search.set("max_edges", String(params.max_edges));
+        if (params?.direction) search.set("direction", params.direction);
+        const qs = search.toString() ? `?${search}` : "";
+        const resp = await apiFetch(
+          `/v1/keys/${encodeURIComponent(fingerprint)}/signatures${qs}`,
+          {},
+          auth,
+        );
+        return resp.json();
+      },
+      postSignatureByFingerprint: async (
+        fingerprint: string,
+        body: {
+          signature_b64: string;
+          signature_type: "certification";
+          hash_algo: "sha256";
+          qr_nonce: { random: string; time: string };
+        },
+        baseUrlOverride?: string,
+      ) => {
+        const resp = await apiFetch(
+          `/v1/keys/${encodeURIComponent(fingerprint)}/signature`,
+          { method: "POST", body: JSON.stringify(body) },
+          auth,
+          baseUrlOverride,
         );
         return resp.json();
       },

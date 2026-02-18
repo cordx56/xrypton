@@ -277,6 +277,48 @@ pub fn sign_bytes(keys: String, sub_passphrase: &str, data: Vec<u8>) -> Result<J
 }
 
 #[wasm_bindgen]
+pub fn sign_detached(
+    keys: String,
+    sub_passphrase: &str,
+    data: Vec<u8>,
+) -> Result<JsValue, JsValue> {
+    let keys = get_private_keys(keys)?;
+    let sig = keys.sign_detached(sub_passphrase, data).map_err(|e| {
+        ReturnValue::Error {
+            message: e.to_string(),
+        }
+        .to_value()
+    })?;
+    Ok(ReturnValue::Ok {
+        value: vec![ResultData::String { data: sig }],
+    }
+    .to_value())
+}
+
+#[wasm_bindgen]
+pub fn certify_key_bytes(
+    private_key: String,
+    target_public_key: String,
+    sub_passphrase: &str,
+) -> Result<JsValue, JsValue> {
+    let private = get_private_keys(private_key)?;
+    let sig = private
+        .certify_key_bytes(sub_passphrase, &target_public_key)
+        .map_err(|e| {
+            ReturnValue::Error {
+                message: e.to_string(),
+            }
+            .to_value()
+        })?;
+    Ok(ReturnValue::Ok {
+        value: vec![ResultData::Base64 {
+            data: STANDARD.encode(sig),
+        }],
+    }
+    .to_value())
+}
+
+#[wasm_bindgen]
 pub fn verify(public_key: String, armored: &str) -> Result<JsValue, JsValue> {
     let keys = get_public_keys(public_key)?;
     keys.verify(armored).map_err(|e| {

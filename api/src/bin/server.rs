@@ -9,7 +9,6 @@ use xrypton_api::federation::dns::DnsTxtResolver;
 use xrypton_api::routes::build_router;
 use xrypton_api::storage::S3Storage;
 
-const NONCE_RETENTION_DAYS: i64 = 30;
 const NONCE_CLEANUP_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[tokio::main]
@@ -41,20 +40,13 @@ async fn main() {
         let cleanup_pool = pool.clone();
         tokio::spawn(async move {
             loop {
-                match db::nonces::delete_nonces_older_than_days(&cleanup_pool, NONCE_RETENTION_DAYS)
-                    .await
-                {
+                match db::nonces::delete_expired_nonces(&cleanup_pool).await {
                     Ok(deleted) => {
-                        tracing::info!(
-                            deleted,
-                            retention_days = NONCE_RETENTION_DAYS,
-                            "nonce cleanup finished"
-                        );
+                        tracing::info!(deleted, "nonce cleanup finished");
                     }
                     Err(e) => {
                         tracing::warn!(
                             error = %e,
-                            retention_days = NONCE_RETENTION_DAYS,
                             "nonce cleanup failed"
                         );
                     }

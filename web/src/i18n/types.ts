@@ -38,6 +38,7 @@ export type TranslationKeys = {
   "settings.days": string;
   "settings.unlimited": string;
   "settings.push_notifications": string;
+  "settings.push_notifications_note": string;
   "settings.notifications_blocked": string;
   "common.cancel": string;
   "common.ok": string;
@@ -184,6 +185,16 @@ export type TranslationKeys = {
   "x.verifying": string;
   "x.unlink_account": string;
   "profile.external_accounts": string;
+  "wot.trusted_by_contacts": string;
+  "wot.results_truncated": string;
+  "wot.trust_graph": string;
+  "wot.scan_sign": string;
+  "wot.show_qr": string;
+  "wot.confirm_sign_title": string;
+  "wot.confirm_sign_message": string;
+  "wot.confirm_sign_server": string;
+  "wot.confirm_sign_target": string;
+  "wot.confirm_sign_fingerprint_suffix": string;
   "error.x_verification_failed": string;
   "error.x_invalid_url": string;
 };

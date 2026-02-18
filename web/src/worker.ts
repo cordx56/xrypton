@@ -7,6 +7,8 @@ import init, {
   get_private_key_user_ids,
   sign,
   sign_bytes,
+  sign_detached,
+  certify_key_bytes,
   sign_encrypt_sign,
   sign_encrypt_sign_bin,
   unwrap_outer,
@@ -294,6 +296,93 @@ worker.addEventListener("message", async ({ data }) => {
             result.data?.result === "error"
               ? result.data.message
               : "sign_bytes error",
+        },
+      });
+    }
+  } else if (parsed.data.call === "sign_detached") {
+    const payload = Buffer.from(parsed.data.payload, "base64");
+    const result = WasmReturnValue.safeParse(
+      sign_detached(parsed.data.keys, parsed.data.passphrase, payload),
+    );
+    if (
+      result.success === true &&
+      result.data.result === "ok" &&
+      result.data.value[0].type === "string"
+    ) {
+      post({
+        call: "sign_detached",
+        result: {
+          success: true,
+          data: { signature: result.data.value[0].data },
+        },
+      });
+    } else {
+      post({
+        call: "sign_detached",
+        result: {
+          success: false,
+          message:
+            result.data?.result === "error"
+              ? result.data.message
+              : "sign_detached error",
+        },
+      });
+    }
+  } else if (parsed.data.call === "certify_key_bytes") {
+    const result = WasmReturnValue.safeParse(
+      certify_key_bytes(
+        parsed.data.privateKey,
+        parsed.data.targetPublicKey,
+        parsed.data.passphrase,
+      ),
+    );
+    if (
+      result.success === true &&
+      result.data.result === "ok" &&
+      result.data.value[0].type === "base64"
+    ) {
+      post({
+        call: "certify_key_bytes",
+        result: {
+          success: true,
+          data: { data: result.data.value[0].data },
+        },
+      });
+    } else {
+      post({
+        call: "certify_key_bytes",
+        result: {
+          success: false,
+          message:
+            result.data?.result === "error"
+              ? result.data.message
+              : "certify key error",
+        },
+      });
+    }
+  } else if (parsed.data.call === "verify_detached_signature") {
+    const payload = Buffer.from(parsed.data.data, "base64");
+    const result = WasmReturnValue.safeParse(
+      verify_detached_signature(
+        parsed.data.publicKey,
+        parsed.data.signature,
+        payload,
+      ),
+    );
+    if (result.success && result.data.result === "ok") {
+      post({
+        call: "verify_detached_signature",
+        result: { success: true, data: {} },
+      });
+    } else {
+      post({
+        call: "verify_detached_signature",
+        result: {
+          success: false,
+          message:
+            result.data?.result === "error"
+              ? result.data.message
+              : "verify detached signature error",
         },
       });
     }

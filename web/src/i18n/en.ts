@@ -40,6 +40,8 @@ export const en: TranslationKeys = {
   "settings.days": "day(s)",
   "settings.unlimited": "Unlimited",
   "settings.push_notifications": "Enable push notifications",
+  "settings.push_notifications_note":
+    "If push notifications are disabled, real-time message sending and receiving will not be available.",
   "settings.notifications_blocked":
     "Notification permission was not granted. Please allow notifications in your browser settings.",
   "common.cancel": "Cancel",
@@ -209,6 +211,17 @@ export const en: TranslationKeys = {
   "x.verifying": "Verifying...",
   "x.unlink_account": "Unlink",
   "profile.external_accounts": "External Accounts",
+  "wot.trusted_by_contacts": "Your trusted contacts trust this user",
+  "wot.results_truncated": "Some results may have been omitted",
+  "wot.trust_graph": "Trust Graph",
+  "wot.scan_sign": "Scan & Sign (WoT)",
+  "wot.show_qr": "Show WoT QR",
+  "wot.confirm_sign_title": "Confirm WoT Signature",
+  "wot.confirm_sign_message":
+    "Review the destination server and fingerprint suffix before signing.",
+  "wot.confirm_sign_server": "Server URL",
+  "wot.confirm_sign_target": "Target User",
+  "wot.confirm_sign_fingerprint_suffix": "Fingerprint suffix",
   "error.x_verification_failed": "X account verification failed.",
   "error.x_invalid_url": "Invalid X post URL.",
 };

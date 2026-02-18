@@ -40,6 +40,8 @@ export const ja: TranslationKeys = {
   "settings.days": "日",
   "settings.unlimited": "無期限",
   "settings.push_notifications": "プッシュ通知を有効化",
+  "settings.push_notifications_note":
+    "プッシュ通知を利用しない場合、リアルタイムのメッセージ送受信はできません。",
   "settings.notifications_blocked":
     "通知が許可されていません。ブラウザ設定で通知を許可してください。",
   "common.cancel": "キャンセル",
@@ -212,6 +214,18 @@ export const ja: TranslationKeys = {
   "x.verifying": "認証中...",
   "x.unlink_account": "連携解除",
   "profile.external_accounts": "外部アカウント",
+  "wot.trusted_by_contacts":
+    "あなたが信頼するユーザがこのユーザを信頼しています",
+  "wot.results_truncated": "結果の一部が省略されている可能性があります",
+  "wot.trust_graph": "信頼グラフ",
+  "wot.scan_sign": "スキャンして署名 (WoT)",
+  "wot.show_qr": "WoT QRを表示",
+  "wot.confirm_sign_title": "WoT署名の確認",
+  "wot.confirm_sign_message":
+    "署名する前に送信先サーバURLとフィンガープリント末尾を確認してください。",
+  "wot.confirm_sign_server": "サーバURL",
+  "wot.confirm_sign_target": "対象ユーザ",
+  "wot.confirm_sign_fingerprint_suffix": "フィンガープリント末尾",
   "error.x_verification_failed": "Xアカウントの認証に失敗しました。",
   "error.x_invalid_url": "無効なXのポストURLです。",
 };

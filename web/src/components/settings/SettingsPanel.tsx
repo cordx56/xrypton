@@ -200,6 +200,9 @@ const SettingsPanel = () => {
           />
           <span className="text-sm">{t("settings.push_notifications")}</span>
         </label>
+        <p className="text-xs text-muted mt-2">
+          {t("settings.push_notifications_note")}
+        </p>
       </section>
 
       {/* Account */}

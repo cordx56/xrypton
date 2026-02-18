@@ -29,7 +29,7 @@ After confirming your passphrases, you're all set.
 
 ### Setting Up WebAuthn
 
-All critical operations require authentication using a key called WebAuthn.
+All critical operations require authentication using WebAuthn.
 Register it with your browser so that you can perform important operations.
 
 ### Server Registration
@@ -48,7 +48,7 @@ Setting up your profile is important so that others can recognize you.
 
 To set up your profile, click the round icon in the upper right corner.
 Click the "Edit Profile" button to start editing your profile.
-Click the icon to upload your favorite image, and write your display name and bio!
+Click the icon to upload your favorite image, and write your display name and bio.
 
 Your profile is signed with your key, so others can verify that the profile was written by you.
 
@@ -67,7 +67,7 @@ A chat with your own name will appear. Select it, then click "General" in the th
 
 In the message area, type a message at the bottom and send it using the send button on the right.
 
-Your secure notepad is now ready!
+Your secure notepad is now ready.
 
 ### Chat with Others
 
@@ -78,15 +78,15 @@ First, add the person you want to chat with to your contacts.
 1. Click the contacts tab at the bottom of the screen.
 1. Once contacts opens, click the + button at the top of the screen.
 1. In the window that opens, enter the User ID of the person you want to chat with.
-1. Press OK. If the person appears in your contacts, you're all set!
+1. Press OK. If the person appears in your contacts, you're all set.
 
 Once the contact is added, you can start chatting.
 
 1. Select the chat tab at the bottom of the screen.
-1. Click + in the channel list, leave the name blank, and select the person you want to message.
-1. Press OK and you're ready. Try sending a message in the General thread!
+1. Click + in the chat list, leave the name blank, and select the person you want to message.
+1. Press OK and you're ready. Try sending a message in the General thread.
 
 ## Conclusion
 
 That covers all the basic operations.
-Now explore and use Xrypton however you like!
+Now explore and use Xrypton however you like.

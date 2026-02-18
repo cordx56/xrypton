@@ -6103,6 +6103,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "thiserror 2.0.18",
  "tokio",
@@ -6118,6 +6119,7 @@ dependencies = [
 name = "xrypton-common"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "pgp",
  "thiserror 2.0.18",
 ]

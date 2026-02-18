@@ -7,6 +7,7 @@ use crate::AppState;
 use crate::config::AppConfig;
 use crate::db;
 use crate::db::Db;
+use crate::db::nonces::NonceType;
 use crate::error::AppError;
 use crate::federation::dns::DnsTxtResolver;
 use crate::types::UserId;
@@ -59,10 +60,18 @@ pub(crate) async fn authenticate(
             Ok(payload_bytes) => {
                 let payload: AuthPayload = serde_json::from_slice(&payload_bytes)
                     .map_err(|e| AppError::Unauthorized(format!("invalid auth payload: {e}")))?;
-                validate_nonce_timestamp(&payload.nonce)?;
+                let nonce_time = validate_nonce_timestamp(&payload.nonce)?;
                 let nonce_key = payload.nonce.replay_key();
+                let expires_at = nonce_time + chrono::Duration::hours(1);
 
-                let is_new = db::nonces::try_use_nonce(pool, nonce_key, user_id.as_str()).await?;
+                let is_new = db::nonces::try_use_nonce(
+                    pool,
+                    NonceType::Auth,
+                    nonce_key,
+                    user_id.as_str(),
+                    expires_at,
+                )
+                .await?;
                 if !is_new {
                     return Err(AppError::Unauthorized("nonce already used".into()));
                 }
@@ -143,7 +152,9 @@ impl AuthNonce {
 }
 
 /// nonceのISO 8601タイムスタンプが現在時刻から前後1時間以内か検証する。
-pub(crate) fn validate_nonce_timestamp(nonce: &AuthNonce) -> Result<(), AppError> {
+pub(crate) fn validate_nonce_timestamp(
+    nonce: &AuthNonce,
+) -> Result<chrono::DateTime<chrono::Utc>, AppError> {
     let client_time: chrono::DateTime<chrono::Utc> = nonce
         .timestamp()
         .parse()
@@ -154,5 +165,5 @@ pub(crate) fn validate_nonce_timestamp(nonce: &AuthNonce) -> Result<(), AppError
             "nonce timestamp out of range".into(),
         ));
     }
-    Ok(())
+    Ok(client_time)
 }

@@ -4,10 +4,10 @@ Welcome to the Xrypton documentation. Xrypton is an end-to-end encrypted messagi
 
 ## Features
 
-- **End-to-End Encryption** : All messages are signed, encrypted and protected using PGP keys.
+- **End-to-End Encryption** : All messages are signed, encrypted, and protected using PGP keys.
 - **Open Source** : The code is publicly available and free for anyone to use.
-- **Distributed** : Federated architecture with no central authority. You can choose any server you like.
+- **Distributed System** : It is not centralized. Also, users can verify data themselves without trusting any server.
 
 ## Getting Started
 
-Read [Getting Started](/docs/en/getting-started) to start using Xrypton!
+Read [Getting Started](/docs/en/getting-started) to start using Xrypton.
