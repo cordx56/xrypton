@@ -104,26 +104,6 @@ async fn upload_file(
         Ok(())
     };
 
-    // temporary sessionの期限チェック
-    if let Some(thread) = db::threads::get_thread(&state.pool, &thread_id).await?
-        && let Some(ref expires_at) = thread.expires_at
-    {
-        #[cfg(not(feature = "postgres"))]
-        {
-            if let Ok(exp) = expires_at.parse::<chrono::DateTime<chrono::Utc>>()
-                && exp < chrono::Utc::now()
-            {
-                return Err(AppError::Forbidden("this session has expired".into()));
-            }
-        }
-        #[cfg(feature = "postgres")]
-        {
-            if *expires_at < chrono::Utc::now() {
-                return Err(AppError::Forbidden("this session has expired".into()));
-            }
-        }
-    }
-
     let mut metadata_content: Option<String> = None;
     let mut file_data: Option<Vec<u8>> = None;
 

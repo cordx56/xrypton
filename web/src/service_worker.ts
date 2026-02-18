@@ -282,6 +282,29 @@ sw.addEventListener("push", (ev) => {
       );
       break;
     }
+
+    case "realtime_offer": {
+      ev.waitUntil(
+        (async () => {
+          const hasVisible = await forwardToClients(notification);
+          if (!hasVisible) {
+            await sw.registration.showNotification("Real-time Chat", {
+              body: `Real-time chat: ${notification.name}`,
+              data: {
+                chatId: notification.chat_id,
+                type: "realtime",
+              },
+            });
+          }
+        })(),
+      );
+      break;
+    }
+
+    case "realtime_answer": {
+      ev.waitUntil(forwardToClients(notification));
+      break;
+    }
   }
 });
 

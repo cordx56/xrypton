@@ -60,6 +60,23 @@ export const Notification = z.discriminatedUnion("type", [
     name: z.string(),
     recipient_id: z.string().optional(),
   }),
+  z.object({
+    type: z.literal("realtime_offer"),
+    chat_id: z.string(),
+    session_id: z.string(),
+    sender_id: z.string(),
+    name: z.string(),
+    encrypted: z.string(),
+    recipient_id: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("realtime_answer"),
+    chat_id: z.string(),
+    session_id: z.string(),
+    sender_id: z.string(),
+    answer: z.string(),
+    recipient_id: z.string().optional(),
+  }),
 ]);
 
 // --- User ID validation ---
@@ -141,7 +158,6 @@ export const ChatGroup = z.object({
 // POST /v1/chat/{chat_id} (create thread)
 export const CreateThreadRequest = z.object({
   name: z.string(),
-  expires_at: z.string().nullish(),
 });
 
 export const Thread = z.object({
@@ -150,7 +166,6 @@ export const Thread = z.object({
   name: z.string(),
   created_by: z.string().nullable(),
   created_at: z.string(),
-  expires_at: z.string().nullish(),
 });
 
 // POST /v1/chat/{chat_id}/{thread_id}/message

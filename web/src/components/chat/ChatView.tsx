@@ -29,6 +29,7 @@ type Props = {
   onDownloadFile?: (message: Message) => void;
   onLoadMore: () => void;
   onBack: () => void;
+  inputPlaceholder?: string;
 };
 
 const ChatView = ({
@@ -41,6 +42,7 @@ const ChatView = ({
   onDownloadFile,
   onLoadMore,
   onBack,
+  inputPlaceholder,
 }: Props) => {
   const { messages, totalMessages } = useChat();
   const { t } = useI18n();
@@ -188,7 +190,11 @@ const ChatView = ({
         })}
       </div>
 
-      <ChatInput onSend={onSend} onSendFile={onSendFile} />
+      <ChatInput
+        onSend={onSend}
+        onSendFile={onSendFile}
+        placeholder={inputPlaceholder}
+      />
     </div>
   );
 };

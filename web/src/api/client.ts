@@ -251,16 +251,10 @@ export function authApiClient(signedMessage: string) {
         const resp = await apiFetch(`/v1/chat/${chatId}`, {}, auth);
         return resp.json();
       },
-      createThread: async (
-        chatId: string,
-        name: string,
-        expiresAt?: string,
-      ) => {
-        const body: Record<string, string> = { name };
-        if (expiresAt) body.expires_at = expiresAt;
+      createThread: async (chatId: string, name: string) => {
         const resp = await apiFetch(
           `/v1/chat/${chatId}`,
-          { method: "POST", body: JSON.stringify(body) },
+          { method: "POST", body: JSON.stringify({ name }) },
           auth,
         );
         return resp.json();
@@ -283,6 +277,36 @@ export function authApiClient(signedMessage: string) {
       },
       listArchived: async () => {
         const resp = await apiFetch("/v1/chat/archived", {}, auth);
+        return resp.json();
+      },
+    },
+    realtime: {
+      start: async (
+        chatId: string,
+        name: string,
+        encrypted: Record<string, string>,
+      ) => {
+        const resp = await apiFetch(
+          `/v1/chat/${chatId}/realtime`,
+          { method: "POST", body: JSON.stringify({ name, encrypted }) },
+          auth,
+        );
+        return resp.json();
+      },
+      answer: async (
+        chatId: string,
+        sessionId: string,
+        toUserId: string,
+        answer: string,
+      ) => {
+        const resp = await apiFetch(
+          `/v1/chat/${chatId}/realtime/${sessionId}/answer`,
+          {
+            method: "POST",
+            body: JSON.stringify({ to_user_id: toUserId, answer }),
+          },
+          auth,
+        );
         return resp.json();
       },
     },

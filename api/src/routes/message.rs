@@ -178,26 +178,6 @@ async fn post_message(
         .verify_and_extract(&body.content)
         .map_err(|e| AppError::BadRequest(format!("content signature invalid: {e}")))?;
 
-    // temporary sessionの期限チェック
-    if let Some(thread) = db::threads::get_thread(&state.pool, &thread_id).await?
-        && let Some(ref expires_at) = thread.expires_at
-    {
-        #[cfg(not(feature = "postgres"))]
-        {
-            if let Ok(exp) = expires_at.parse::<chrono::DateTime<chrono::Utc>>()
-                && exp < chrono::Utc::now()
-            {
-                return Err(AppError::Forbidden("this session has expired".into()));
-            }
-        }
-        #[cfg(feature = "postgres")]
-        {
-            if *expires_at < chrono::Utc::now() {
-                return Err(AppError::Forbidden("this session has expired".into()));
-            }
-        }
-    }
-
     let message_id = MessageId::new_v4();
     db::messages::create_message(
         &state.pool,
@@ -275,7 +255,6 @@ async fn post_message(
 #[derive(Deserialize, Serialize)]
 struct CreateThreadBody {
     name: String,
-    expires_at: Option<String>,
 }
 
 async fn create_thread(
@@ -318,26 +297,9 @@ async fn create_thread(
         return Ok(Json(resp_body));
     }
 
-    // expires_atをTimestamp型に変換
-    #[cfg(not(feature = "postgres"))]
-    let expires_at = body.expires_at.clone();
-    #[cfg(feature = "postgres")]
-    let expires_at = body.expires_at.as_deref().and_then(|s| {
-        chrono::DateTime::parse_from_rfc3339(s)
-            .ok()
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-    });
-
     let thread_id = ThreadId::new_v4();
-    db::threads::create_thread(
-        &state.pool,
-        &thread_id,
-        &chat_id,
-        &body.name,
-        &auth.user_id,
-        expires_at.as_ref(),
-    )
-    .await?;
+    db::threads::create_thread(&state.pool, &thread_id, &chat_id, &body.name, &auth.user_id)
+        .await?;
 
     // グループメンバー（作成者除く）にPush通知を送信
     let pool = state.pool.clone();
@@ -373,7 +335,6 @@ async fn create_thread(
         "id": thread_id.as_str(),
         "chat_id": chat_id.as_str(),
         "name": body.name,
-        "expires_at": body.expires_at,
     })))
 }
 

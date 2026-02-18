@@ -98,11 +98,6 @@ export type TranslationKeys = {
   "chat.show_archived": string;
   "chat.no_archived_channels": string;
   "chat.no_archived_threads": string;
-  "chat.temporary_session": string;
-  "chat.expires_at": string;
-  "chat.session_expired": string;
-  "chat.waiting_keys": string;
-  "chat.pending_messages": string;
   "landing.tagline": string;
   "landing.get_started": string;
   "landing.docs": string;
@@ -172,6 +167,13 @@ export type TranslationKeys = {
   "error.atproto_post_failed": string;
   "error.atproto_sign_failed": string;
   "error.atproto_did_already_linked": string;
+  "realtime.session": string;
+  "realtime.start": string;
+  "realtime.start_desc": string;
+  "realtime.leave": string;
+  "realtime.active": string;
+  "realtime.placeholder": string;
+  "error.realtime_connection_failed": string;
 };
 
 export type Locale = "en" | "ja";

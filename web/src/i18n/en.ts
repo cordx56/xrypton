@@ -103,11 +103,6 @@ export const en: TranslationKeys = {
   "chat.show_archived": "Show Archived",
   "chat.no_archived_channels": "No archived channels",
   "chat.no_archived_threads": "No archived threads",
-  "chat.temporary_session": "Temporary Session",
-  "chat.expires_at": "Expires at",
-  "chat.session_expired": "This session has expired",
-  "chat.waiting_keys": "Waiting for members to join...",
-  "chat.pending_messages": "Messages will be sent when all members join",
   "landing.tagline": "Secure messaging with end-to-end encryption",
   "landing.get_started": "Get Started",
   "landing.docs": "Docs",
@@ -193,4 +188,13 @@ export const en: TranslationKeys = {
     "Post was created but PGP signature failed. You can retry signing later.",
   "error.atproto_did_already_linked":
     "This DID is already linked to another account.",
+  "realtime.session": "Real-time Session",
+  "realtime.start": "Start Real-time Chat",
+  "realtime.start_desc":
+    "Messages are sent directly between participants and won't be stored on the server.",
+  "realtime.leave": "Leave",
+  "realtime.active": "Real-time chat active",
+  "realtime.placeholder": "Type a real-time message...",
+  "error.realtime_connection_failed":
+    "Failed to establish real-time connection.",
 };

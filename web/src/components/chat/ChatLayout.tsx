@@ -18,7 +18,6 @@ import {
   base64ToBytes,
 } from "@/utils/base64";
 import {
-  isFileMessage,
   parseFileMetadata,
   buildFileMessageContent,
   isImageType,
@@ -34,20 +33,10 @@ import Avatar from "@/components/common/Avatar";
 import Dialog from "@/components/common/Dialog";
 import { useNotification } from "@/contexts/NotificationContext";
 import ChannelInfo from "./ChannelInfo";
-import {
-  getTempKeys,
-  setTempKeys,
-  getTempPubKeys,
-  setTempPubKeys,
-  getPendingMessages,
-  setPendingMessages,
-  clearPendingMessages,
-} from "@/utils/tempSessionStore";
 import { usePublicKeyResolver } from "@/hooks/usePublicKeyResolver";
+import { useRealtime } from "@/contexts/RealtimeContext";
 import type { ChatGroup, Thread, Message } from "@/types/chat";
 import type { Contact } from "@/types/contact";
-
-const TEMP_SESSION_KEY_PREFIX = "TEMP_SESSION_KEY:";
 
 type Props = {
   chatId?: string;
@@ -238,7 +227,9 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const { showError } = useErrorToast();
   const { resolveKeys, refreshKeys, resolveDisplayName } =
     usePublicKeyResolver();
+  const realtime = useRealtime();
   const [loading, setLoading] = useState(false);
+  const [realtimeFocused, setRealtimeFocused] = useState(false);
   const [selectedGroupName, setSelectedGroupName] = useState("");
   const [selectedThreadName, setSelectedThreadName] = useState("");
   const [archivedGroups, setArchivedGroups] = useState<ChatGroup[]>([]);
@@ -252,6 +243,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const knownPublicKeys = useRef<PublicKeyMap>({});
   // メンバー暗号化公開鍵のキャッシュ（暗号化用、グループ選択時に取得）
   const encryptionPublicKeys = useRef<string[]>([]);
+  const encryptionPublicKeyByUser = useRef<Record<string, string>>({});
   // primary_key_fingerprint → user_id の逆引きマップ
   const fingerprintToUserId = useRef<Record<string, string>>({});
   // リトライ済みメッセージの追跡（重複防止）
@@ -300,16 +292,14 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     type: string;
     chat_id?: string;
     thread_id?: string;
+    session_id?: string;
     name?: string;
     sender_id?: string;
     sender_name?: string;
     encrypted?: string;
+    answer?: string;
     is_self?: boolean;
   }) => {
-    const signed = await auth.getSignedMessage();
-    if (!signed) return;
-    const client = authApiClient(signed.signedMessage);
-
     switch (data.type) {
       case "message": {
         // 自己メッセージの場合、送信側の楽観的追加で処理するため
@@ -416,20 +406,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
             );
             const rawMessages: Message[] = msgData.messages ?? [];
             chat.setTotalMessages(msgData.total ?? 0);
-            const decrypted = await mergeAndDecryptNewMessages(rawMessages);
-
-            // temp session: 新しい鍵交換メッセージがあるか確認し、保留メッセージを送信
-            const thread = chat.threads.find((t) => t.id === currentThreadId);
-            if (thread?.expires_at) {
-              const memberCount =
-                Object.keys(memberProfilesRef.current).length || 1;
-              await collectTempKeysAndFlush(
-                currentChatId,
-                currentThreadId,
-                decrypted,
-                memberCount,
-              );
-            }
+            await mergeAndDecryptNewMessages(rawMessages);
           } catch {
             // failed to refresh messages
           }
@@ -438,6 +415,9 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       }
       case "added_to_group": {
         try {
+          const signed = await auth.getSignedMessage();
+          if (!signed) break;
+          const client = authApiClient(signed.signedMessage);
           const groups = await client.chat.list();
           chat.setGroups(groups);
         } catch {
@@ -449,11 +429,71 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
         const currentChatId = chatIdRef.current;
         if (currentChatId && data.chat_id && currentChatId === data.chat_id) {
           try {
+            const signed = await auth.getSignedMessage();
+            if (!signed) break;
+            const client = authApiClient(signed.signedMessage);
             const detail = await client.chat.get(data.chat_id);
             chat.setThreads(detail.threads ?? []);
           } catch {
             // failed to refresh threads
           }
+        }
+        break;
+      }
+      case "realtime_offer": {
+        if (
+          !data.encrypted ||
+          !data.session_id ||
+          !data.sender_id ||
+          !data.name
+        )
+          break;
+        // 暗号化データを復号して SDP + 一時公開鍵を取得
+        if (auth.worker && auth.privateKeys && auth.subPassphrase) {
+          try {
+            const decrypted = await new Promise<string>((resolve, reject) => {
+              auth.worker!.eventWaiter("decrypt", (result: any) => {
+                if (result.success) {
+                  resolve(decodeBase64Url(result.data.payload));
+                } else {
+                  reject(new Error(result.message));
+                }
+              });
+              auth.worker!.postMessage({
+                call: "decrypt",
+                passphrase: auth.subPassphrase!,
+                privateKeys: auth.privateKeys!,
+                knownPublicKeys: knownPublicKeys.current,
+                message: data.encrypted!,
+              });
+            });
+            const parsed = JSON.parse(decrypted);
+            realtime.addPendingSession({
+              sessionId: data.session_id!,
+              chatId: data.chat_id ?? "",
+              name: data.name!,
+              createdBy: data.sender_id!,
+              offer: {
+                sdp: parsed.sdp,
+                publicKey: parsed.publicKey,
+              },
+            });
+          } catch {
+            // 復号失敗
+          }
+        }
+        break;
+      }
+      case "realtime_answer": {
+        if (!data.session_id || !data.sender_id || !data.answer) break;
+        try {
+          await realtime.handleIncomingAnswer(
+            data.session_id,
+            data.sender_id,
+            data.answer,
+          );
+        } catch {
+          // answer適用失敗
         }
         break;
       }
@@ -529,6 +569,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
 
       const pubKeys: PublicKeyMap = {};
       const encPubKeys: string[] = [];
+      const encPubKeyMap: Record<string, string> = {};
       const fingerprintMap: Record<string, string> = {};
       const profiles: Record<string, MemberProfile> = {};
       for (const member of data.members ?? []) {
@@ -541,6 +582,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
               publicKeys: resolved.signing_public_key,
             };
             encPubKeys.push(resolved.encryption_public_key);
+            encPubKeyMap[member.user_id] = resolved.encryption_public_key;
             fingerprintMap[resolved.primary_key_fingerprint] = member.user_id;
             signingKey = resolved.signing_public_key;
           }
@@ -572,6 +614,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       }
       knownPublicKeys.current = pubKeys;
       encryptionPublicKeys.current = encPubKeys;
+      encryptionPublicKeyByUser.current = encPubKeyMap;
       fingerprintToUserId.current = fingerprintMap;
       setMemberProfiles(profiles);
     },
@@ -604,17 +647,6 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
         const data = await client.message.list(chatId, threadId);
         chat.setTotalMessages(data.total ?? 0);
 
-        // temp session: 鍵がなければ生成して鍵交換メッセージを送信
-        if (thread?.expires_at) {
-          if (!getTempKeys(threadId)) {
-            try {
-              await generateAndSendTempKey(chatId, threadId);
-            } catch {
-              // 鍵生成失敗
-            }
-          }
-        }
-
         // 暗号化状態のメッセージを即座に表示し、プログレッシブに復号
         const rawMessages: Message[] = data.messages ?? [];
         chat.setMessages(rawMessages.map((m) => ({ ...m, encrypted: true })));
@@ -624,21 +656,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
         await groupDetailReady.current;
 
         const version = ++decryptVersionRef.current;
-        const decrypted = await decryptMessagesProgressively(
-          rawMessages,
-          version,
-        );
-
-        // temp session: メッセージから鍵交換情報を収集し、保留メッセージを送信
-        if (thread?.expires_at) {
-          const memberCount = Object.keys(memberProfiles).length || 1;
-          await collectTempKeysAndFlush(
-            chatId,
-            threadId,
-            decrypted,
-            memberCount,
-          );
-        }
+        await decryptMessagesProgressively(rawMessages, version);
       } catch {
         showError(t("error.message_load_failed"));
       } finally {
@@ -646,6 +664,38 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       }
     })();
   }, [chatId, threadId]);
+
+  useEffect(() => {
+    const current = realtime.activeSession;
+    const isRealtimeView =
+      !!chatId && !threadId && current?.chatId === chatId && realtimeFocused;
+    if (!isRealtimeView || !auth.userId) return;
+    const currentUserId = auth.userId;
+
+    setSelectedThreadName(current.name);
+    const mapped: Message[] = realtime.realtimeMessages.map((m) => ({
+      id: m.id,
+      thread_id: "",
+      sender_id: m.senderId === "self" ? currentUserId : m.senderId,
+      content: m.content,
+      created_at: new Date(m.timestamp).toISOString(),
+    }));
+    chat.setMessages(mapped);
+    chat.setTotalMessages(mapped.length);
+  }, [
+    auth.userId,
+    chatId,
+    realtime.activeSession,
+    realtime.realtimeMessages,
+    realtimeFocused,
+    threadId,
+  ]);
+
+  useEffect(() => {
+    if (!realtime.activeSession) {
+      setRealtimeFocused(false);
+    }
+  }, [realtime.activeSession]);
 
   // アーカイブ済みグループを取得
   const fetchArchivedGroups = useCallback(async () => {
@@ -746,6 +796,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   // グループ選択
   const selectGroup = useCallback(
     (group: ChatGroup) => {
+      setRealtimeFocused(false);
       setSelectedGroupName(group.name || group.id);
       chat.markGroupRead(group.id);
       router.push(`/chat/${group.id}`);
@@ -757,19 +808,13 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const selectThread = useCallback(
     (thread: Thread) => {
       if (!chatId) return;
+      setRealtimeFocused(false);
       setSelectedThreadName(thread.name || thread.id);
       chat.markThreadRead(thread.id);
       router.push(`/chat/${chatId}/${thread.id}`);
     },
     [chatId, router, chat.markThreadRead],
   );
-
-  // 現在のスレッドがtemp sessionかどうかを判定
-  const isTempSession = (tid?: string): boolean => {
-    if (!tid) return false;
-    const thread = chat.threads.find((t) => t.id === tid);
-    return !!thread?.expires_at;
-  };
 
   // Worker経由で1件復号するヘルパー
   const workerDecrypt = (
@@ -795,14 +840,10 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     });
 
   // 1件のメッセージを復号し、結果を返す
-  // isKeyExchange=true の場合は鍵交換メッセージなので表示から除外する
   const decryptOne = async (
     msg: Message,
-    tempSession: boolean,
-    tempKeys: { privateKey: string; passphrase: string } | null,
   ): Promise<{
     content: string;
-    isKeyExchange: boolean;
     failed: boolean;
     errorMessage?: string;
   }> => {
@@ -812,52 +853,10 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
         auth.privateKeys!,
         auth.subPassphrase!,
       );
-      if (decrypted.startsWith(TEMP_SESSION_KEY_PREFIX)) {
-        return { content: decrypted, isKeyExchange: true, failed: false };
-      }
-      // temp sessionの場合、一時鍵で再復号を試みる
-      if (tempSession && tempKeys) {
-        try {
-          const tempDecrypted = await workerDecrypt(
-            msg.content,
-            tempKeys.privateKey,
-            tempKeys.passphrase,
-          );
-          return {
-            content: tempDecrypted,
-            isKeyExchange: false,
-            failed: false,
-          };
-        } catch {
-          // 一時鍵での復号失敗時は通常の復号結果を使用
-        }
-      }
-      return { content: decrypted, isKeyExchange: false, failed: false };
+      return { content: decrypted, failed: false };
     } catch (e) {
-      // 通常の復号にも失敗した場合、temp sessionなら一時鍵で直接試みる
-      if (tempSession && tempKeys) {
-        try {
-          const tempDecrypted = await workerDecrypt(
-            msg.content,
-            tempKeys.privateKey,
-            tempKeys.passphrase,
-          );
-          return {
-            content: tempDecrypted,
-            isKeyExchange: tempDecrypted.startsWith(TEMP_SESSION_KEY_PREFIX),
-            failed: false,
-          };
-        } catch {
-          // 一時鍵でも復号失敗
-        }
-      }
       const errorMessage = e instanceof Error ? e.message : undefined;
-      return {
-        content: msg.content,
-        isKeyExchange: false,
-        failed: true,
-        errorMessage,
-      };
+      return { content: msg.content, failed: true, errorMessage };
     }
   };
 
@@ -903,11 +902,8 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const handleKeyRefreshAndRetry = async (
     msg: Message,
     errorMessage: string | undefined,
-    tempSession: boolean,
-    tempKeys: { privateKey: string; passphrase: string } | null,
   ): Promise<{
     content: string;
-    isKeyExchange: boolean;
     failed: boolean;
     errorMessage?: string;
   } | null> => {
@@ -930,7 +926,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       }
 
       // 更新された鍵でリトライ
-      return await decryptOne(msg, tempSession, tempKeys);
+      return await decryptOne(msg);
     } finally {
       retryingMessages.current.delete(msg.id);
     }
@@ -947,10 +943,6 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       return messages;
     }
 
-    const currentThreadId = threadId;
-    const tempSession = isTempSession(currentThreadId);
-    const tempKeys = currentThreadId ? getTempKeys(currentThreadId) : null;
-
     const allDecrypted: Message[] = [];
 
     // 最新のメッセージから順に復号
@@ -958,25 +950,20 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       if (decryptVersionRef.current !== version) return allDecrypted;
 
       const msg = messages[i];
-      let result = await decryptOne(msg, tempSession, tempKeys);
+      let result = await decryptOne(msg);
 
       // 鍵関連エラーの場合、鍵を再取得してリトライ
       if (result.failed && isKeyRelatedError(result.errorMessage)) {
         const retryResult = await handleKeyRefreshAndRetry(
           msg,
           result.errorMessage,
-          tempSession,
-          tempKeys,
         );
         if (retryResult) result = retryResult;
       }
 
       if (decryptVersionRef.current !== version) return allDecrypted;
 
-      if (result.isKeyExchange) {
-        allDecrypted.push({ ...msg, content: result.content });
-        chat.setMessages((prev) => prev.filter((m) => m.id !== msg.id));
-      } else {
+      {
         const fileMeta = !result.failed
           ? parseFileMetadata(result.content)
           : null;
@@ -1018,48 +1005,38 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     });
     if (!auth.worker || !auth.privateKeys || !auth.subPassphrase) return [];
 
-    const currentThreadId = threadIdRef.current;
-    const tempSession = isTempSession(currentThreadId);
-    const tempKeys = currentThreadId ? getTempKeys(currentThreadId) : null;
     const allDecrypted: Message[] = [];
 
     for (const msg of newRawMessages) {
       try {
-        let result = await decryptOne(msg, tempSession, tempKeys);
+        let result = await decryptOne(msg);
 
         // 鍵関連エラーの場合、鍵を再取得してリトライ
         if (result.failed && isKeyRelatedError(result.errorMessage)) {
           const retryResult = await handleKeyRefreshAndRetry(
             msg,
             result.errorMessage,
-            tempSession,
-            tempKeys,
           );
           if (retryResult) result = retryResult;
         }
 
-        if (result.isKeyExchange) {
-          allDecrypted.push({ ...msg, content: result.content });
-          chat.setMessages((prev) => prev.filter((m) => m.id !== msg.id));
-        } else {
-          const fileMeta = !result.failed
-            ? parseFileMetadata(result.content)
-            : null;
-          const updated: Message = {
-            ...msg,
-            content: result.content,
-            encrypted: undefined,
-            decryptFailed: result.failed || undefined,
-            fileMetadata: fileMeta ?? undefined,
-          };
-          allDecrypted.push(updated);
-          chat.setMessages((prev) =>
-            prev.map((m) => (m.id === msg.id ? updated : m)),
-          );
-          // 画像ファイルの場合は自動ダウンロード
-          if (fileMeta && isImageType(fileMeta.type) && msg.file_id) {
-            loadImagePreview(updated);
-          }
+        const fileMeta = !result.failed
+          ? parseFileMetadata(result.content)
+          : null;
+        const updated: Message = {
+          ...msg,
+          content: result.content,
+          encrypted: undefined,
+          decryptFailed: result.failed || undefined,
+          fileMetadata: fileMeta ?? undefined,
+        };
+        allDecrypted.push(updated);
+        chat.setMessages((prev) =>
+          prev.map((m) => (m.id === msg.id ? updated : m)),
+        );
+        // 画像ファイルの場合は自動ダウンロード
+        if (fileMeta && isImageType(fileMeta.type) && msg.file_id) {
+          loadImagePreview(updated);
         }
       } catch {
         chat.setMessages((prev) =>
@@ -1078,137 +1055,38 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     pushDialog(NewGroupDialog);
   };
 
-  // temp session用: PGP鍵を生成して鍵交換メッセージを送信
-  const generateAndSendTempKey = async (
-    targetChatId: string,
-    targetThreadId: string,
-  ) => {
-    if (!auth.worker) return;
-    const signed = await auth.getSignedMessage();
-    if (!signed) return;
-
-    const passphrase = crypto.randomUUID();
-    const userId = signed.userId;
-
-    // Worker経由でPGP鍵を生成
-    const keys = await new Promise<string>((resolve, reject) => {
-      auth.worker!.eventWaiter("generate", (result) => {
-        if (result.success) resolve(result.data.keys);
-        else reject(new Error(result.message));
-      });
-      auth.worker!.postMessage({
-        call: "generate",
-        userId,
-        mainPassphrase: passphrase,
-        subPassphrase: passphrase,
-      });
-    });
-
-    // 公開鍵をエクスポート
-    const publicKey = await new Promise<string>((resolve, reject) => {
-      auth.worker!.eventWaiter("export_public_keys", (result) => {
-        if (result.success) resolve(result.data.keys);
-        else reject(new Error(result.message));
-      });
-      auth.worker!.postMessage({
-        call: "export_public_keys",
-        keys,
-      });
-    });
-
-    // sessionStorageに保存
-    setTempKeys(targetThreadId, { privateKey: keys, passphrase });
-
-    // 鍵交換メッセージを送信（通常の暗号化で）
-    const client = authApiClient(signed.signedMessage);
-    const keyMsg = `${TEMP_SESSION_KEY_PREFIX}${publicKey}`;
-
-    if (
-      auth.privateKeys &&
-      auth.subPassphrase &&
-      encryptionPublicKeys.current.length > 0
-    ) {
-      const plainBase64 = encodeToBase64(keyMsg);
-      const encrypted = await new Promise<string>((resolve, reject) => {
-        auth.worker!.eventWaiter("encrypt", (result) => {
-          if (result.success) resolve(result.data.message);
-          else reject(new Error(result.message));
-        });
-        auth.worker!.postMessage({
-          call: "encrypt",
-          passphrase: auth.subPassphrase!,
-          privateKeys: auth.privateKeys!,
-          publicKeys: encryptionPublicKeys.current,
-          payload: plainBase64,
-        });
-      });
-      await client.message.send(targetChatId, targetThreadId, encrypted);
-    }
-  };
-
-  // temp sessionメッセージから鍵交換メッセージを収集し、保留メッセージを送信
-  const collectTempKeysAndFlush = async (
-    targetChatId: string,
-    targetThreadId: string,
-    messages: Message[],
-    memberCount: number,
-  ) => {
-    const pubKeys: Record<string, string> =
-      getTempPubKeys(targetThreadId) ?? {};
-
-    // TEMP_SESSION_KEY:プレフィックスのメッセージから公開鍵を収集
-    for (const msg of messages) {
-      if (msg.content.startsWith(TEMP_SESSION_KEY_PREFIX) && msg.sender_id) {
-        pubKeys[msg.sender_id] = msg.content.slice(
-          TEMP_SESSION_KEY_PREFIX.length,
-        );
+  const handleJoinRealtime = useCallback(
+    async (sessionId: string) => {
+      if (realtime.activeSession?.sessionId === sessionId) {
+        setRealtimeFocused(true);
+        return;
       }
-    }
+      await realtime.joinSession(sessionId);
+      setRealtimeFocused(true);
+    },
+    [realtime.activeSession, realtime.joinSession],
+  );
 
-    setTempPubKeys(targetThreadId, pubKeys);
-
-    // 全メンバーの公開鍵が揃った場合、保留メッセージを送信
-    if (Object.keys(pubKeys).length >= memberCount) {
-      const pending = getPendingMessages(targetThreadId);
-      if (pending.length > 0 && auth.worker) {
-        const tempKeys = getTempKeys(targetThreadId);
-        if (!tempKeys) return;
-
-        const signed = await auth.getSignedMessage();
-        if (!signed) return;
-        const client = authApiClient(signed.signedMessage);
-        const allPubKeys = Object.values(pubKeys);
-
-        for (const text of pending) {
-          try {
-            const plainBase64 = encodeToBase64(text);
-            const encrypted = await new Promise<string>((resolve, reject) => {
-              auth.worker!.eventWaiter("encrypt", (result) => {
-                if (result.success) resolve(result.data.message);
-                else reject(new Error(result.message));
-              });
-              auth.worker!.postMessage({
-                call: "encrypt",
-                passphrase: auth.subPassphrase!,
-                privateKeys: auth.privateKeys!,
-                publicKeys: allPubKeys,
-                payload: plainBase64,
-              });
-            });
-            await client.message.send(targetChatId, targetThreadId, encrypted);
-          } catch {
-            // 送信失敗した保留メッセージはスキップ
-          }
-        }
-        clearPendingMessages(targetThreadId);
+  const handleLeaveRealtime = useCallback(
+    (sessionId: string) => {
+      if (realtime.activeSession?.sessionId === sessionId) {
+        realtime.leaveSession();
+        setRealtimeFocused(false);
+      } else {
+        realtime.removePendingSession(sessionId);
       }
-    }
-  };
+    },
+    [
+      realtime.activeSession,
+      realtime.leaveSession,
+      realtime.removePendingSession,
+    ],
+  );
 
   const handleNewThread = () => {
     pushDialog((p) => {
-      const [isTempSession, setIsTempSession] = useState(false);
       const [threadName, setThreadName] = useState("");
+      const [isRealtimeSession, setIsRealtimeSession] = useState(false);
       return (
         <Dialog {...p} title={t("chat.new_thread")}>
           <form
@@ -1218,48 +1096,47 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
               const name = fd.get("name") as string;
               if (!name || !chatId) return;
 
-              const expiresAt = isTempSession
-                ? (fd.get("expires_at") as string)
-                : undefined;
-              // temp sessionの場合、終了時刻が必須
-              if (isTempSession && !expiresAt) return;
-
-              // ISO 8601形式に変換（datetime-localはローカル時刻）
-              const expiresAtIso = expiresAt
-                ? new Date(expiresAt).toISOString()
-                : undefined;
-
-              const signed = await auth.getSignedMessage();
-              if (!signed) return;
-              try {
-                const client = authApiClient(signed.signedMessage);
-                const result = await client.chat.createThread(
-                  chatId,
-                  name,
-                  expiresAtIso,
-                );
-                const newThread: Thread = {
-                  id: result.id,
-                  chat_id: result.chat_id ?? chatId,
-                  name,
-                  created_by: signed.userId,
-                  created_at: new Date().toISOString(),
-                  expires_at: expiresAtIso,
-                };
-                chat.setThreads([...chat.threads, newThread]);
-
-                // temp sessionの場合、PGP鍵を生成して鍵交換メッセージを送信
-                if (isTempSession) {
-                  try {
-                    await generateAndSendTempKey(chatId, result.id);
-                  } catch {
-                    // 鍵生成失敗はスレッド作成自体は成功しているので無視しない
-                  }
+              if (isRealtimeSession) {
+                // リアルタイムセッション開始
+                try {
+                  const memberIds = Object.keys(memberProfiles).filter(
+                    (id) => id !== auth.userId,
+                  );
+                  const memberPublicKeys = Object.fromEntries(
+                    memberIds
+                      .map((id) => [id, encryptionPublicKeyByUser.current[id]])
+                      .filter(([, key]) => !!key),
+                  ) as Record<string, string>;
+                  await realtime.startSession(
+                    chatId,
+                    name,
+                    memberIds,
+                    memberPublicKeys,
+                  );
+                  setRealtimeFocused(true);
+                  p.close();
+                } catch {
+                  showError(t("error.unknown"));
                 }
-
-                p.close();
-              } catch {
-                showError(t("error.unknown"));
+              } else {
+                // 通常スレッド作成
+                const signed = await auth.getSignedMessage();
+                if (!signed) return;
+                try {
+                  const client = authApiClient(signed.signedMessage);
+                  const result = await client.chat.createThread(chatId, name);
+                  const newThread: Thread = {
+                    id: result.id,
+                    chat_id: result.chat_id ?? chatId,
+                    name,
+                    created_by: signed.userId,
+                    created_at: new Date().toISOString(),
+                  };
+                  chat.setThreads([...chat.threads, newThread]);
+                  p.close();
+                } catch {
+                  showError(t("error.unknown"));
+                }
               }
             }}
           >
@@ -1272,30 +1149,23 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
             <label className="flex items-center gap-2 mb-3 cursor-pointer">
               <input
                 type="checkbox"
-                checked={isTempSession}
-                onChange={(e) => setIsTempSession(e.target.checked)}
+                checked={isRealtimeSession}
+                onChange={(e) => setIsRealtimeSession(e.target.checked)}
                 className="accent-accent"
               />
-              <span className="text-sm">{t("chat.temporary_session")}</span>
+              <span className="text-sm">{t("realtime.session")}</span>
             </label>
-            {isTempSession && (
-              <div className="mb-3">
-                <label className="block text-sm text-muted mb-1">
-                  {t("chat.expires_at")}
-                </label>
-                <input
-                  name="expires_at"
-                  type="datetime-local"
-                  className="w-full border border-accent/30 rounded px-3 py-2 bg-transparent"
-                />
-              </div>
+            {isRealtimeSession && (
+              <p className="text-xs text-muted mb-3">
+                {t("realtime.start_desc")}
+              </p>
             )}
             <button
               type="submit"
               disabled={!threadName.trim()}
               className="px-4 py-2 bg-accent/30 rounded hover:bg-accent/50 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {t("common.ok")}
+              {isRealtimeSession ? t("realtime.start") : t("common.ok")}
             </button>
           </form>
         </Dialog>
@@ -1304,73 +1174,22 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   };
 
   const handleSendMessage = async (text: string) => {
-    if (!chatId || !threadId) return;
+    if (!chatId) return;
+
+    const inRealtimeMode =
+      !threadId && realtime.activeSession?.chatId === chatId;
+    if (inRealtimeMode) {
+      try {
+        await realtime.sendRealtimeMessage(text);
+      } catch {
+        showError(t("error.realtime_connection_failed"));
+      }
+      return;
+    }
+    if (!threadId) return;
 
     const signed = await auth.getSignedMessage();
     if (!signed || !auth.worker || !auth.privateKeys || !auth.subPassphrase) {
-      return;
-    }
-
-    // temp sessionの場合の分岐
-    if (isTempSession(threadId)) {
-      const tempKeys = getTempKeys(threadId);
-      if (!tempKeys) return;
-
-      const pubKeys = getTempPubKeys(threadId);
-      const memberCount = Object.keys(memberProfiles).length || 1;
-
-      // 全メンバーの公開鍵が揃っていない場合は保留
-      if (!pubKeys || Object.keys(pubKeys).length < memberCount) {
-        const pending = getPendingMessages(threadId);
-        setPendingMessages(threadId, [...pending, text]);
-        // 保留中であることをローカルに表示
-        chat.setMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            thread_id: threadId,
-            sender_id: signed.userId,
-            content: `[${t("chat.pending_messages")}] ${text}`,
-            created_at: new Date().toISOString(),
-          },
-        ]);
-        return;
-      }
-
-      // main keys で署名+暗号化して送信（外側署名はサーバが検証する）
-      try {
-        const plainBase64 = encodeToBase64(text);
-        const allPubKeys = Object.values(pubKeys);
-        const encrypted = await new Promise<string>((resolve, reject) => {
-          auth.worker!.eventWaiter("encrypt", (result) => {
-            if (result.success) resolve(result.data.message);
-            else reject(new Error(result.message));
-          });
-          auth.worker!.postMessage({
-            call: "encrypt",
-            passphrase: auth.subPassphrase!,
-            privateKeys: auth.privateKeys!,
-            publicKeys: allPubKeys,
-            payload: plainBase64,
-          });
-        });
-
-        const client = authApiClient(signed.signedMessage);
-        const result = await client.message.send(chatId, threadId, encrypted);
-        chat.setMessages((prev) => [
-          ...prev,
-          {
-            id: result.id ?? crypto.randomUUID(),
-            thread_id: threadId,
-            sender_id: signed.userId,
-            content: text,
-            created_at: new Date().toISOString(),
-          },
-        ]);
-        touchTimestamps(chatId, threadId);
-      } catch {
-        showError(t("error.message_send_failed"));
-      }
       return;
     }
 
@@ -1673,6 +1492,23 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   };
 
   const currentUserId = auth.userId ?? "me";
+  const activeRealtimeSession = realtime.activeSession;
+  const isRealtimeView =
+    !!chatId &&
+    !threadId &&
+    activeRealtimeSession?.chatId === chatId &&
+    realtimeFocused;
+  const chatViewThreadName = isRealtimeView
+    ? activeRealtimeSession.name
+    : selectedThreadName;
+  const chatInputPlaceholder = isRealtimeView
+    ? t("realtime.placeholder")
+    : t("chat.placeholder");
+  const handleBackFromChatView = () => {
+    if (!chatId) return;
+    if (isRealtimeView) setRealtimeFocused(false);
+    router.push(`/chat/${chatId}`);
+  };
 
   // SSR/初回マウント時はレイアウト未確定なので何も描画しない
   if (isMobile === undefined) return null;
@@ -1682,18 +1518,19 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     if (isInfoRoute) {
       return <ChannelInfo chatId={chatId!} />;
     }
-    if (chatId && threadId) {
+    if (chatId && (threadId || isRealtimeView)) {
       return (
         <ChatViewComponent
-          threadName={selectedThreadName}
+          threadName={chatViewThreadName}
           currentUserId={currentUserId}
           memberProfiles={memberProfiles}
           loading={loading}
           onSend={handleSendMessage}
-          onSendFile={handleSendFile}
-          onDownloadFile={handleDownloadFile}
-          onLoadMore={handleLoadMore}
-          onBack={() => router.push(`/chat/${chatId}`)}
+          onSendFile={isRealtimeView ? undefined : handleSendFile}
+          onDownloadFile={isRealtimeView ? undefined : handleDownloadFile}
+          onLoadMore={isRealtimeView ? async () => {} : handleLoadMore}
+          inputPlaceholder={chatInputPlaceholder}
+          onBack={handleBackFromChatView}
         />
       );
     }
@@ -1707,6 +1544,8 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           onArchive={handleArchiveThread}
           onUnarchive={handleUnarchiveThread}
           archivedThreads={archivedThreads}
+          onJoinRealtime={handleJoinRealtime}
+          onLeaveRealtime={handleLeaveRealtime}
         />
       );
     }
@@ -1747,6 +1586,8 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
             onArchive={handleArchiveThread}
             onUnarchive={handleUnarchiveThread}
             archivedThreads={archivedThreads}
+            onJoinRealtime={handleJoinRealtime}
+            onLeaveRealtime={handleLeaveRealtime}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-muted text-sm">
@@ -1755,17 +1596,18 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
         )}
       </div>
       <div className="flex-1 min-w-0">
-        {chatId && threadId ? (
+        {chatId && (threadId || isRealtimeView) ? (
           <ChatViewComponent
-            threadName={selectedThreadName}
+            threadName={chatViewThreadName}
             currentUserId={currentUserId}
             memberProfiles={memberProfiles}
             loading={loading}
             onSend={handleSendMessage}
-            onSendFile={handleSendFile}
-            onDownloadFile={handleDownloadFile}
-            onLoadMore={handleLoadMore}
-            onBack={() => router.push(`/chat/${chatId}`)}
+            onSendFile={isRealtimeView ? undefined : handleSendFile}
+            onDownloadFile={isRealtimeView ? undefined : handleDownloadFile}
+            onLoadMore={isRealtimeView ? async () => {} : handleLoadMore}
+            inputPlaceholder={chatInputPlaceholder}
+            onBack={handleBackFromChatView}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-muted text-sm">

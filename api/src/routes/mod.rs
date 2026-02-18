@@ -5,6 +5,7 @@ mod federation;
 mod file;
 mod message;
 mod notification;
+mod realtime;
 mod thread;
 mod user;
 
@@ -25,7 +26,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(contacts::routes())
         .merge(notification::routes())
         .merge(federation::routes())
-        .merge(atproto::routes());
+        .merge(atproto::routes())
+        .merge(realtime::routes());
 
     Router::new()
         .nest("/v1", api)

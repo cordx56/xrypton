@@ -21,7 +21,6 @@ export type Thread = {
   created_at: string;
   updated_at?: string | null;
   archived_at?: string | null;
-  expires_at?: string | null;
 };
 
 export type FileMetadata = {

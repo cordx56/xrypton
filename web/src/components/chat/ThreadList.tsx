@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useChat } from "@/contexts/ChatContext";
+import { useRealtime } from "@/contexts/RealtimeContext";
 import { useI18n } from "@/contexts/I18nContext";
 import { formatDateTime } from "@/utils/date";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -10,6 +11,7 @@ import {
   faBoxArchive,
   faBoxOpen,
   faClock,
+  faRightFromBracket,
 } from "@fortawesome/free-solid-svg-icons";
 import type { Thread } from "@/types/chat";
 
@@ -21,6 +23,8 @@ type Props = {
   onArchive: (thread: Thread) => void;
   onUnarchive: (thread: Thread) => void;
   archivedThreads: Thread[];
+  onJoinRealtime?: (sessionId: string) => void;
+  onLeaveRealtime?: (sessionId: string) => void;
 };
 
 const ThreadList = ({
@@ -31,29 +35,13 @@ const ThreadList = ({
   onArchive,
   onUnarchive,
   archivedThreads,
+  onJoinRealtime,
+  onLeaveRealtime,
 }: Props) => {
   const { threads, unreadThreadIds } = useChat();
+  const { pendingSessions, activeSession } = useRealtime();
   const { t } = useI18n();
   const [showArchived, setShowArchived] = useState(false);
-  // Date.now()はSSRとクライアントで値が異なるため、マウント後にのみ計算する
-  const [now, setNow] = useState<number | null>(null);
-
-  useEffect(() => {
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(id);
-  }, []);
-
-  // temp sessionの残り時間を表示用にフォーマット
-  const formatExpiry = (expiresAt: string): string => {
-    if (now === null) return "";
-    const diff = new Date(expiresAt).getTime() - now;
-    if (diff <= 0) return t("chat.session_expired");
-    const hours = Math.floor(diff / 3600000);
-    const minutes = Math.floor((diff % 3600000) / 60000);
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    return `${minutes}m`;
-  };
 
   const displayThreads = showArchived ? archivedThreads : threads;
 
@@ -87,7 +75,98 @@ const ThreadList = ({
         )}
       </div>
       <div className="flex-1 overflow-y-auto">
-        {displayThreads.length === 0 ? (
+        {/* リアルタイムセッション（アーカイブ表示でない場合のみ） */}
+        {!showArchived && pendingSessions.length > 0 && (
+          <ul>
+            {pendingSessions.map((session) => (
+              <li
+                key={session.sessionId}
+                role="button"
+                tabIndex={0}
+                onClick={() => onJoinRealtime?.(session.sessionId)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onJoinRealtime?.(session.sessionId);
+                  }
+                }}
+                className="w-full text-left px-4 py-3 border-b border-accent/10 hover:bg-accent/10 transition-colors flex items-center gap-2 cursor-pointer"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="truncate flex items-center gap-1 font-medium">
+                    <FontAwesomeIcon
+                      icon={faClock}
+                      className="text-xs text-accent flex-shrink-0"
+                    />
+                    {session.name}
+                  </div>
+                  <div className="text-xs text-muted">
+                    {t("realtime.session")}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onLeaveRealtime?.(session.sessionId);
+                  }}
+                  className="text-muted hover:text-fg px-2 py-1 rounded hover:bg-accent/20 flex-shrink-0"
+                  title={t("realtime.leave")}
+                >
+                  <FontAwesomeIcon
+                    icon={faRightFromBracket}
+                    className="text-sm"
+                  />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {/* アクティブなリアルタイムセッション */}
+        {!showArchived && activeSession && (
+          <ul>
+            <li
+              role="button"
+              tabIndex={0}
+              onClick={() => onJoinRealtime?.(activeSession.sessionId)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onJoinRealtime?.(activeSession.sessionId);
+                }
+              }}
+              className="w-full text-left px-4 py-3 border-b border-accent/10 bg-accent/5 hover:bg-accent/10 transition-colors flex items-center gap-2 cursor-pointer"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="truncate flex items-center gap-1 font-bold">
+                  <FontAwesomeIcon
+                    icon={faClock}
+                    className="text-xs text-accent flex-shrink-0"
+                  />
+                  {activeSession.name}
+                </div>
+                <div className="text-xs text-accent">
+                  {t("realtime.active")}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onLeaveRealtime?.(activeSession.sessionId)}
+                className="text-muted hover:text-fg px-2 py-1 rounded hover:bg-accent/20 flex-shrink-0"
+                title={t("realtime.leave")}
+              >
+                <FontAwesomeIcon
+                  icon={faRightFromBracket}
+                  className="text-sm"
+                />
+              </button>
+            </li>
+          </ul>
+        )}
+        {/* 通常スレッド一覧 */}
+        {displayThreads.length === 0 &&
+        pendingSessions.length === 0 &&
+        !activeSession ? (
           <p className="text-center text-muted p-8">
             {showArchived
               ? t("chat.no_archived_threads")
@@ -113,23 +192,11 @@ const ThreadList = ({
                   <div
                     className={`truncate flex items-center gap-1 ${unreadThreadIds.has(thread.id) ? "font-bold" : "font-medium"}`}
                   >
-                    {thread.expires_at && (
-                      <FontAwesomeIcon
-                        icon={faClock}
-                        className="text-xs text-accent flex-shrink-0"
-                      />
-                    )}
                     {thread.name || thread.id}
                   </div>
                   <div className="text-xs text-muted flex items-center gap-1">
-                    {thread.expires_at ? (
-                      formatExpiry(thread.expires_at)
-                    ) : (
-                      <>
-                        <FontAwesomeIcon icon={faArrowsRotate} />
-                        {formatDateTime(thread.updated_at ?? thread.created_at)}
-                      </>
-                    )}
+                    <FontAwesomeIcon icon={faArrowsRotate} />
+                    {formatDateTime(thread.updated_at ?? thread.created_at)}
                   </div>
                 </div>
                 <button

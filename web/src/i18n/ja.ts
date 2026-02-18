@@ -106,11 +106,6 @@ export const ja: TranslationKeys = {
   "chat.show_archived": "アーカイブ済みを表示",
   "chat.no_archived_channels": "アーカイブ済みチャンネルはありません",
   "chat.no_archived_threads": "アーカイブ済みスレッドはありません",
-  "chat.temporary_session": "一時セッション",
-  "chat.expires_at": "終了時刻",
-  "chat.session_expired": "このセッションは終了しました",
-  "chat.waiting_keys": "メンバーの参加を待っています...",
-  "chat.pending_messages": "全メンバーが参加したらメッセージが送信されます",
   "landing.tagline": "エンドツーエンド暗号化によるセキュアなメッセージング",
   "landing.get_started": "はじめる",
   "landing.docs": "ドキュメント",
@@ -197,4 +192,12 @@ export const ja: TranslationKeys = {
     "投稿は成功しましたが、PGP署名に失敗しました。後で再試行できます。",
   "error.atproto_did_already_linked":
     "このDIDは既に他のアカウントに紐付けられています。",
+  "realtime.session": "リアルタイムセッション",
+  "realtime.start": "リアルタイムチャットを開始",
+  "realtime.start_desc":
+    "メッセージは参加者間で直接送受信され、サーバには保存されません。",
+  "realtime.leave": "退出",
+  "realtime.active": "リアルタイムチャット中",
+  "realtime.placeholder": "リアルタイムメッセージを入力...",
+  "error.realtime_connection_failed": "リアルタイム接続に失敗しました。",
 };

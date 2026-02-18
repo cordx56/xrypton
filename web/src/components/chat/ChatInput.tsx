@@ -8,11 +8,12 @@ type Props = {
   onSend: (text: string) => void | Promise<void>;
   onSendFile?: (file: File) => Promise<void>;
   disabled?: boolean;
+  placeholder?: string;
 };
 
 const MAX_ROWS = 5;
 
-const ChatInput = ({ onSend, onSendFile, disabled }: Props) => {
+const ChatInput = ({ onSend, onSendFile, disabled, placeholder }: Props) => {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const { t } = useI18n();
@@ -93,7 +94,7 @@ const ChatInput = ({ onSend, onSendFile, disabled }: Props) => {
           adjustHeight();
         }}
         onKeyDown={handleKeyDown}
-        placeholder={t("chat.placeholder")}
+        placeholder={placeholder ?? t("chat.placeholder")}
         disabled={disabled || sending}
         rows={1}
         className="flex-1 resize-none rounded-lg border border-accent/30 px-3 py-2 text-base leading-6 bg-transparent focus:outline-none focus:border-accent overflow-y-auto"
