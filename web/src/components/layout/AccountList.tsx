@@ -8,13 +8,16 @@ import {
   faArrowRightFromBracket,
 } from "@fortawesome/free-solid-svg-icons";
 import Avatar from "@/components/common/Avatar";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   getCachedProfile,
+  setCachedProfile,
   setActiveAccountId,
   syncSettingsToLocalStorage,
   deleteAccountData,
   getAccountIds,
 } from "@/utils/accountStore";
+import { apiClient, getApiBaseUrl } from "@/api/client";
 import { displayUserId } from "@/utils/schema";
 import { useI18n } from "@/contexts/I18nContext";
 import type { AccountInfo } from "@/types/user";
@@ -30,18 +33,52 @@ type Props = {
 /** 連絡先リストと同じスタイルのアカウント一覧。クリックでアカウント切り替え。 */
 const AccountList = ({ accountIds, activeId, showAdd = false }: Props) => {
   const { t } = useI18n();
+  const auth = useAuth();
   const [profiles, setProfiles] = useState<AccountInfo[]>([]);
 
   useEffect(() => {
     (async () => {
-      const list: AccountInfo[] = [];
-      for (const id of accountIds) {
-        const cached = await getCachedProfile(id);
-        list.push(cached ?? { userId: id });
-      }
+      const list: AccountInfo[] = await Promise.all(
+        accountIds.map(async (id) => {
+          const cached = await getCachedProfile(id);
+          if (cached) return cached;
+          // キャッシュがなければAPIから取得
+          try {
+            const client = apiClient();
+            const [p, keys] = await Promise.all([
+              client.user.getProfile(id),
+              client.user.getKeys(id),
+            ]);
+            let dn: string | undefined = p.display_name || undefined;
+            if (dn?.startsWith("-----") && auth.worker) {
+              const plaintext = await new Promise<string | null>((resolve) => {
+                auth.worker!.eventWaiter("verify_extract_string", (r) => {
+                  resolve(r.success ? r.data.plaintext : null);
+                });
+                auth.worker!.postMessage({
+                  call: "verify_extract_string",
+                  publicKey: keys.signing_public_key,
+                  armored: dn!,
+                });
+              });
+              dn = plaintext ?? undefined;
+            }
+            const info: AccountInfo = {
+              userId: id,
+              displayName: dn,
+              iconUrl: p.icon_url ? `${getApiBaseUrl()}${p.icon_url}` : null,
+              signingPublicKey: keys.signing_public_key,
+            };
+            await setCachedProfile(id, info);
+            return info;
+          } catch {
+            return { userId: id };
+          }
+        }),
+      );
       setProfiles(list);
     })();
-  }, [accountIds]);
+  }, [accountIds, auth.worker]);
 
   const handleClick = useCallback(
     async (userId: string) => {
@@ -94,7 +131,11 @@ const AccountList = ({ accountIds, activeId, showAdd = false }: Props) => {
             onClick={() => handleClick(p.userId)}
             className="w-full flex items-center gap-3 px-4 py-3 border-b border-accent/10 hover:bg-accent/5 transition-colors text-left"
           >
-            <Avatar name={p.displayName || p.userId} iconUrl={p.iconUrl} />
+            <Avatar
+              name={p.displayName || p.userId}
+              iconUrl={p.iconUrl}
+              publicKey={p.signingPublicKey}
+            />
             <div className="min-w-0 flex-1">
               <div className="font-medium truncate">
                 {p.displayName || displayUserId(p.userId)}

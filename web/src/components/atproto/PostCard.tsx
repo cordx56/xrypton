@@ -18,6 +18,7 @@ import {
   faHeart as faHeartSolid,
   faRetweet,
   faComment,
+  faTrash,
 } from "@fortawesome/free-solid-svg-icons";
 import { faHeart as faHeartRegular } from "@fortawesome/free-regular-svg-icons";
 import { useAtproto } from "@/contexts/AtprotoContext";
@@ -39,6 +40,8 @@ type Props = {
   reason?: AppBskyFeedDefs.ReasonRepost;
   /** 返信先の情報（タイムラインで「〜へのリプライ」を表示） */
   replyParent?: { handle: string; uri: string };
+  /** 削除後に親側でリストから除去するコールバック */
+  onDelete?: (uri: string) => void;
 };
 
 /** at:// URIをページパスに変換 */
@@ -251,9 +254,10 @@ const PostCard = ({
   onReply,
   reason,
   replyParent,
+  onDelete,
 }: Props) => {
   const router = useRouter();
-  const { agent } = useAtproto();
+  const { agent, did } = useAtproto();
   const { pushDialog } = useDialogs();
   const record = post.record as AppBskyFeedPost.Record;
 
@@ -317,6 +321,20 @@ const PostCard = ({
     [agent, pushDialog, post.uri],
   );
 
+  const isOwn = did === post.author.did;
+  const [deleted, setDeleted] = useState(false);
+
+  const handleDelete = useCallback(async () => {
+    if (!agent || !window.confirm("Delete this post?")) return;
+    try {
+      await agent.deletePost(post.uri);
+      setDeleted(true);
+      onDelete?.(post.uri);
+    } catch {
+      // サイレント
+    }
+  }, [agent, post.uri, onDelete]);
+
   const repostLp = useLongPress(
     useCallback(() => showUserList("reposts"), [showUserList]),
   );
@@ -351,6 +369,8 @@ const PostCard = ({
       }
     }
   }
+
+  if (deleted) return null;
 
   return (
     <div
@@ -483,6 +503,15 @@ const PostCard = ({
               <FontAwesomeIcon icon={liked ? faHeartSolid : faHeartRegular} />
               <span>{likeCount}</span>
             </button>
+            {isOwn && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="ml-auto flex items-center text-xs hover:text-red-400 transition-colors"
+              >
+                <FontAwesomeIcon icon={faTrash} />
+              </button>
+            )}
           </div>
         </div>
       </div>

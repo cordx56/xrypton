@@ -154,11 +154,14 @@ export async function getCachedProfile(
   }
 }
 
+/** 既存のキャッシュとマージして保存（signingPublicKey など既存フィールドを保持） */
 export async function setCachedProfile(
   userId: string,
-  info: AccountInfo,
+  info: Partial<AccountInfo> & { userId: string },
 ): Promise<void> {
-  await setKey(accountKey(userId, "profileCache"), JSON.stringify(info));
+  const existing = await getCachedProfile(userId);
+  const merged: AccountInfo = { ...existing, ...info };
+  await setKey(accountKey(userId, "profileCache"), JSON.stringify(merged));
 }
 
 // --- 設定の localStorage 同期（アカウント切り替え前に呼ぶ） ---

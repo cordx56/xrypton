@@ -25,4 +25,5 @@ export type AccountInfo = {
   userId: string;
   displayName?: string;
   iconUrl?: string | null;
+  signingPublicKey?: string;
 };
