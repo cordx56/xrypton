@@ -22,18 +22,24 @@ const sw: ServiceWorkerGlobalScope = self;
 const forwardToClients = async (
   data: z.infer<typeof Notification>,
 ): Promise<boolean> => {
+  // 配信は制御外クライアントも含める
   const clients = await sw.clients.matchAll({
     type: "window",
     includeUncontrolled: true,
   });
-  let hasVisible = false;
   for (const client of clients) {
-    client.postMessage(data);
-    if ((client as WindowClient).visibilityState === "visible") {
-      hasVisible = true;
+    try {
+      client.postMessage(data);
+    } catch {
+      // postMessage失敗は無視し、他クライアントへの配信を継続
     }
   }
-  return hasVisible;
+
+  // 通知抑制判定は、現SWが制御中の可視クライアントのみに限定する
+  const controlledClients = await sw.clients.matchAll({ type: "window" });
+  return controlledClients.some(
+    (client) => (client as WindowClient).visibilityState === "visible",
+  );
 };
 
 /** 復号結果(WasmReturnValue)からプレーンテキストを抽出する */

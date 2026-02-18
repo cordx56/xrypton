@@ -8,6 +8,7 @@ export type ResolvedProfile = {
   userId: string;
   displayName: string;
   iconUrl: string | null;
+  signingPublicKey?: string;
 };
 
 /**
@@ -33,15 +34,23 @@ export function useResolvedProfiles(userIds: string[]) {
       const results = await Promise.all(
         userIds.map(async (uid) => {
           try {
-            const profile = await apiClient().user.getProfile(uid);
+            const [profile, keys] = await Promise.all([
+              apiClient().user.getProfile(uid),
+              apiClient().user.getKeys(uid),
+            ]);
             const iconUrl = profile.icon_url
-              ? `${getApiBaseUrl()}${profile.icon_url}`
+              ? `${getApiBaseUrl()}${profile.icon_url}?t=${Date.now()}`
               : null;
             const displayName = await resolveDisplayName(
               uid,
               profile.display_name || uid,
             );
-            return { userId: uid, displayName, iconUrl };
+            return {
+              userId: uid,
+              displayName,
+              iconUrl,
+              signingPublicKey: keys.signing_public_key ?? undefined,
+            };
           } catch {
             return { userId: uid, displayName: uid, iconUrl: null };
           }
