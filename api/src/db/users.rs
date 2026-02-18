@@ -1,6 +1,26 @@
 use super::models::{ProfileRow, UserRow};
 use super::{Db, sql};
 use crate::types::UserId;
+use xrypton_common::keys::PublicKeys;
+
+const PGP_MESSAGE_PREFIX: &str = "-----BEGIN PGP MESSAGE-----";
+
+/// 表示名を取得する。署名済み(PGP armored)の場合は検証して平文を抽出する。
+pub async fn resolve_display_name(pool: &Db, user_id: &UserId) -> Option<String> {
+    let profile = get_profile(pool, user_id).await.ok()??;
+    let name = profile.display_name;
+    if name.is_empty() {
+        return None;
+    }
+    if !name.starts_with(PGP_MESSAGE_PREFIX) {
+        return Some(name);
+    }
+    // 署名済み display_name → 公開鍵で検証して平文を抽出
+    let user = get_user(pool, user_id).await.ok()??;
+    let pub_keys = PublicKeys::try_from(user.signing_public_key.as_str()).ok()?;
+    let plaintext_bytes = pub_keys.verify_and_extract(&name).ok()?;
+    String::from_utf8(plaintext_bytes).ok()
+}
 
 #[tracing::instrument(skip(pool), err)]
 pub async fn get_user(pool: &Db, id: &UserId) -> Result<Option<UserRow>, sqlx::Error> {

@@ -6,26 +6,6 @@ use web_push::{
 use crate::config::AppConfig;
 use crate::db;
 use crate::types::{ChatId, MessageId, ThreadId, UserId};
-use xrypton_common::keys::PublicKeys;
-
-const PGP_MESSAGE_PREFIX: &str = "-----BEGIN PGP MESSAGE-----";
-
-/// 送信者の表示名を取得する。署名済み(PGP armored)の場合は検証して平文を抽出する。
-async fn resolve_display_name(pool: &db::Db, user_id: &UserId) -> Option<String> {
-    let profile = db::users::get_profile(pool, user_id).await.ok()??;
-    let name = profile.display_name;
-    if name.is_empty() {
-        return None;
-    }
-    if !name.starts_with(PGP_MESSAGE_PREFIX) {
-        return Some(name);
-    }
-    // 署名済み display_name → 公開鍵で検証して平文を抽出
-    let user = db::users::get_user(pool, user_id).await.ok()??;
-    let pub_keys = PublicKeys::try_from(user.signing_public_key.as_str()).ok()?;
-    let plaintext_bytes = pub_keys.verify_and_extract(&name).ok()?;
-    String::from_utf8(plaintext_bytes).ok()
-}
 
 /// 1ユーザの全サブスクリプションにPush通知を送信する内部ヘルパー。
 async fn send_push_to_user(
@@ -119,7 +99,7 @@ pub async fn send_to_members(
     };
 
     // 送信者の表示名を取得（署名済みの場合は平文を抽出する）
-    let sender_name = resolve_display_name(pool, sender_id)
+    let sender_name = db::users::resolve_display_name(pool, sender_id)
         .await
         .unwrap_or_else(|| qualified_sender_id.clone());
 

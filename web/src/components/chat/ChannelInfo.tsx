@@ -50,18 +50,6 @@ const ChannelInfo = ({ chatId }: Props) => {
     })();
   }, [chatId]);
 
-  // プロフィール解決完了後、空名グループの場合メンバー表示名で代替
-  useEffect(() => {
-    if (members.length === 0 || channelName !== chatId) return;
-    const others = members.filter((m) => m.userId !== auth.userId);
-    const name =
-      others.length > 0
-        ? others.map((m) => m.displayName).join(", ")
-        : (members.find((m) => m.userId === auth.userId)?.displayName ??
-          chatId);
-    setChannelName(name);
-  }, [members, auth.userId, chatId]);
-
   const loading = fetching || resolvingProfiles;
 
   if (loading) {

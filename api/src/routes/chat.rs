@@ -6,6 +6,7 @@ use serde::Deserialize;
 use crate::AppState;
 use crate::auth::AuthenticatedUser;
 use crate::db;
+use crate::db::models::ChatGroupRow;
 use crate::error::AppError;
 use crate::types::{ChatId, UserId};
 
@@ -122,11 +123,26 @@ async fn create_chat(
     })))
 }
 
+/// 空名グループの `name` を解決済み表示名で上書きする。
+async fn resolve_empty_group_names(pool: &db::Db, groups: &mut [ChatGroupRow], requester: &UserId) {
+    for group in groups.iter_mut() {
+        if group.name.is_empty() {
+            let chat_id = ChatId(group.id.clone());
+            if let Some(resolved) =
+                db::chat::resolve_group_display_name(pool, &chat_id, requester).await
+            {
+                group.name = resolved;
+            }
+        }
+    }
+}
+
 async fn list_chats(
     State(state): State<AppState>,
     auth: AuthenticatedUser,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let groups = db::chat::get_user_chat_groups(&state.pool, &auth.user_id).await?;
+    let mut groups = db::chat::get_user_chat_groups(&state.pool, &auth.user_id).await?;
+    resolve_empty_group_names(&state.pool, &mut groups, &auth.user_id).await;
     Ok(Json(serde_json::json!(groups)))
 }
 
@@ -173,6 +189,15 @@ async fn get_chat(
     let threads = db::threads::get_threads_by_chat(&state.pool, &chat_id).await?;
     let archived_threads = db::threads::get_archived_threads_by_chat(&state.pool, &chat_id).await?;
 
+    // 空名グループの場合、メンバー表示名で代替
+    let mut group = group;
+    if group.name.is_empty()
+        && let Some(resolved) =
+            db::chat::resolve_group_display_name(&state.pool, &chat_id, &auth.user_id).await
+    {
+        group.name = resolved;
+    }
+
     Ok(Json(serde_json::json!({
         "group": group,
         "members": members,
@@ -185,7 +210,8 @@ async fn list_archived_chats(
     State(state): State<AppState>,
     auth: AuthenticatedUser,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let groups = db::chat::get_user_archived_chat_groups(&state.pool, &auth.user_id).await?;
+    let mut groups = db::chat::get_user_archived_chat_groups(&state.pool, &auth.user_id).await?;
+    resolve_empty_group_names(&state.pool, &mut groups, &auth.user_id).await;
     Ok(Json(serde_json::json!(groups)))
 }
 

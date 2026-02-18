@@ -2,6 +2,47 @@ use super::models::{ChatGroupRow, ChatMemberRow};
 use super::{Db, sql};
 use crate::types::{ChatId, ThreadId, UserId};
 
+/// グループの表示名を解決する。
+/// リクエストユーザ以外のメンバーの表示名をソートして結合する。
+/// 自分だけの場合は自分の表示名を返す。メンバーが見つからない場合は `None`。
+pub async fn resolve_group_display_name(
+    pool: &Db,
+    chat_id: &ChatId,
+    requester: &UserId,
+) -> Option<String> {
+    let members = get_chat_members(pool, chat_id).await.ok()?;
+    if members.is_empty() {
+        return None;
+    }
+
+    let mut names: Vec<(bool, String)> = Vec::with_capacity(members.len());
+    for m in &members {
+        let uid = UserId(m.user_id.clone());
+        let display = super::users::resolve_display_name(pool, &uid)
+            .await
+            .unwrap_or_else(|| m.user_id.clone());
+        let is_self = m.user_id == requester.as_str();
+        names.push((is_self, display));
+    }
+
+    let mut others: Vec<&str> = names
+        .iter()
+        .filter(|(is_self, _)| !is_self)
+        .map(|(_, name)| name.as_str())
+        .collect();
+    others.sort_unstable();
+
+    if others.is_empty() {
+        // 自分だけのグループ
+        names
+            .into_iter()
+            .find(|(is_self, _)| *is_self)
+            .map(|(_, n)| n)
+    } else {
+        Some(others.join(", "))
+    }
+}
+
 #[tracing::instrument(skip(pool), err)]
 pub async fn create_chat_group(
     pool: &Db,

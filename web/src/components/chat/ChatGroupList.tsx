@@ -3,8 +3,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useChat } from "@/contexts/ChatContext";
 import { useI18n } from "@/contexts/I18nContext";
-import { authApiClient, apiClient } from "@/api/client";
-import { usePublicKeyResolver } from "@/hooks/usePublicKeyResolver";
+import { authApiClient } from "@/api/client";
 import { getAccountValue } from "@/utils/accountStore";
 import { formatDateTime } from "@/utils/date";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -39,11 +38,7 @@ const ChatGroupList = ({
   const auth = useAuth();
   const { groups, unreadGroupIds } = useChat();
   const { t } = useI18n();
-  const { resolveDisplayName } = usePublicKeyResolver();
   const [showArchived, setShowArchived] = useState(false);
-  const [resolvedNames, setResolvedNames] = useState<Record<string, string>>(
-    {},
-  );
   const [hideNonContact, setHideNonContact] = useState(false);
   const [groupMembers, setGroupMembers] = useState<Record<string, string[]>>(
     {},
@@ -58,19 +53,14 @@ const ChatGroupList = ({
     });
   }, [auth.userId]);
 
-  // 空名グループのメンバー表示名を解決 + 非連絡先フィルタ用のメンバー情報取得
+  // 非連絡先フィルタ用のメンバー情報取得
   useEffect(() => {
-    // フィルタ有効時は全グループ、無効時は空名グループのみ
-    const targetGroups = hideNonContact
-      ? groups
-      : groups.filter((g) => !g.name);
-    if (targetGroups.length === 0 && !hideNonContact) return;
+    if (!hideNonContact) return;
 
     (async () => {
-      const names: Record<string, string> = {};
       const members: Record<string, string[]> = {};
 
-      for (const g of targetGroups) {
+      for (const g of groups) {
         try {
           const signed = await auth.getSignedMessage();
           if (!signed) continue;
@@ -83,50 +73,23 @@ const ChatGroupList = ({
             .map((m) => m.user_id)
             .filter((id) => id !== auth.userId);
           members[g.id] = otherIds;
-
-          // 空名グループの表示名解決
-          if (!g.name) {
-            const profiles = await Promise.all(
-              memberList.map(async (m) => {
-                try {
-                  const profile = await apiClient().user.getProfile(m.user_id);
-                  const name = await resolveDisplayName(
-                    m.user_id,
-                    profile.display_name || m.user_id,
-                  );
-                  return { userId: m.user_id, displayName: name };
-                } catch {
-                  return { userId: m.user_id, displayName: m.user_id };
-                }
-              }),
-            );
-            const others = profiles.filter((p) => p.userId !== auth.userId);
-            names[g.id] =
-              others.length > 0
-                ? others.map((p) => p.displayName).join(", ")
-                : (profiles.find((p) => p.userId === auth.userId)
-                    ?.displayName ?? g.id);
-          }
         } catch {
-          // メンバー名解決に失敗したグループはスキップ
+          // メンバー取得に失敗したグループはスキップ
         }
       }
 
-      setResolvedNames((prev) => ({ ...prev, ...names }));
-      if (hideNonContact) setGroupMembers(members);
+      setGroupMembers(members);
 
       // 連絡先一覧を取得
-      if (hideNonContact) {
-        try {
-          const signed = await auth.getSignedMessage();
-          if (!signed) return;
-          const client = authApiClient(signed.signedMessage);
-          const contacts: { contact_user_id: string }[] =
-            await client.contacts.list();
-          setContactIds(new Set(contacts.map((c) => c.contact_user_id)));
-        } catch {
-          // 連絡先取得失敗時はフィルタを適用しない
-        }
+      try {
+        const signed = await auth.getSignedMessage();
+        if (!signed) return;
+        const client = authApiClient(signed.signedMessage);
+        const contacts: { contact_user_id: string }[] =
+          await client.contacts.list();
+        setContactIds(new Set(contacts.map((c) => c.contact_user_id)));
+      } catch {
+        // 連絡先取得失敗時はフィルタを適用しない
       }
     })();
   }, [groups, hideNonContact]);
@@ -203,7 +166,7 @@ const ChatGroupList = ({
                   <div
                     className={`truncate ${unreadGroupIds.has(g.id) ? "font-bold" : "font-medium"}`}
                   >
-                    {g.name || resolvedNames[g.id] || g.id}
+                    {g.name || g.id}
                   </div>
                   <div className="text-xs text-muted flex items-center gap-1">
                     <FontAwesomeIcon icon={faArrowsRotate} />

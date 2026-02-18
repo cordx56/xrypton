@@ -248,8 +248,6 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const decryptVersionRef = useRef(0);
   // fetchGroupDetailの完了を待つためのPromise
   const groupDetailReady = useRef<Promise<void>>(Promise.resolve());
-  // 空名グループの解決済み表示名キャッシュ（再選択時にIDが表示されるのを防ぐ）
-  const resolvedGroupNamesRef = useRef<Record<string, string>>({});
   // メンバー署名公開鍵のキャッシュ（検証用、グループ選択時に取得）
   const knownPublicKeys = useRef<PublicKeyMap>({});
   // メンバー暗号化公開鍵のキャッシュ（暗号化用、グループ選択時に取得）
@@ -571,19 +569,6 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       encryptionPublicKeys.current = encPubKeys;
       fingerprintToUserId.current = fingerprintMap;
       setMemberProfiles(profiles);
-
-      // 空名グループの場合、メンバー表示名で代替しキャッシュに保存
-      if (!data.group?.name) {
-        const others = Object.entries(profiles)
-          .filter(([id]) => id !== auth.userId)
-          .map(([, p]) => p.display_name);
-        const displayName =
-          others.length > 0
-            ? others.join(", ")
-            : (profiles[auth.userId!]?.display_name ?? groupId);
-        resolvedGroupNamesRef.current[groupId] = displayName;
-        setSelectedGroupName(displayName);
-      }
     },
     [auth.getSignedMessage, auth.userId, chat, resolveKeys, resolveDisplayName],
   );
@@ -591,12 +576,8 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   // chatIdが変わった時にグループ詳細を取得
   useEffect(() => {
     if (!chatId) return;
-    // グループ名を仮設定（空名の場合はfetchGroupDetailでメンバー表示名に更新される）
     const group = chat.groups.find((g) => g.id === chatId);
-    if (group)
-      setSelectedGroupName(
-        group.name || resolvedGroupNamesRef.current[chatId] || group.id,
-      );
+    if (group) setSelectedGroupName(group.name || group.id);
     groupDetailReady.current = fetchGroupDetail(chatId).catch(() => {});
   }, [chatId]);
 
@@ -760,9 +741,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   // グループ選択
   const selectGroup = useCallback(
     (group: ChatGroup) => {
-      setSelectedGroupName(
-        group.name || resolvedGroupNamesRef.current[group.id] || group.id,
-      );
+      setSelectedGroupName(group.name || group.id);
       chat.markGroupRead(group.id);
       router.push(`/chat/${group.id}`);
     },
