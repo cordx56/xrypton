@@ -39,12 +39,7 @@ import { linkify } from "@/utils/linkify";
 import { verifyPubkeyPostOnPds } from "@/utils/atprotoVerify";
 import { verifyXPost } from "@/utils/xVerify";
 import type { ExternalAccount } from "@/types/atproto";
-import {
-  bytesToBase64,
-  decodeBase64Url,
-  fromBase64Url,
-  toBase64Url,
-} from "@/utils/base64";
+import { bytesToBase64, toBase64Url } from "@/utils/base64";
 import { canonicalize } from "@/utils/canonicalize";
 import {
   useSignatureVerifier,
@@ -53,7 +48,6 @@ import {
 import { usePublicKeyResolver } from "@/hooks/usePublicKeyResolver";
 import { useResolvedProfiles } from "@/hooks/useResolvedProfiles";
 import WotGraphDialog from "@/components/contacts/WotGraphDialog";
-import QrReader from "@/components/QrReader";
 
 type Props = {
   userId: string;
@@ -71,30 +65,6 @@ type WotQrPayload = {
     time: string;
   };
 };
-type WotSignRequest = {
-  keyServerBase: string;
-  targetFingerprint: string;
-  targetUserId: string;
-  targetPublicKey: string;
-  qrNonce: WotQrPayload["nonce"];
-};
-
-function normalizeKeyServerBaseUrl(raw: string): string {
-  const url = new URL(raw);
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new Error("invalid key_server protocol");
-  }
-  if (
-    url.protocol === "http:" &&
-    url.hostname !== "localhost" &&
-    url.hostname !== "127.0.0.1" &&
-    url.hostname !== "::1"
-  ) {
-    throw new Error("insecure key_server is not allowed");
-  }
-  const base = `${url.origin}${url.pathname}`.replace(/\/+$/, "");
-  return base.length > 0 ? base : url.origin;
-}
 
 function getOwnKeyServerBaseUrl(): string {
   if (typeof window === "undefined") return getApiBaseUrl();
@@ -155,8 +125,6 @@ const UserProfileView = ({ userId }: Props) => {
   );
   const [trustGraph, setTrustGraph] = useState<WotGraphResponse | null>(null);
   const [trustGraphTruncated, setTrustGraphTruncated] = useState(false);
-  const [scanResult, setScanResult] = useState("");
-  const [scanProcessing, setScanProcessing] = useState(false);
   const isFetchingRef = useRef(false);
 
   const isLoggedIn = !!auth.userId && auth.isRegistered;
@@ -630,201 +598,6 @@ const UserProfileView = ({ userId }: Props) => {
     };
   }, [auth, isLoggedIn, isOwnProfile, targetFingerprint]);
 
-  const submitWotSignature = useCallback(
-    async (request: WotSignRequest) => {
-      if (!auth.worker || !auth.privateKeys || !auth.subPassphrase) {
-        showError(t("error.unauthorized"));
-        return;
-      }
-      setScanProcessing(true);
-      try {
-        const signaturePacketB64 = await new Promise<string | null>(
-          (resolve) => {
-            auth.worker!.eventWaiter("certify_key_bytes", (result) => {
-              if (result.success) resolve(result.data.data);
-              else resolve(null);
-            });
-            auth.worker!.postMessage({
-              call: "certify_key_bytes",
-              privateKey: auth.privateKeys!,
-              targetPublicKey: request.targetPublicKey,
-              passphrase: auth.subPassphrase!,
-            });
-          },
-        );
-        if (!signaturePacketB64) throw new Error("certification sign failed");
-
-        const signed = await auth.getSignedMessage();
-        if (!signed) throw new Error("authorization failed");
-        await authApiClient(
-          signed.signedMessage,
-        ).wot.postSignatureByFingerprint(
-          request.targetFingerprint,
-          {
-            signature_b64: signaturePacketB64,
-            signature_type: "certification",
-            hash_algo: "sha256",
-            qr_nonce: request.qrNonce,
-          },
-          request.keyServerBase,
-        );
-        router.push(`/profile/${encodeURIComponent(request.targetUserId)}`);
-      } catch (e) {
-        showError(e instanceof Error ? e.message : t("error.unknown"));
-      } finally {
-        setScanProcessing(false);
-      }
-    },
-    [auth, router, showError, t],
-  );
-
-  const openWotSignatureConfirmDialog = useCallback(
-    (request: WotSignRequest) => {
-      const suffix = `${request.targetFingerprint.slice(-8, -4)} ${request.targetFingerprint.slice(-4)}`;
-      pushDialog((p) => (
-        <Dialog {...p} title={t("wot.confirm_sign_title")}>
-          <div className="space-y-3">
-            <p className="text-sm text-muted">
-              {t("wot.confirm_sign_message")}
-            </p>
-            <div>
-              <p className="text-xs text-muted">
-                {t("wot.confirm_sign_server")}
-              </p>
-              <Code code={request.keyServerBase} />
-            </div>
-            <div>
-              <p className="text-xs text-muted">
-                {t("wot.confirm_sign_target")}
-              </p>
-              <p className="text-sm select-all">{request.targetUserId}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted">
-                {t("wot.confirm_sign_fingerprint_suffix")}
-              </p>
-              <p className="text-sm font-mono">{suffix}</p>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={p.close}
-                className="px-3 py-1.5 rounded border border-accent/30 text-sm hover:bg-accent/10"
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  p.close();
-                  void submitWotSignature(request);
-                }}
-                className="px-3 py-1.5 rounded bg-accent/20 text-sm hover:bg-accent/30"
-              >
-                {t("common.ok")}
-              </button>
-            </div>
-          </div>
-        </Dialog>
-      ));
-    },
-    [pushDialog, submitWotSignature, t],
-  );
-
-  useEffect(() => {
-    if (!scanResult || scanProcessing || !isLoggedIn || !auth.worker) return;
-    let cancelled = false;
-    setScanProcessing(true);
-
-    (async () => {
-      try {
-        const split = scanResult.split(".");
-        if (split.length !== 2) throw new Error("invalid qr payload");
-        const [sigB64u, payloadB64u] = split;
-        const payloadText = decodeBase64Url(payloadB64u);
-        const payload = JSON.parse(payloadText) as WotQrPayload;
-        if (payload.type !== "xrypton-wot" || payload.v !== 1) {
-          throw new Error("invalid qr version/type");
-        }
-        if (typeof payload.key_server !== "string" || !payload.key_server) {
-          throw new Error("invalid key_server");
-        }
-        const keyServerBase = normalizeKeyServerBaseUrl(payload.key_server);
-        const fp = payload.fingerprint;
-        if (!/^[A-F0-9]{40,128}$/.test(fp) || fp.length % 2 !== 0) {
-          throw new Error("invalid fingerprint");
-        }
-        const nonceTime = new Date(payload.nonce.time).getTime();
-        if (!Number.isFinite(nonceTime)) throw new Error("invalid nonce time");
-        if (Math.abs(Date.now() - nonceTime) > 5 * 60 * 1000) {
-          throw new Error("qr expired");
-        }
-
-        const keyResp = await apiClient().wot.getKeyByFingerprint(
-          fp,
-          keyServerBase,
-        );
-        const targetPrimaryFingerprint = keyResp.fingerprint;
-        if (
-          !/^[A-F0-9]{40,128}$/.test(targetPrimaryFingerprint) ||
-          targetPrimaryFingerprint.length % 2 !== 0
-        ) {
-          throw new Error("invalid response fingerprint");
-        }
-        if (targetPrimaryFingerprint !== fp) {
-          throw new Error("fingerprint mismatch");
-        }
-        const payloadBytes = new TextEncoder().encode(canonicalize(payload));
-        const signatureArmored = new TextDecoder().decode(
-          fromBase64Url(sigB64u),
-        );
-        const verifyOk = await new Promise<boolean>((resolve) => {
-          auth.worker!.eventWaiter("verify_detached_signature", (result) => {
-            resolve(result.success);
-          });
-          auth.worker!.postMessage({
-            call: "verify_detached_signature",
-            publicKey: keyResp.armored_public_key,
-            signature: signatureArmored,
-            data: bytesToBase64(payloadBytes),
-          });
-        });
-        if (!verifyOk) throw new Error("qr signature verify failed");
-
-        if (!cancelled) {
-          openWotSignatureConfirmDialog({
-            keyServerBase,
-            targetFingerprint: targetPrimaryFingerprint,
-            targetUserId: keyResp.user_id,
-            targetPublicKey: keyResp.armored_public_key,
-            qrNonce: payload.nonce,
-          });
-        }
-      } catch (e) {
-        if (!cancelled) {
-          showError(e instanceof Error ? e.message : t("error.unknown"));
-        }
-      } finally {
-        if (!cancelled) {
-          setScanProcessing(false);
-          setScanResult("");
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    auth,
-    isLoggedIn,
-    openWotSignatureConfirmDialog,
-    scanProcessing,
-    scanResult,
-    showError,
-    t,
-  ]);
-
   const trustedByUserId = useMemo(
     () => new Set(contactUserIds),
     [contactUserIds],
@@ -1018,22 +791,6 @@ const UserProfileView = ({ userId }: Props) => {
     ));
   };
 
-  const openWotScanner = () => {
-    setScanResult("");
-    pushDialog((p) => (
-      <Dialog {...p} title="Scan Web of Trust QR">
-        <div className="space-y-3">
-          <QrReader
-            setData={(data) => {
-              setScanResult(data);
-              p.close();
-            }}
-          />
-        </div>
-      </Dialog>
-    ));
-  };
-
   const openTrustGraphDialog = () => {
     if (!trustGraph || !targetFingerprint) return;
     const activeFingerprints = new Set(
@@ -1114,22 +871,25 @@ const UserProfileView = ({ userId }: Props) => {
             </button>
           )}
           <h2 className="text-lg font-semibold flex-1">{t("tab.profile")}</h2>
-          {isLoggedIn &&
-            (isContact ? (
-              <span className="p-2 text-accent">
-                <FontAwesomeIcon icon={faCheck} />
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={handleAddContact}
-                disabled={addingContact}
-                className="p-2 hover:bg-accent/10 rounded disabled:opacity-50"
-                title={t("contacts.add")}
-              >
-                <FontAwesomeIcon icon={faPlus} />
-              </button>
-            ))}
+          {isLoggedIn && (
+            <div className="flex items-center gap-1">
+              {isContact ? (
+                <span className="p-2 text-accent">
+                  <FontAwesomeIcon icon={faCheck} />
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleAddContact}
+                  disabled={addingContact}
+                  className="p-2 hover:bg-accent/10 rounded disabled:opacity-50"
+                  title={t("contacts.add")}
+                >
+                  <FontAwesomeIcon icon={faPlus} />
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1280,16 +1040,6 @@ const UserProfileView = ({ userId }: Props) => {
             <FontAwesomeIcon icon={faKey} />
             {t("profile.public_keys")}
           </button>
-          {isLoggedIn && (
-            <button
-              type="button"
-              onClick={openWotScanner}
-              disabled={scanProcessing || !hasWorker}
-              className="w-full py-2 rounded border border-accent/30 hover:bg-accent/10 text-sm disabled:opacity-50"
-            >
-              {t("wot.scan_sign")}
-            </button>
-          )}
         </div>
       )}
 
