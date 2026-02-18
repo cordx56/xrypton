@@ -22,7 +22,10 @@ const sw: ServiceWorkerGlobalScope = self;
 const forwardToClients = async (
   data: z.infer<typeof Notification>,
 ): Promise<boolean> => {
-  const clients = await sw.clients.matchAll({ type: "window" });
+  const clients = await sw.clients.matchAll({
+    type: "window",
+    includeUncontrolled: true,
+  });
   let hasVisible = false;
   for (const client of clients) {
     client.postMessage(data);
@@ -159,8 +162,6 @@ sw.addEventListener("push", (ev) => {
           }
 
           // 可視クライアントがいればブラウザ通知をスキップ
-          // iOS Safariではclients.matchAll()が空を返す場合があるが、
-          // その場合は hasVisible=false となりフォールバックで通知を表示する
           if (hasVisible) return;
 
           // 送信者名（バックエンドが付与、空文字やundefinedならフォールバック）

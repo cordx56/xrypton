@@ -248,6 +248,9 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const fingerprintToUserId = useRef<Record<string, string>>({});
   // リトライ済みメッセージの追跡（重複防止）
   const retryingMessages = useRef<Set<string>>(new Set());
+  // チャット/スレッド切替時の古い非同期レスポンスを無視するための世代番号
+  const groupDetailVersionRef = useRef(0);
+  const messageLoadVersionRef = useRef(0);
   // メンバープロフィールのキャッシュ
   type MemberProfile = {
     display_name: string;
@@ -448,7 +451,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           !data.name
         )
           break;
-        // 暗号化データを復号して SDP + 一時公開鍵を取得
+        // 暗号化データを復号して SDP を取得
         if (auth.worker && auth.privateKeys && auth.subPassphrase) {
           try {
             const decrypted = await new Promise<string>((resolve, reject) => {
@@ -467,7 +470,11 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
                 message: data.encrypted!,
               });
             });
-            const parsed = JSON.parse(decrypted);
+            const parsed = JSON.parse(decrypted) as {
+              sdp?: string;
+              publicKey?: string;
+            };
+            if (!parsed.sdp) break;
             realtime.addPendingSession({
               sessionId: data.session_id!,
               chatId: data.chat_id ?? "",
@@ -560,10 +567,17 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   // グループ詳細（メンバー公開鍵・プロフィール）を取得してキャッシュに格納
   const fetchGroupDetail = useCallback(
     async (groupId: string) => {
+      const requestVersion = ++groupDetailVersionRef.current;
       const signed = await auth.getSignedMessage();
       if (!signed) return;
       const client = authApiClient(signed.signedMessage);
       const data = await client.chat.get(groupId);
+      if (
+        chatIdRef.current !== groupId ||
+        groupDetailVersionRef.current !== requestVersion
+      ) {
+        return;
+      }
       chat.setThreads(data.threads ?? []);
       setArchivedThreads(data.archived_threads ?? []);
 
@@ -612,6 +626,12 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           };
         }
       }
+      if (
+        chatIdRef.current !== groupId ||
+        groupDetailVersionRef.current !== requestVersion
+      ) {
+        return;
+      }
       knownPublicKeys.current = pubKeys;
       encryptionPublicKeys.current = encPubKeys;
       encryptionPublicKeyByUser.current = encPubKeyMap;
@@ -631,7 +651,11 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
 
   // threadIdが変わった時にメッセージを取得
   useEffect(() => {
-    if (!chatId || !threadId) return;
+    if (!chatId || !threadId) {
+      messageLoadVersionRef.current += 1;
+      return;
+    }
+    const requestVersion = ++messageLoadVersionRef.current;
     const thread = chat.threads.find((t) => t.id === threadId);
     if (thread) setSelectedThreadName(thread.name || thread.id);
 
@@ -645,6 +669,13 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
         if (!signed) return;
         const client = authApiClient(signed.signedMessage);
         const data = await client.message.list(chatId, threadId);
+        if (
+          chatIdRef.current !== chatId ||
+          threadIdRef.current !== threadId ||
+          messageLoadVersionRef.current !== requestVersion
+        ) {
+          return;
+        }
         chat.setTotalMessages(data.total ?? 0);
 
         // 暗号化状態のメッセージを即座に表示し、プログレッシブに復号
@@ -654,13 +685,24 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
 
         // メンバー公開鍵の取得完了を待ってから復号を開始
         await groupDetailReady.current;
+        if (
+          chatIdRef.current !== chatId ||
+          threadIdRef.current !== threadId ||
+          messageLoadVersionRef.current !== requestVersion
+        ) {
+          return;
+        }
 
         const version = ++decryptVersionRef.current;
         await decryptMessagesProgressively(rawMessages, version);
       } catch {
-        showError(t("error.message_load_failed"));
+        if (messageLoadVersionRef.current === requestVersion) {
+          showError(t("error.message_load_failed"));
+        }
       } finally {
-        setLoading(false);
+        if (messageLoadVersionRef.current === requestVersion) {
+          setLoading(false);
+        }
       }
     })();
   }, [chatId, threadId]);
@@ -1087,18 +1129,21 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     pushDialog((p) => {
       const [threadName, setThreadName] = useState("");
       const [isRealtimeSession, setIsRealtimeSession] = useState(false);
+      const [isSubmitting, setIsSubmitting] = useState(false);
       return (
         <Dialog {...p} title={t("chat.new_thread")}>
           <form
             onSubmit={async (e) => {
               e.preventDefault();
+              if (isSubmitting) return;
               const fd = new FormData(e.currentTarget);
               const name = fd.get("name") as string;
               if (!name || !chatId) return;
+              setIsSubmitting(true);
 
-              if (isRealtimeSession) {
-                // リアルタイムセッション開始
-                try {
+              try {
+                if (isRealtimeSession) {
+                  // リアルタイムセッション開始
                   const memberIds = Object.keys(memberProfiles).filter(
                     (id) => id !== auth.userId,
                   );
@@ -1115,14 +1160,10 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
                   );
                   setRealtimeFocused(true);
                   p.close();
-                } catch {
-                  showError(t("error.unknown"));
-                }
-              } else {
-                // 通常スレッド作成
-                const signed = await auth.getSignedMessage();
-                if (!signed) return;
-                try {
+                } else {
+                  // 通常スレッド作成
+                  const signed = await auth.getSignedMessage();
+                  if (!signed) return;
                   const client = authApiClient(signed.signedMessage);
                   const result = await client.chat.createThread(chatId, name);
                   const newThread: Thread = {
@@ -1134,9 +1175,11 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
                   };
                   chat.setThreads([...chat.threads, newThread]);
                   p.close();
-                } catch {
-                  showError(t("error.unknown"));
                 }
+              } catch {
+                showError(t("error.unknown"));
+              } finally {
+                setIsSubmitting(false);
               }
             }}
           >
@@ -1144,6 +1187,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
               name="name"
               placeholder={t("chat.thread_name")}
               className="w-full border border-accent/30 rounded px-3 py-2 mb-3 bg-transparent"
+              disabled={isSubmitting}
               onChange={(e) => setThreadName(e.target.value)}
             />
             <label className="flex items-center gap-2 mb-3 cursor-pointer">
@@ -1151,6 +1195,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
                 type="checkbox"
                 checked={isRealtimeSession}
                 onChange={(e) => setIsRealtimeSession(e.target.checked)}
+                disabled={isSubmitting}
                 className="accent-accent"
               />
               <span className="text-sm">{t("realtime.session")}</span>
@@ -1162,10 +1207,18 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
             )}
             <button
               type="submit"
-              disabled={!threadName.trim()}
+              disabled={!threadName.trim() || isSubmitting}
               className="px-4 py-2 bg-accent/30 rounded hover:bg-accent/50 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {isRealtimeSession ? t("realtime.start") : t("common.ok")}
+              {isSubmitting ? (
+                <span className="inline-flex items-center justify-center">
+                  <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                </span>
+              ) : isRealtimeSession ? (
+                t("realtime.start")
+              ) : (
+                t("common.ok")
+              )}
             </button>
           </form>
         </Dialog>

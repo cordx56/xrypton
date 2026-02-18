@@ -30,8 +30,8 @@ export type PendingSession = {
   chatId: string;
   name: string;
   createdBy: string;
-  /** 復号済みの SDP + 一時公開鍵 */
-  offer: { sdp: string; publicKey: string };
+  /** 復号済みの SDP（公開鍵はDataChannel確立後の key_exchange で交換） */
+  offer: { sdp: string; publicKey?: string };
 };
 
 type RealtimeContextType = {
@@ -148,7 +148,7 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
       // 各メンバー向けの SDP Offer を生成
       const offers = await createOffersForMembers(session, targetMemberIds);
 
-      // 各メンバーの永続公開鍵で SDP+一時公開鍵を暗号化
+      // 各メンバーの永続公開鍵で SDP を暗号化
       const encrypted: Record<string, string> = {};
       for (let i = 0; i < targetMemberIds.length; i++) {
         const memberId = targetMemberIds[i];
@@ -158,7 +158,6 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
 
         const plainData = JSON.stringify({
           sdp: offer.sdp,
-          publicKey: tempKeys.publicKey,
         });
         const plainBase64 = encodeToBase64(plainData);
 
@@ -220,8 +219,10 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
         callbacks,
       };
 
-      // 作成者のPGP公開鍵を保存
-      session.peerPublicKeys.set(pending.createdBy, pending.offer.publicKey);
+      // 互換性: offerに公開鍵が含まれる場合のみ事前登録
+      if (pending.offer.publicKey) {
+        session.peerPublicKeys.set(pending.createdBy, pending.offer.publicKey);
+      }
 
       // 作成者の Offer に Answer を返す
       const answer = await acceptOffer(
