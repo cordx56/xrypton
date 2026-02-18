@@ -1,19 +1,18 @@
 import { z } from "zod";
 import { Notification } from "@/utils/schema";
 import { getKey } from "@/utils/keyStore";
-import { enqueuePushNotification } from "@/utils/pushInboxStore";
+import {
+  enqueuePushNotification,
+  hasPushInboxEntry,
+} from "@/utils/pushInboxStore";
 
 // @ts-ignore
 const sw: ServiceWorkerGlobalScope = self;
 
-/** 可視状態の制御中クライアントがあるか判定する。
- * iOSでは取得漏れがあるため、判定不能は「非表示」とみなして通知を優先する。 */
-const hasVisibleControlledClient = async (): Promise<boolean> => {
-  const controlledClients = await sw.clients.matchAll({ type: "window" });
-  return controlledClients.some(
-    (client) => (client as WindowClient).visibilityState === "visible",
-  );
-};
+const NOTIFY_ACK_WAIT_MS = 1500;
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 sw.addEventListener("install", (event) => {
   const a = z.object({});
@@ -77,8 +76,7 @@ sw.addEventListener("push", (ev) => {
   const notification = data.data;
   ev.waitUntil(
     (async () => {
-      await enqueuePushNotification(notification);
-      const hasVisible = await hasVisibleControlledClient();
+      const inboxKey = await enqueuePushNotification(notification);
 
       switch (notification.type) {
         case "message": {
@@ -90,7 +88,8 @@ sw.addEventListener("push", (ev) => {
             );
             if (shouldSuppress) return;
           }
-          if (hasVisible) return;
+          await sleep(NOTIFY_ACK_WAIT_MS);
+          if (!(await hasPushInboxEntry(inboxKey))) return;
           await sw.registration.showNotification(
             notification.sender_name || "New message",
             {
@@ -106,7 +105,8 @@ sw.addEventListener("push", (ev) => {
         }
 
         case "added_to_group": {
-          if (hasVisible) return;
+          await sleep(NOTIFY_ACK_WAIT_MS);
+          if (!(await hasPushInboxEntry(inboxKey))) return;
           await sw.registration.showNotification("New group", {
             body: `Added to group '${notification.name}'`,
             data: { chatId: notification.chat_id },
@@ -115,7 +115,8 @@ sw.addEventListener("push", (ev) => {
         }
 
         case "new_thread": {
-          if (hasVisible) return;
+          await sleep(NOTIFY_ACK_WAIT_MS);
+          if (!(await hasPushInboxEntry(inboxKey))) return;
           await sw.registration.showNotification("New thread", {
             body: `New thread '${notification.name}'`,
             data: { chatId: notification.chat_id },
@@ -124,7 +125,8 @@ sw.addEventListener("push", (ev) => {
         }
 
         case "realtime_offer": {
-          if (hasVisible) return;
+          await sleep(NOTIFY_ACK_WAIT_MS);
+          if (!(await hasPushInboxEntry(inboxKey))) return;
           await sw.registration.showNotification("Real-time Chat", {
             body: `Real-time chat: ${notification.name}`,
             data: {

@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { Notification } from "@/utils/schema";
-import { deleteKey, getEntriesWithPrefix, setKey } from "@/utils/keyStore";
+import {
+  deleteKey,
+  getEntriesWithPrefix,
+  getKey,
+  setKey,
+} from "@/utils/keyStore";
 
 const INBOX_PREFIX = "push:inbox:";
 const MAX_ENTRIES = 300;
@@ -31,12 +36,13 @@ function parseStored(raw: string): StoredPushNotification | null {
 
 export async function enqueuePushNotification(
   notification: z.infer<typeof Notification>,
-): Promise<void> {
+): Promise<string> {
   const now = Date.now();
   const key = `${INBOX_PREFIX}${now}:${crypto.randomUUID()}`;
   const value: StoredPushNotification = { receivedAt: now, notification };
   await setKey(key, JSON.stringify(value));
   await trimPushInbox();
+  return key;
 }
 
 export async function loadPushInbox(limit = 100): Promise<PushInboxEntry[]> {
@@ -67,6 +73,11 @@ export async function loadPushInbox(limit = 100): Promise<PushInboxEntry[]> {
 
 export async function removePushInboxEntry(key: string): Promise<void> {
   await deleteKey(key);
+}
+
+export async function hasPushInboxEntry(key: string): Promise<boolean> {
+  const value = await getKey(key);
+  return value !== undefined;
 }
 
 async function trimPushInbox(): Promise<void> {
