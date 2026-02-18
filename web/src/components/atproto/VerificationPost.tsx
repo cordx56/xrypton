@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import { RichText } from "@atproto/api";
 import { useAtproto } from "@/contexts/AtprotoContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useI18n } from "@/contexts/I18nContext";
@@ -61,9 +62,13 @@ const VerificationPost = () => {
     if (!agent || !fingerprint || posting) return;
     setPosting(true);
     try {
-      // ATProtoに投稿
+      // リンクを自動検出してfacets付きで投稿
+      const rt = new RichText({ text: postText });
+      await rt.detectFacets(agent);
+
       const response = await agent.post({
-        text: postText,
+        text: rt.text,
+        facets: rt.facets,
         langs: ["en"],
       } as Parameters<typeof agent.post>[0]);
 

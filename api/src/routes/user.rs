@@ -319,9 +319,13 @@ async fn verify_pubkey_post(pool: &db::Db, uri: &str, pds_url: &str) -> bool {
     // 1. DB から署名を取得
     let sigs = match db::atproto::get_signatures_by_uri(pool, uri, None).await {
         Ok(s) => s,
-        Err(_) => return false,
+        Err(e) => {
+            tracing::warn!(uri, "verify_pubkey_post: DB query failed: {e}");
+            return false;
+        }
     };
     let Some(sig) = sigs.first() else {
+        tracing::warn!(uri, "verify_pubkey_post: no signature found in DB");
         return false;
     };
 
@@ -329,25 +333,27 @@ async fn verify_pubkey_post(pool: &db::Db, uri: &str, pds_url: &str) -> bool {
     let Ok(public_keys) =
         xrypton_common::keys::PublicKeys::try_from(sig.signing_public_key.as_str())
     else {
+        tracing::warn!(uri, "verify_pubkey_post: failed to parse public key");
         return false;
     };
     let Ok(payload_bytes) = public_keys.verify_and_extract(&sig.signature) else {
+        tracing::warn!(uri, "verify_pubkey_post: PGP signature verification failed");
         return false;
     };
     let Ok(payload_text) = String::from_utf8(payload_bytes) else {
+        tracing::warn!(uri, "verify_pubkey_post: payload is not valid UTF-8");
         return false;
     };
 
     // 3. AT URIをパースしてPDSから実際のレコードを取得
     let Some((did, collection, rkey)) = parse_at_uri(uri) else {
+        tracing::warn!(uri, "verify_pubkey_post: failed to parse AT URI");
         return false;
     };
 
     // SSRF防止: PDSのURLがプライベートIPでないことを検証
-    if super::atproto::validate_url_not_private(pds_url)
-        .await
-        .is_err()
-    {
+    if let Err(e) = super::atproto::validate_url_not_private(pds_url).await {
+        tracing::warn!(uri, pds_url, "verify_pubkey_post: SSRF check failed: {e}");
         return false;
     }
 
@@ -356,6 +362,7 @@ async fn verify_pubkey_post(pool: &db::Db, uri: &str, pds_url: &str) -> bool {
         .timeout(std::time::Duration::from_secs(10))
         .build()
     else {
+        tracing::warn!(uri, "verify_pubkey_post: failed to build HTTP client");
         return false;
     };
     let client = AtpServiceClient::new(
@@ -371,6 +378,11 @@ async fn verify_pubkey_post(pool: &db::Db, uri: &str, pds_url: &str) -> bool {
     }
     .into();
     let Ok(output) = client.service.com.atproto.repo.get_record(params).await else {
+        tracing::warn!(
+            uri,
+            pds_url,
+            "verify_pubkey_post: getRecord from PDS failed"
+        );
         return false;
     };
 
@@ -381,9 +393,17 @@ async fn verify_pubkey_post(pool: &db::Db, uri: &str, pds_url: &str) -> bool {
         .and_then(|c| serde_json::to_value(c).ok())
         .and_then(|v| v.get("$link").and_then(|s| s.as_str()).map(String::from));
     let Some(cid_str) = cid_str else {
+        tracing::warn!(
+            uri,
+            "verify_pubkey_post: failed to extract CID from getRecord response"
+        );
         return false;
     };
     let Ok(record_value) = serde_json::to_value(&output.value) else {
+        tracing::warn!(
+            uri,
+            "verify_pubkey_post: failed to serialize record to JSON"
+        );
         return false;
     };
     let target = serde_json::json!({
@@ -392,7 +412,14 @@ async fn verify_pubkey_post(pool: &db::Db, uri: &str, pds_url: &str) -> bool {
         "uri": uri,
     });
     let expected = super::atproto::canonicalize_json(&target);
-    payload_text == expected
+    if payload_text != expected {
+        tracing::warn!(
+            uri,
+            "verify_pubkey_post: canonicalized mismatch\n  payload:  {payload_text}\n  expected: {expected}"
+        );
+        return false;
+    }
+    true
 }
 
 async fn get_profile(
