@@ -117,6 +117,16 @@ pub fn get_primary_fingerprint(public_keys: String) -> Result<JsValue, JsValue> 
     }
     .to_value())
 }
+#[wasm_bindgen]
+pub fn get_signing_sub_key_fingerprint(public_keys: String) -> Result<JsValue, JsValue> {
+    let keys = get_public_keys(public_keys)?;
+    Ok(ReturnValue::Ok {
+        value: vec![ResultData::String {
+            data: keys.get_signing_sub_key_fingerprint(),
+        }],
+    }
+    .to_value())
+}
 
 #[wasm_bindgen]
 pub fn get_pub_key_user_ids(public_keys: String) -> Result<JsValue, JsValue> {

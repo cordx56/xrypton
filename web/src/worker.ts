@@ -3,6 +3,7 @@ import init, {
   generate_private_keys,
   export_public_keys,
   get_primary_fingerprint,
+  get_signing_sub_key_fingerprint,
   get_private_key_user_ids,
   sign,
   sign_bytes,
@@ -29,6 +30,33 @@ import { base64ToBase64Url, decodeBase64Url } from "@/utils/base64";
 const worker: Worker = self;
 
 let initialized = false;
+
+/** knownPublicKeys マップから、主鍵フィンガープリントと署名サブキーフィンガープリント
+ *  の両方でルックアップ可能なマップを構築する。
+ *  extract_fingerprint が返す issuer fingerprint は署名サブキーのものであるため、
+ *  主鍵フィンガープリントだけでは検索に失敗する。 */
+function buildPubKeyLookup(
+  knownPublicKeys: Record<string, { name: string; publicKeys: string }>,
+): Map<string, { name: string; publicKeys: string }> {
+  const map = new Map(Object.entries(knownPublicKeys));
+  for (const [, entry] of Object.entries(knownPublicKeys)) {
+    try {
+      const result = WasmReturnValue.safeParse(
+        get_signing_sub_key_fingerprint(entry.publicKeys),
+      );
+      if (
+        result.success &&
+        result.data.result === "ok" &&
+        result.data.value[0]?.type === "string"
+      ) {
+        map.set(result.data.value[0].data, entry);
+      }
+    } catch {
+      // 署名サブキーのフィンガープリント取得に失敗した場合はスキップ
+    }
+  }
+  return map;
+}
 
 worker.addEventListener("message", async ({ data }) => {
   const post = (msg: z.infer<typeof WorkerResultMessage>) =>
@@ -312,7 +340,7 @@ worker.addEventListener("message", async ({ data }) => {
     // 4. decrypt_bytes で inner を復号 + inner signer fingerprints 取得
     // 5. outer fingerprint ∈ inner fingerprints を確認
     // 6. detached signature 検証
-    const knownPubKeys = new Map(Object.entries(parsed.data.knownPublicKeys));
+    const knownPubKeys = buildPubKeyLookup(parsed.data.knownPublicKeys);
 
     try {
       // 1. outer signer fingerprint を取得
@@ -553,7 +581,7 @@ worker.addEventListener("message", async ({ data }) => {
     // 4. decrypt_bytes で inner を復号 + inner signer fingerprints 取得
     // 5. outer fingerprint ∈ inner fingerprints を確認
     // 6. detached signature 検証
-    const knownPubKeys = new Map(Object.entries(parsed.data.knownPublicKeys));
+    const knownPubKeys = buildPubKeyLookup(parsed.data.knownPublicKeys);
 
     try {
       const rawData = Buffer.from(parsed.data.data, "base64");

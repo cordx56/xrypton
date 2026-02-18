@@ -275,6 +275,9 @@ impl PublicKeys {
     pub fn get_signing_sub_key_id(&self) -> String {
         self.signing_public().key_id().to_string()
     }
+    pub fn get_signing_sub_key_fingerprint(&self) -> String {
+        format!("{:X}", self.signing_public().fingerprint())
+    }
     pub fn get_primary_fingerprint(&self) -> String {
         format!("{:X}", self.keys.fingerprint())
     }
