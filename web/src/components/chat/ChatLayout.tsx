@@ -1,15 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { z } from "zod";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useChat } from "@/contexts/ChatContext";
 import { useDialogs, DialogComponent } from "@/contexts/DialogContext";
 import { useI18n } from "@/contexts/I18nContext";
 import { useIsMobile } from "@/hooks/useMediaQuery";
-import { useServiceWorker } from "@/hooks/useServiceWorker";
 import { authApiClient, apiClient, getApiBaseUrl } from "@/api/client";
-import { displayUserId } from "@/utils/schema";
+import { displayUserId, Notification } from "@/utils/schema";
 import {
   decodeBase64Url,
   encodeToBase64,
@@ -23,6 +23,7 @@ import {
   isImageType,
 } from "@/utils/fileMessage";
 import { setCachedContactIds } from "@/utils/accountStore";
+import { loadPushInbox, removePushInboxEntry } from "@/utils/pushInboxStore";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
 import ChatGroupList from "./ChatGroupList";
 import ThreadList from "./ThreadList";
@@ -288,231 +289,318 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   memberProfilesRef.current = memberProfiles;
   const messagesRef = useRef(chat.messages);
   messagesRef.current = chat.messages;
+  const processingPushInboxRef = useRef(false);
 
-  // SWからのPush通知イベントをリッスンしてUI更新
-  // useServiceWorkerがref経由で最新の関数を呼ぶため、useCallbackは不要
-  const handleSwEvent = async (data: {
-    type: string;
-    chat_id?: string;
-    thread_id?: string;
-    session_id?: string;
-    name?: string;
-    sender_id?: string;
-    sender_name?: string;
-    encrypted?: string;
-    answer?: string;
-    is_self?: boolean;
-  }) => {
-    switch (data.type) {
-      case "message": {
-        // 自己メッセージの場合、送信側の楽観的追加で処理するため
-        // メッセージリストの再取得をスキップ（ファイル送信時に完了前に表示されるのを防ぐ）
-        if (data.is_self) break;
-
-        // Worker経由で暗号文を復号
-        let body = "New message";
-        if (
-          data.encrypted &&
-          auth.worker &&
-          auth.privateKeys &&
-          auth.subPassphrase
-        ) {
-          try {
-            body = await new Promise<string>((resolve, reject) => {
-              auth.worker!.eventWaiter("decrypt", (result) => {
-                if (result.success) {
-                  resolve(decodeBase64Url(result.data.payload));
-                } else {
-                  reject(new Error(result.message));
-                }
-              });
-              auth.worker!.postMessage({
-                call: "decrypt",
-                passphrase: auth.subPassphrase!,
-                privateKeys: auth.privateKeys!,
-                knownPublicKeys: knownPublicKeys.current,
-                message: data.encrypted!,
-              });
-            });
-          } catch {
-            // 復号失敗時はデフォルトのbodyを使用
-          }
-        }
-
-        // 送信者プロフィールを取得（キャッシュまたはAPI）
-        const senderId = data.sender_id ?? "unknown";
-        let displayName = displayUserId(senderId);
-        let iconUrl: string | null = null;
-        const cached = memberProfilesRef.current[senderId];
-        if (cached) {
-          displayName = cached.display_name;
-          iconUrl = cached.icon_url;
-        } else if (data.sender_name) {
-          // サーバが平文解決済みの sender_name を付与している場合はそれを使う
-          displayName = data.sender_name;
-          try {
-            const profile = await apiClient().user.getProfile(senderId);
-            iconUrl = profile.icon_url
-              ? `${getApiBaseUrl()}${profile.icon_url}`
-              : null;
-          } catch {
-            // アイコン取得失敗は無視
-          }
-        } else {
-          try {
-            const profile = await apiClient().user.getProfile(senderId);
-            displayName = await resolveDisplayName(
-              senderId,
-              profile.display_name || displayUserId(senderId),
-            );
-            iconUrl = profile.icon_url
-              ? `${getApiBaseUrl()}${profile.icon_url}`
-              : null;
-          } catch {
-            // プロフィール取得失敗時はsenderIdを使用
-          }
-        }
-
-        showNotification({ displayName, iconUrl, body });
-
-        // チャンネルとスレッドの更新日時を更新
-        if (data.chat_id) {
-          touchTimestamps(data.chat_id, data.thread_id);
-        }
-
-        // 現在閲覧中でないチャンネル/スレッドを未読にする
-        if (data.chat_id) {
-          const viewingThread =
-            chatIdRef.current === data.chat_id &&
-            threadIdRef.current === data.thread_id;
-          if (!viewingThread) {
-            chat.markUnread(data.chat_id, data.thread_id);
-          }
-        }
-
-        // 現在表示中のチャットと一致する場合、メッセージリストを再取得
-        const currentChatId = chatIdRef.current;
-        const currentThreadId = threadIdRef.current;
-        if (
-          currentChatId &&
-          currentThreadId &&
-          data.chat_id &&
-          currentChatId === data.chat_id
-        ) {
-          try {
-            const signed2 = await auth.getSignedMessage();
-            if (!signed2) break;
-            const client2 = authApiClient(signed2.signedMessage);
-            const msgData = await client2.message.list(
-              currentChatId,
-              currentThreadId,
-            );
-            const rawMessages: Message[] = msgData.messages ?? [];
-            chat.setTotalMessages(msgData.total ?? 0);
-            await mergeAndDecryptNewMessages(rawMessages);
-          } catch {
-            // failed to refresh messages
-          }
-        }
-        break;
+  const handleRealtimeOffer = useCallback(
+    async (data: {
+      chat_id?: string;
+      session_id?: string;
+      sender_id?: string;
+      name?: string;
+      encrypted?: string;
+    }): Promise<boolean> => {
+      if (!data.encrypted || !data.session_id || !data.sender_id || !data.name)
+        return true;
+      if (
+        realtime.activeSession?.sessionId === data.session_id ||
+        realtime.pendingSessions.some((s) => s.sessionId === data.session_id)
+      ) {
+        return true;
       }
-      case "added_to_group": {
+
+      if (auth.worker && auth.privateKeys && auth.subPassphrase) {
         try {
-          const signed = await auth.getSignedMessage();
-          if (!signed) break;
-          const client = authApiClient(signed.signedMessage);
-          const groups = await client.chat.list();
-          chat.setGroups(groups);
+          const decrypted = await new Promise<string>((resolve, reject) => {
+            auth.worker!.eventWaiter("decrypt", (result: any) => {
+              if (result.success) {
+                resolve(decodeBase64Url(result.data.payload));
+              } else {
+                reject(new Error(result.message));
+              }
+            });
+            auth.worker!.postMessage({
+              call: "decrypt",
+              passphrase: auth.subPassphrase!,
+              privateKeys: auth.privateKeys!,
+              knownPublicKeys: knownPublicKeys.current,
+              message: data.encrypted!,
+            });
+          });
+          const parsed = JSON.parse(decrypted) as {
+            sdp?: string;
+            publicKey?: string;
+          };
+          if (!parsed.sdp) return true;
+          realtime.addPendingSession({
+            sessionId: data.session_id,
+            chatId: data.chat_id ?? "",
+            name: data.name,
+            createdBy: data.sender_id,
+            offer: {
+              sdp: parsed.sdp,
+              publicKey: parsed.publicKey,
+            },
+          });
+          return true;
         } catch {
-          // failed to refresh groups
+          // 復号失敗
+          return false;
         }
-        break;
       }
-      case "new_thread": {
-        const currentChatId = chatIdRef.current;
-        if (currentChatId && data.chat_id && currentChatId === data.chat_id) {
+      return false;
+    },
+    [
+      auth.privateKeys,
+      auth.subPassphrase,
+      auth.worker,
+      realtime.activeSession?.sessionId,
+      realtime.addPendingSession,
+      realtime.pendingSessions,
+    ],
+  );
+
+  const handlePushEvent = useCallback(
+    async (data: z.infer<typeof Notification>): Promise<boolean> => {
+      switch (data.type) {
+        case "message": {
+          // 自己メッセージの場合、送信側の楽観的追加で処理するため
+          // メッセージリストの再取得をスキップ（ファイル送信時に完了前に表示されるのを防ぐ）
+          if (data.is_self) break;
+
+          // message_id からメッセージ本体を取得し、Worker経由で復号
+          let body = "New message";
+          if (
+            data.chat_id &&
+            data.thread_id &&
+            data.message_id &&
+            auth.worker &&
+            auth.privateKeys &&
+            auth.subPassphrase
+          ) {
+            try {
+              const signed = await auth.getSignedMessage();
+              if (signed) {
+                const client = authApiClient(signed.signedMessage);
+                const msg = await client.message.get(
+                  data.chat_id,
+                  data.thread_id,
+                  data.message_id,
+                );
+                if (typeof msg.content === "string" && msg.content.length > 0) {
+                  body = await new Promise<string>((resolve, reject) => {
+                    auth.worker!.eventWaiter("decrypt", (result) => {
+                      if (result.success) {
+                        resolve(decodeBase64Url(result.data.payload));
+                      } else {
+                        reject(new Error(result.message));
+                      }
+                    });
+                    auth.worker!.postMessage({
+                      call: "decrypt",
+                      passphrase: auth.subPassphrase!,
+                      privateKeys: auth.privateKeys!,
+                      knownPublicKeys: knownPublicKeys.current,
+                      message: msg.content,
+                    });
+                  });
+                }
+              }
+            } catch {
+              // 復号失敗時はデフォルトのbodyを使用
+            }
+          }
+
+          // 送信者プロフィールを取得（キャッシュまたはAPI）
+          const senderId = data.sender_id ?? "unknown";
+          let displayName = displayUserId(senderId);
+          let iconUrl: string | null = null;
+          const cached = memberProfilesRef.current[senderId];
+          if (cached) {
+            displayName = cached.display_name;
+            iconUrl = cached.icon_url;
+          } else if (data.sender_name) {
+            // サーバが平文解決済みの sender_name を付与している場合はそれを使う
+            displayName = data.sender_name;
+            try {
+              const profile = await apiClient().user.getProfile(senderId);
+              iconUrl = profile.icon_url
+                ? `${getApiBaseUrl()}${profile.icon_url}`
+                : null;
+            } catch {
+              // アイコン取得失敗は無視
+            }
+          } else {
+            try {
+              const profile = await apiClient().user.getProfile(senderId);
+              displayName = await resolveDisplayName(
+                senderId,
+                profile.display_name || displayUserId(senderId),
+              );
+              iconUrl = profile.icon_url
+                ? `${getApiBaseUrl()}${profile.icon_url}`
+                : null;
+            } catch {
+              // プロフィール取得失敗時はsenderIdを使用
+            }
+          }
+
+          showNotification({ displayName, iconUrl, body });
+
+          // チャンネルとスレッドの更新日時を更新
+          if (data.chat_id) {
+            touchTimestamps(data.chat_id, data.thread_id);
+          }
+
+          // 現在閲覧中でないチャンネル/スレッドを未読にする
+          if (data.chat_id) {
+            const viewingThread =
+              chatIdRef.current === data.chat_id &&
+              threadIdRef.current === data.thread_id;
+            if (!viewingThread) {
+              chat.markUnread(data.chat_id, data.thread_id);
+            }
+          }
+
+          // 現在表示中のチャットと一致する場合、メッセージリストを再取得
+          const currentChatId = chatIdRef.current;
+          const currentThreadId = threadIdRef.current;
+          if (
+            currentChatId &&
+            currentThreadId &&
+            data.chat_id &&
+            currentChatId === data.chat_id
+          ) {
+            try {
+              const signed2 = await auth.getSignedMessage();
+              if (!signed2) break;
+              const client2 = authApiClient(signed2.signedMessage);
+              const msgData = await client2.message.list(
+                currentChatId,
+                currentThreadId,
+              );
+              const rawMessages: Message[] = msgData.messages ?? [];
+              chat.setTotalMessages(msgData.total ?? 0);
+              await mergeAndDecryptNewMessages(rawMessages);
+            } catch {
+              // failed to refresh messages
+            }
+          }
+          return true;
+        }
+        case "added_to_group": {
           try {
             const signed = await auth.getSignedMessage();
             if (!signed) break;
             const client = authApiClient(signed.signedMessage);
-            const detail = await client.chat.get(data.chat_id);
-            chat.setThreads(detail.threads ?? []);
+            const groups = await client.chat.list();
+            chat.setGroups(groups);
           } catch {
-            // failed to refresh threads
+            // failed to refresh groups
           }
+          return true;
         }
-        break;
-      }
-      case "realtime_offer": {
-        if (
-          !data.encrypted ||
-          !data.session_id ||
-          !data.sender_id ||
-          !data.name
-        )
-          break;
-        // 暗号化データを復号して SDP を取得
-        if (auth.worker && auth.privateKeys && auth.subPassphrase) {
+        case "new_thread": {
+          const currentChatId = chatIdRef.current;
+          if (currentChatId && data.chat_id && currentChatId === data.chat_id) {
+            try {
+              const signed = await auth.getSignedMessage();
+              if (!signed) break;
+              const client = authApiClient(signed.signedMessage);
+              const detail = await client.chat.get(data.chat_id);
+              chat.setThreads(detail.threads ?? []);
+            } catch {
+              // failed to refresh threads
+            }
+          }
+          return true;
+        }
+        case "realtime_offer": {
+          return handleRealtimeOffer(data);
+        }
+        case "realtime_answer": {
+          if (!data.session_id || !data.sender_id || !data.answer) break;
           try {
-            const decrypted = await new Promise<string>((resolve, reject) => {
-              auth.worker!.eventWaiter("decrypt", (result: any) => {
-                if (result.success) {
-                  resolve(decodeBase64Url(result.data.payload));
-                } else {
-                  reject(new Error(result.message));
-                }
-              });
-              auth.worker!.postMessage({
-                call: "decrypt",
-                passphrase: auth.subPassphrase!,
-                privateKeys: auth.privateKeys!,
-                knownPublicKeys: knownPublicKeys.current,
-                message: data.encrypted!,
-              });
-            });
-            const parsed = JSON.parse(decrypted) as {
-              sdp?: string;
-              publicKey?: string;
-            };
-            if (!parsed.sdp) break;
-            realtime.addPendingSession({
-              sessionId: data.session_id!,
-              chatId: data.chat_id ?? "",
-              name: data.name!,
-              createdBy: data.sender_id!,
-              offer: {
-                sdp: parsed.sdp,
-                publicKey: parsed.publicKey,
-              },
-            });
+            await realtime.handleIncomingAnswer(
+              data.session_id,
+              data.sender_id,
+              data.answer,
+            );
           } catch {
-            // 復号失敗
+            // answer適用失敗
+          }
+          return true;
+        }
+      }
+      return true;
+    },
+    [
+      auth.getSignedMessage,
+      auth.privateKeys,
+      auth.subPassphrase,
+      auth.worker,
+      chat,
+      handleRealtimeOffer,
+      resolveDisplayName,
+      realtime.handleIncomingAnswer,
+      showNotification,
+    ],
+  );
+
+  // Push受信データをIndexedDBから高頻度で回収して処理
+  useEffect(() => {
+    let disposed = false;
+    const processInbox = async () => {
+      if (disposed || processingPushInboxRef.current) return;
+      processingPushInboxRef.current = true;
+      try {
+        const entries = await loadPushInbox(100);
+        for (const entry of entries) {
+          if (disposed) return;
+          const processed = await handlePushEvent(entry.notification);
+          if (processed) {
+            await removePushInboxEntry(entry.key);
           }
         }
-        break;
+      } catch {
+        // failed to process push inbox
+      } finally {
+        processingPushInboxRef.current = false;
       }
-      case "realtime_answer": {
-        if (!data.session_id || !data.sender_id || !data.answer) break;
-        try {
-          await realtime.handleIncomingAnswer(
-            data.session_id,
-            data.sender_id,
-            data.answer,
-          );
-        } catch {
-          // answer適用失敗
-        }
-        break;
-      }
-    }
-  };
+    };
 
-  useServiceWorker(handleSwEvent);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void processInbox();
+      }
+    };
+    const onFocus = () => {
+      void processInbox();
+    };
+    const onPageShow = () => {
+      void processInbox();
+    };
+
+    void processInbox();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("pageshow", onPageShow);
+    const intervalId = window.setInterval(() => {
+      void processInbox();
+    }, 1000);
+
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pageshow", onPageShow);
+      window.clearInterval(intervalId);
+    };
+  }, [handlePushEvent]);
 
   // iOS SafariではSWからのpostMessageが届かない場合があるため、
-  // ページが再度可視状態になった際にデータを再取得するフォールバック
+  // 可視化・フォーカス復帰時と定期的にデータを再取得するフォールバック
   useEffect(() => {
-    const onVisible = async () => {
+    const refreshFromServer = async () => {
       if (document.visibilityState !== "visible") return;
       const signed = await auth.getSignedMessage();
       if (!signed) return;
@@ -540,8 +628,32 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
         // failed to refresh on visibility change
       }
     };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
+
+    const onVisibilityChange = () => {
+      void refreshFromServer();
+    };
+    const onFocus = () => {
+      void refreshFromServer();
+    };
+    const onPageShow = () => {
+      void refreshFromServer();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("pageshow", onPageShow);
+
+    // SWイベント未達の環境向けフォールバックポーリング
+    const intervalId = window.setInterval(() => {
+      void refreshFromServer();
+    }, 15000);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pageshow", onPageShow);
+      window.clearInterval(intervalId);
+    };
   }, [
     auth.getSignedMessage,
     auth.worker,

@@ -1,90 +1,18 @@
 import { z } from "zod";
-import init, { decrypt, sign } from "xrypton-wasm";
-import { Notification, WasmReturnValue } from "@/utils/schema";
-import { decodeBase64Url } from "@/utils/base64";
+import { Notification } from "@/utils/schema";
 import { getKey } from "@/utils/keyStore";
-import { buildAuthPayload } from "@/utils/authPayload";
-
-/** アクティブアカウントのプレフィックス付きキーを取得する */
-const getAccountKey = async (key: string): Promise<string | undefined> => {
-  const activeId = await getKey("activeAccountId");
-  if (!activeId) return getKey(key);
-  return getKey(`account:${activeId}:${key}`);
-};
-
-const wasmReady = init();
+import { enqueuePushNotification } from "@/utils/pushInboxStore";
 
 // @ts-ignore
 const sw: ServiceWorkerGlobalScope = self;
 
-/** メインアプリのすべてのクライアントにメッセージを転送する。
- *  可視状態のクライアントに転送できた場合は true を返す。 */
-const forwardToClients = async (
-  data: z.infer<typeof Notification>,
-): Promise<boolean> => {
-  // 配信は制御外クライアントも含める
-  const clients = await sw.clients.matchAll({
-    type: "window",
-    includeUncontrolled: true,
-  });
-  for (const client of clients) {
-    try {
-      client.postMessage(data);
-    } catch {
-      // postMessage失敗は無視し、他クライアントへの配信を継続
-    }
-  }
-
-  // 通知抑制判定は、現SWが制御中の可視クライアントのみに限定する
+/** 可視状態の制御中クライアントがあるか判定する。
+ * iOSでは取得漏れがあるため、判定不能は「非表示」とみなして通知を優先する。 */
+const hasVisibleControlledClient = async (): Promise<boolean> => {
   const controlledClients = await sw.clients.matchAll({ type: "window" });
   return controlledClients.some(
     (client) => (client as WindowClient).visibilityState === "visible",
   );
-};
-
-/** 復号結果(WasmReturnValue)からプレーンテキストを抽出する */
-const extractPlaintext = (
-  result: z.infer<typeof WasmReturnValue>,
-): string | undefined => {
-  if (result.result !== "ok") return undefined;
-  const first = result.value[0];
-  if (!first || first.type !== "base64") return undefined;
-  try {
-    return decodeBase64Url(first.data);
-  } catch {
-    return undefined;
-  }
-};
-
-/** 認証付きfetchヘルパー。WASM sign()でPGP署名を生成しAuthorizationヘッダに付与する */
-const authenticatedFetch = async (
-  url: string,
-  privateKeys: string,
-  subPassphrase: string,
-): Promise<Response | null> => {
-  try {
-    const payload = buildAuthPayload();
-    const encoded = new TextEncoder().encode(payload);
-    const signResult = WasmReturnValue.safeParse(
-      sign(privateKeys, subPassphrase, encoded),
-    );
-    if (
-      !signResult.success ||
-      signResult.data.result !== "ok" ||
-      signResult.data.value[0]?.type !== "base64"
-    ) {
-      return null;
-    }
-    // base64urlエンコードされたarmoredメッセージをデコード
-    const armoredMessage = decodeBase64Url(signResult.data.value[0].data);
-    const resp = await fetch(url, {
-      headers: { Authorization: btoa(armoredMessage) },
-    });
-    if (!resp.ok) return null;
-    return resp;
-  } catch {
-    return null;
-  }
 };
 
 sw.addEventListener("install", (event) => {
@@ -147,18 +75,14 @@ sw.addEventListener("push", (ev) => {
   }
 
   const notification = data.data;
+  ev.waitUntil(
+    (async () => {
+      await enqueuePushNotification(notification);
+      const hasVisible = await hasVisibleControlledClient();
 
-  switch (notification.type) {
-    case "message": {
-      ev.waitUntil(
-        (async () => {
-          // クライアントへ転送（自己メッセージでもデータ同期のため転送する）
-          const hasVisible = await forwardToClients(notification);
-
-          // 自己メッセージはデータ同期のみでブラウザ通知を表示しない
+      switch (notification.type) {
+        case "message": {
           if (notification.is_self) return;
-
-          // 連絡先外を非表示にする設定: recipient_idで対象アカウントを特定して判定
           if (notification.sender_id) {
             const shouldSuppress = await shouldSuppressNonContact(
               notification.sender_id,
@@ -166,151 +90,57 @@ sw.addEventListener("push", (ev) => {
             );
             if (shouldSuppress) return;
           }
-
-          // 可視クライアントがいればブラウザ通知をスキップ
           if (hasVisible) return;
-
-          // 送信者名（バックエンドが付与、空文字やundefinedならフォールバック）
-          const title = notification.sender_name || "New message";
-
-          // sender_idからアイコンURLを構築（絶対URLにする）
-          let icon: string | undefined;
-          if (notification.sender_id) {
-            icon = `${sw.location.origin}/api/v1/user/${encodeURIComponent(notification.sender_id)}/icon`;
-          }
-
-          const notifOptions: NotificationOptions = {
-            icon,
-            tag: `msg-${notification.thread_id ?? notification.chat_id ?? "default"}`,
-            data: {
-              chatId: notification.chat_id,
-              threadId: notification.thread_id,
-            },
-          };
-
-          // thread_id / message_id がない場合はフォールバック表示
-          if (!notification.thread_id || !notification.message_id) {
-            await sw.registration.showNotification(title, {
-              ...notifOptions,
+          await sw.registration.showNotification(
+            notification.sender_name || "New message",
+            {
               body: "You have a new message",
-            });
-            return;
-          }
-
-          // IndexedDBからアクティブアカウントの秘密鍵とパスフレーズを取得
-          const keys = await getAccountKey("privateKeys");
-          if (!keys) {
-            await sw.registration.showNotification(title, {
-              ...notifOptions,
-              body: "You have a new message",
-            });
-            return;
-          }
-          const pass = await getAccountKey("subPassphrase");
-          if (!pass) {
-            await sw.registration.showNotification(title, {
-              ...notifOptions,
-              body: "Encrypted",
-            });
-            return;
-          }
-
-          // APIからメッセージを取得して復号（WASM初期化失敗時はフォールバック通知）
-          try {
-            await wasmReady;
-            const apiUrl = `${sw.location.origin}/api/v1/chat/${notification.chat_id}/${notification.thread_id}/message/${notification.message_id}`;
-            const resp = await authenticatedFetch(apiUrl, keys, pass);
-            if (!resp) {
-              await sw.registration.showNotification(title, {
-                ...notifOptions,
-                body: "You have a new message",
-              });
-              return;
-            }
-
-            const msg = await resp.json();
-            const content = msg.content;
-            if (!content || typeof content !== "string") {
-              await sw.registration.showNotification(title, {
-                ...notifOptions,
-                body: "You have a new message",
-              });
-              return;
-            }
-
-            const result = WasmReturnValue.safeParse(
-              decrypt(keys, pass, content),
-            );
-            if (!result.success) {
-              await sw.registration.showNotification(title, {
-                ...notifOptions,
-                body: "You have a new message",
-              });
-              return;
-            }
-            const plaintext = extractPlaintext(result.data);
-            await sw.registration.showNotification(title, {
-              ...notifOptions,
-              body: plaintext ?? "You have a new message",
-            });
-          } catch {
-            await sw.registration.showNotification(title, {
-              ...notifOptions,
-              body: "You have a new message",
-            });
-          }
-        })(),
-      );
-      break;
-    }
-
-    case "added_to_group": {
-      ev.waitUntil(
-        (async () => {
-          await sw.registration.showNotification("New group", {
-            body: `Added to group '${notification.name}'`,
-          });
-          await forwardToClients(notification);
-        })(),
-      );
-      break;
-    }
-
-    case "new_thread": {
-      ev.waitUntil(
-        (async () => {
-          await sw.registration.showNotification("New thread", {
-            body: `New thread '${notification.name}'`,
-          });
-          await forwardToClients(notification);
-        })(),
-      );
-      break;
-    }
-
-    case "realtime_offer": {
-      ev.waitUntil(
-        (async () => {
-          const hasVisible = await forwardToClients(notification);
-          if (!hasVisible) {
-            await sw.registration.showNotification("Real-time Chat", {
-              body: `Real-time chat: ${notification.name}`,
+              tag: `msg-${notification.thread_id ?? notification.chat_id ?? "default"}`,
               data: {
                 chatId: notification.chat_id,
-                type: "realtime",
+                threadId: notification.thread_id,
               },
-            });
-          }
-        })(),
-      );
-      break;
-    }
+            },
+          );
+          break;
+        }
 
-    case "realtime_answer": {
-      ev.waitUntil(forwardToClients(notification));
-      break;
-    }
-  }
+        case "added_to_group": {
+          if (hasVisible) return;
+          await sw.registration.showNotification("New group", {
+            body: `Added to group '${notification.name}'`,
+            data: { chatId: notification.chat_id },
+          });
+          break;
+        }
+
+        case "new_thread": {
+          if (hasVisible) return;
+          await sw.registration.showNotification("New thread", {
+            body: `New thread '${notification.name}'`,
+            data: { chatId: notification.chat_id },
+          });
+          break;
+        }
+
+        case "realtime_offer": {
+          if (hasVisible) return;
+          await sw.registration.showNotification("Real-time Chat", {
+            body: `Real-time chat: ${notification.name}`,
+            data: {
+              chatId: notification.chat_id,
+              type: "realtime",
+            },
+          });
+          break;
+        }
+
+        case "realtime_answer": {
+          break;
+        }
+      }
+    })(),
+  );
 });
 
 /** 通知タップ時にアプリを開く/フォーカスする */
