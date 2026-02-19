@@ -66,7 +66,7 @@ export type TranslationKeys = {
   "auth.import_key": string;
   "auth.import_key_placeholder": string;
   "contacts.add": string;
-  "contacts.add_title": string;
+  "contacts.search_title": string;
   "contacts.user_id": string;
   "contacts.no_contacts": string;
   "contacts.select_members": string;

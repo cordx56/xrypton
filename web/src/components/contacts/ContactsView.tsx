@@ -11,7 +11,11 @@ import { ContactQuery, displayUserId } from "@/utils/schema";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faAddressBook } from "@fortawesome/free-regular-svg-icons";
-import { faPlus, faQrcode, faTrash } from "@fortawesome/free-solid-svg-icons";
+import {
+  faMagnifyingGlass,
+  faQrcode,
+  faTrash,
+} from "@fortawesome/free-solid-svg-icons";
 import Avatar from "@/components/common/Avatar";
 import Dialog from "@/components/common/Dialog";
 import { setCachedContactIds } from "@/utils/accountStore";
@@ -19,7 +23,6 @@ import { useResolvedProfiles } from "@/hooks/useResolvedProfiles";
 import type { Contact } from "@/types/contact";
 import { bytesToBase64, decodeBase64Url, fromBase64Url } from "@/utils/base64";
 import { canonicalize } from "@/utils/canonicalize";
-import Code from "@/components/Code";
 import QrReader from "@/components/QrReader";
 
 type WotQrPayload = {
@@ -115,35 +118,27 @@ const ContactsView = () => {
     }
   };
 
-  const handleAdd = () => {
+  const handleSearch = () => {
     pushDialog((p) => (
-      <Dialog {...p} title={t("contacts.add_title")}>
+      <Dialog {...p} title={t("contacts.search_title")}>
         <form
           onSubmit={async (e) => {
             e.preventDefault();
             const fd = new FormData(e.currentTarget);
-            const userId = fd.get("user_id") as string;
-            if (!userId) return;
-            if (!ContactQuery.safeParse(userId).success) {
+            const targetUserId = fd.get("user_id") as string;
+            if (!targetUserId) return;
+            if (!ContactQuery.safeParse(targetUserId).success) {
               showError(t("error.invalid_contact_query"));
               return;
             }
 
-            const signed = await auth.getSignedMessage();
-            if (!signed) return;
             try {
-              const client = authApiClient(signed.signedMessage);
-              await client.contacts.add(userId);
+              await apiClient().user.getProfile(targetUserId);
               p.close();
-              await loadContactIds();
+              router.push(`/profile/${encodeURIComponent(targetUserId)}`);
             } catch (e) {
-              if (e instanceof ApiError) {
-                if (e.status === 404) showError(t("error.contact_not_found"));
-                else if (e.status === 409)
-                  showError(t("error.contact_already_exists"));
-                else if (e.status === 400)
-                  showError(t("error.cannot_add_self"));
-                else showError(t("error.unknown"));
+              if (e instanceof ApiError && e.status === 404) {
+                showError(t("error.contact_not_found"));
               } else {
                 showError(t("error.network"));
               }
@@ -227,7 +222,7 @@ const ContactsView = () => {
               <p className="text-xs text-muted">
                 {t("wot.confirm_sign_server")}
               </p>
-              <Code code={request.keyServerBase} />
+              <p className="text-sm select-all">{request.keyServerBase}</p>
             </div>
             <div>
               <p className="text-xs text-muted">
@@ -395,10 +390,10 @@ const ContactsView = () => {
           </button>
           <button
             type="button"
-            onClick={handleAdd}
+            onClick={handleSearch}
             className="text-sm px-3 py-1 rounded bg-accent/20 hover:bg-accent/30"
           >
-            <FontAwesomeIcon icon={faPlus} />
+            <FontAwesomeIcon icon={faMagnifyingGlass} />
           </button>
         </div>
       </div>

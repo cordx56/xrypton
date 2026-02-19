@@ -71,7 +71,7 @@ export const en: TranslationKeys = {
   "auth.import_key": "Import Key",
   "auth.import_key_placeholder": "Paste armored private key here",
   "contacts.add": "Add Contact",
-  "contacts.add_title": "Add New Contact",
+  "contacts.search_title": "Search User",
   "contacts.user_id": "User ID",
   "contacts.no_contacts": "No contacts yet",
   "contacts.select_members": "Select Members",
@@ -215,7 +215,7 @@ export const en: TranslationKeys = {
   "wot.results_truncated": "Some results may have been omitted",
   "wot.trust_graph": "Trust Graph",
   "wot.scan_sign": "Scan & Sign (WoT)",
-  "wot.show_qr": "Show WoT QR",
+  "wot.show_qr": "Show Web of Trust Code",
   "wot.confirm_sign_title": "Confirm WoT Signature",
   "wot.confirm_sign_message":
     "Review the destination server and fingerprint suffix before signing.",

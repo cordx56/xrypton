@@ -129,6 +129,9 @@ const UserProfileView = ({ userId }: Props) => {
   const [targetFingerprint, setTargetFingerprint] = useState<string | null>(
     null,
   );
+  const [viewerFingerprint, setViewerFingerprint] = useState<string | null>(
+    null,
+  );
   const [trustGraph, setTrustGraph] = useState<WotGraphResponse | null>(null);
   const [trustGraphTruncated, setTrustGraphTruncated] = useState(false);
   const isFetchingRef = useRef(false);
@@ -603,6 +606,32 @@ const UserProfileView = ({ userId }: Props) => {
     };
   }, [auth, isLoggedIn, userId]);
 
+  // 閲覧者自身のfingerprintを取得
+  useEffect(() => {
+    if (!isLoggedIn || !auth.userId || isOwnProfile) {
+      setViewerFingerprint(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const signed = await auth.getSignedMessage();
+        if (!signed) return;
+        const keys = await authApiClient(signed.signedMessage).user.getKeys(
+          auth.userId!,
+        );
+        if (!cancelled) {
+          setViewerFingerprint(keys?.primary_key_fingerprint ?? null);
+        }
+      } catch {
+        if (!cancelled) setViewerFingerprint(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth, isLoggedIn, isOwnProfile]);
+
   useEffect(() => {
     if (!isLoggedIn || isOwnProfile || !targetFingerprint) {
       setTrustGraph(null);
@@ -636,16 +665,14 @@ const UserProfileView = ({ userId }: Props) => {
     };
   }, [auth, isLoggedIn, isOwnProfile, targetFingerprint]);
 
-  const trustedByUserId = useMemo(
-    () => new Set(contactUserIds),
-    [contactUserIds],
-  );
+  // 閲覧者 → target への署名チェーンが存在するか検証し、
+  // 経路上の中間ユーザーIDを返す（閲覧者自身と target は除く）
   const trustedPathUserIds = useMemo(() => {
-    if (!trustGraph || !targetFingerprint || trustedByUserId.size === 0)
-      return [];
+    if (!trustGraph || !targetFingerprint || !viewerFingerprint) return [];
+    if (viewerFingerprint === targetFingerprint) return [];
 
-    const userByFingerprint = new Map<string, string>();
     const revokedFingerprints = new Set<string>();
+    const userByFingerprint = new Map<string, string>();
     for (const node of trustGraph.nodes) {
       if (node.revoked) {
         revokedFingerprints.add(node.fingerprint);
@@ -655,7 +682,15 @@ const UserProfileView = ({ userId }: Props) => {
         userByFingerprint.set(node.fingerprint, node.user_id);
       }
     }
-    if (revokedFingerprints.has(targetFingerprint)) return [];
+    if (
+      revokedFingerprints.has(targetFingerprint) ||
+      revokedFingerprints.has(viewerFingerprint)
+    )
+      return [];
+
+    // 閲覧者のfingerprintがグラフに含まれていなければ信頼チェーンなし
+    if (!trustGraph.nodes.some((n) => n.fingerprint === viewerFingerprint))
+      return [];
 
     const adjacency = new Map<string, string[]>();
     for (const edge of trustGraph.edges) {
@@ -671,33 +706,41 @@ const UserProfileView = ({ userId }: Props) => {
       adjacency.set(edge.from_fingerprint, list);
     }
 
-    const target = targetFingerprint;
-    const matched = new Set<string>();
+    // 閲覧者 → target へのBFS（経路復元用に親を記録）
+    const parent = new Map<string, string | null>();
+    parent.set(viewerFingerprint, null);
+    const queue = [viewerFingerprint];
+    let found = false;
 
-    for (const [fp, uid] of userByFingerprint.entries()) {
-      if (!trustedByUserId.has(uid)) continue;
-      const seen = new Set<string>();
-      const queue = [fp];
-      let found = false;
-      while (queue.length > 0 && !found) {
-        const cur = queue.shift()!;
-        if (cur === target) {
+    while (queue.length > 0 && !found) {
+      const cur = queue.shift()!;
+      for (const next of adjacency.get(cur) ?? []) {
+        if (parent.has(next)) continue;
+        parent.set(next, cur);
+        if (next === targetFingerprint) {
           found = true;
           break;
         }
-        if (seen.has(cur)) continue;
-        seen.add(cur);
-        for (const next of adjacency.get(cur) ?? []) {
-          if (!seen.has(next)) queue.push(next);
-        }
-      }
-      if (found) {
-        matched.add(uid);
+        queue.push(next);
       }
     }
 
-    return Array.from(matched);
-  }, [targetFingerprint, trustGraph, trustedByUserId]);
+    if (!found) return [];
+
+    // 経路をたどって中間ユーザーIDを収集
+    const pathUserIds: string[] = [];
+    let cur: string | null = targetFingerprint;
+    while (cur !== null) {
+      const uid = userByFingerprint.get(cur);
+      if (uid && uid !== userId && uid !== auth.userId) {
+        pathUserIds.push(uid);
+      }
+      cur = parent.get(cur) ?? null;
+      if (cur === viewerFingerprint) break;
+    }
+
+    return pathUserIds;
+  }, [targetFingerprint, viewerFingerprint, trustGraph, userId, auth.userId]);
 
   const { profiles: trustedProfiles } = useResolvedProfiles(trustedPathUserIds);
   const trustedProfilesByUserId = useMemo(
@@ -821,9 +864,8 @@ const UserProfileView = ({ userId }: Props) => {
     pushDialog((p) => (
       <Dialog {...p} title="Web of Trust QR">
         <div className="space-y-3">
+          <p className="text-base text-center font-mono">FP suffix: {suffix}</p>
           <QrDisplay data={qrText} />
-          <p className="text-xs text-center text-muted">FP suffix: {suffix}</p>
-          <Code code={qrText} />
         </div>
       </Dialog>
     ));
@@ -865,9 +907,7 @@ const UserProfileView = ({ userId }: Props) => {
       }
     >;
 
-    const rootFingerprint =
-      activeNodes.find((n) => n.user_id === auth.userId)?.fingerprint ??
-      targetFingerprint;
+    const rootFingerprint = viewerFingerprint ?? targetFingerprint;
 
     pushDialog((p) => (
       <Dialog {...p} title={t("wot.trust_graph")}>
@@ -1019,15 +1059,23 @@ const UserProfileView = ({ userId }: Props) => {
       </div>
 
       {externalAccounts.length > 0 && (
-        <div className="flex flex-wrap gap-2 justify-center">
-          {externalAccounts.map((account) => {
+        <div className="flex flex-wrap items-center gap-2 justify-center">
+          {externalAccounts.flatMap((account, idx) => {
+            const separator =
+              idx > 0 ? (
+                <span key={`sep-${idx}`} className="text-muted select-none">
+                  /
+                </span>
+              ) : null;
+
             if (account.type === "atproto") {
               const label = account.handle ?? account.did;
               const href = account.handle
                 ? `https://bsky.app/profile/${account.handle}`
                 : `https://bsky.app/profile/${account.did}`;
               const state = externalVerified.get(account.did) ?? "pending";
-              return (
+              return [
+                separator,
                 <a
                   key={account.did}
                   href={href}
@@ -1044,13 +1092,14 @@ const UserProfileView = ({ userId }: Props) => {
                 >
                   <FontAwesomeIcon icon={faAt} />
                   {label}
-                </a>
-              );
+                </a>,
+              ];
             }
             if (account.type === "x") {
               const state =
                 externalVerified.get(`x:${account.handle}`) ?? "pending";
-              return (
+              return [
+                separator,
                 <a
                   key={`x:${account.handle}`}
                   href={account.author_url}
@@ -1066,10 +1115,10 @@ const UserProfileView = ({ userId }: Props) => {
                   title={`@${account.handle}`}
                 >
                   <FontAwesomeIcon icon={faXTwitter} />@{account.handle}
-                </a>
-              );
+                </a>,
+              ];
             }
-            return null;
+            return [null];
           })}
         </div>
       )}

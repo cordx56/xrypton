@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/contexts/I18nContext";
 import { MultiDirectedGraph } from "graphology";
 import Sigma from "sigma";
+import { createEdgeArrowProgram } from "sigma/rendering";
+import { createNodeImageProgram } from "@sigma/node-image";
 
 type GraphNode = {
   fingerprint: string;
@@ -39,6 +41,7 @@ type SigmaNodeAttributes = {
   size: number;
   color: string;
   userId: string | null;
+  image: string | null;
 };
 
 type SigmaEdgeAttributes = {
@@ -198,8 +201,7 @@ export default function WotGraphDialog({
       const userId = userIdByFingerprint[node.fingerprint] ?? node.userId;
       const profile = userId ? profiles[userId] : null;
       const label =
-        profile?.displayName ??
-        `${node.fingerprint.slice(0, 8)} ${node.fingerprint.slice(-8)}`;
+        profile?.displayName ?? userId ?? node.fingerprint.slice(0, 16);
       const position = positions.get(node.fingerprint) ?? { x: 0, y: 0 };
       const color =
         node.fingerprint === targetFingerprint
@@ -211,9 +213,10 @@ export default function WotGraphDialog({
       g.addNode(node.fingerprint, {
         ...position,
         label,
-        size: node.fingerprint === targetFingerprint ? 18 : 14,
+        size: node.fingerprint === targetFingerprint ? 26 : 20,
         color,
         userId,
+        image: profile?.iconUrl ?? null,
       });
     }
 
@@ -225,7 +228,7 @@ export default function WotGraphDialog({
         edge.from,
         edge.to,
         {
-          size: edge.to === targetFingerprint ? 2.2 : 1.5,
+          size: edge.to === targetFingerprint ? 4 : 3,
           color:
             edge.to === targetFingerprint
               ? themeColors.targetEdge
@@ -250,12 +253,26 @@ export default function WotGraphDialog({
     const container = containerRef.current;
     if (!container) return;
 
+    const NodeProgram = createNodeImageProgram({
+      drawingMode: "background",
+      keepWithinCircle: true,
+      padding: 0.15,
+    });
+
+    const BigArrowProgram = createEdgeArrowProgram({
+      widenessToThicknessRatio: 2.5,
+      lengthToThicknessRatio: 3,
+    });
+
     const renderer = new Sigma(graph, container, {
+      defaultNodeType: "image",
+      nodeProgramClasses: { image: NodeProgram },
       defaultEdgeType: "arrow",
+      edgeProgramClasses: { arrow: BigArrowProgram },
       renderEdgeLabels: false,
       labelRenderedSizeThreshold: 0,
       labelDensity: 1.2,
-      labelSize: 12,
+      labelSize: 16,
       labelColor: { color: themeColors.foreground },
       zIndex: true,
       maxCameraRatio: 3,

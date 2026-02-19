@@ -44,6 +44,9 @@ type Props = {
   threadId?: string;
 };
 
+const PUSH_INBOX_FETCH_LIMIT = 100;
+const PUSH_INBOX_POLL_INTERVAL_MS = 500;
+
 /** メンバーの公開鍵キャッシュ: userId -> publicKeys (armored) */
 type PublicKeyMap = Record<string, { name: string; publicKeys: string }>;
 
@@ -619,7 +622,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       if (disposed || processingPushInboxRef.current) return;
       processingPushInboxRef.current = true;
       try {
-        const entries = await loadPushInbox(100);
+        const entries = await loadPushInbox(PUSH_INBOX_FETCH_LIMIT);
         for (const entry of entries) {
           if (disposed) return;
           const processed = await handlePushEvent(entry.notification);
@@ -633,26 +636,30 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
         processingPushInboxRef.current = false;
       }
     };
+    const triggerProcessInbox = () => {
+      void processInbox();
+    };
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        void processInbox();
+        triggerProcessInbox();
       }
     };
     const onFocus = () => {
-      void processInbox();
+      triggerProcessInbox();
     };
     const onPageShow = () => {
-      void processInbox();
+      triggerProcessInbox();
     };
 
-    void processInbox();
+    triggerProcessInbox();
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("focus", onFocus);
     window.addEventListener("pageshow", onPageShow);
-    const intervalId = window.setInterval(() => {
-      void processInbox();
-    }, 1000);
+    const intervalId = window.setInterval(
+      triggerProcessInbox,
+      PUSH_INBOX_POLL_INTERVAL_MS,
+    );
 
     return () => {
       disposed = true;

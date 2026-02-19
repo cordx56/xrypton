@@ -71,7 +71,7 @@ export const ja: TranslationKeys = {
   "auth.import_key": "鍵をインポート",
   "auth.import_key_placeholder": "PGP秘密鍵を貼り付けてください",
   "contacts.add": "連絡先を追加",
-  "contacts.add_title": "新しい連絡先を追加",
+  "contacts.search_title": "ユーザーを検索",
   "contacts.user_id": "ユーザID",
   "contacts.no_contacts": "連絡先がありません",
   "contacts.select_members": "メンバーを選択",
@@ -219,7 +219,7 @@ export const ja: TranslationKeys = {
   "wot.results_truncated": "結果の一部が省略されている可能性があります",
   "wot.trust_graph": "信頼グラフ",
   "wot.scan_sign": "スキャンして署名 (WoT)",
-  "wot.show_qr": "WoT QRを表示",
+  "wot.show_qr": "Web of Trust コードを表示",
   "wot.confirm_sign_title": "WoT署名の確認",
   "wot.confirm_sign_message":
     "署名する前に送信先サーバURLとフィンガープリント末尾を確認してください。",

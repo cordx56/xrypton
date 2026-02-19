@@ -38,6 +38,9 @@ importers:
       '@next/mdx':
         specifier: ^16.1.6
         version: 16.1.6(@mdx-js/loader@3.1.1)(@mdx-js/react@3.1.1(@types/react@19.2.14)(react@19.2.1))
+      '@sigma/node-image':
+        specifier: ^3.0.0
+        version: 3.0.0(sigma@3.0.2(graphology-types@0.24.8))
       '@tailwindcss/typography':
         specifier: ^0.5.19
         version: 0.5.19(tailwindcss@4.1.18)
@@ -872,6 +875,11 @@ packages:
 
   '@rtsao/scc@1.1.0':
     resolution: {integrity: sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g==}
+
+  '@sigma/node-image@3.0.0':
+    resolution: {integrity: sha512-i4WLNPugDY4jgQEZtNSiSVj4HHXOraciXLtlgdygeUxMVEhH8PJ/+Q1vQ9f/SlKFnZQ+7vH3HnsSDW6FD9aP+g==}
+    peerDependencies:
+      sigma: '>=3.0.0-beta.10'
 
   '@swc/helpers@0.5.15':
     resolution: {integrity: sha512-JQ5TuMi45Owi4/BIMAJBoSQoOJu12oOk/gADqlcUL9JEdHB8vyjUSsxqeNXnmXHjYKMi2WcYtezGEEhqUI/E2g==}
@@ -3701,6 +3709,10 @@ snapshots:
     optional: true
 
   '@rtsao/scc@1.1.0': {}
+
+  '@sigma/node-image@3.0.0(sigma@3.0.2(graphology-types@0.24.8))':
+    dependencies:
+      sigma: 3.0.2(graphology-types@0.24.8)
 
   '@swc/helpers@0.5.15':
     dependencies:

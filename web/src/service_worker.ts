@@ -9,7 +9,7 @@ import {
 // @ts-ignore
 const sw: ServiceWorkerGlobalScope = self;
 
-const NOTIFY_ACK_WAIT_MS = 1500;
+const NOTIFY_ACK_WAIT_MS = 1000;
 const ORIGIN = sw.location.origin;
 
 const sleep = (ms: number) =>
