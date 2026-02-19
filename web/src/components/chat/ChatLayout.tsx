@@ -385,7 +385,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
         case "message": {
           // 自己メッセージの場合、送信側の楽観的追加で処理するため
           // メッセージリストの再取得をスキップ（ファイル送信時に完了前に表示されるのを防ぐ）
-          if (data.is_self) break;
+          if (data.is_self) return true;
 
           // message_id からメッセージ本体を取得し、Worker経由で復号
           let body = "New message";
@@ -447,6 +447,32 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
               }
             } catch {
               // 復号失敗時はデフォルトのbodyを使用
+            }
+          }
+
+          // 現在表示中のチャットと一致する場合、メッセージリストを再取得
+          // 失敗時はInboxを残して再試行し、SW通知抑止による取りこぼしを防ぐ
+          const currentChatId = chatIdRef.current;
+          const currentThreadId = threadIdRef.current;
+          if (
+            currentChatId &&
+            currentThreadId &&
+            data.chat_id &&
+            currentChatId === data.chat_id
+          ) {
+            try {
+              const signed2 = await auth.getSignedMessage();
+              if (!signed2) return false;
+              const client2 = authApiClient(signed2.signedMessage);
+              const msgData = await client2.message.list(
+                currentChatId,
+                currentThreadId,
+              );
+              const rawMessages: Message[] = msgData.messages ?? [];
+              chat.setTotalMessages(msgData.total ?? 0);
+              await mergeAndDecryptNewMessages(rawMessages);
+            } catch {
+              return false;
             }
           }
 
@@ -522,41 +548,17 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
             }
           }
 
-          // 現在表示中のチャットと一致する場合、メッセージリストを再取得
-          const currentChatId = chatIdRef.current;
-          const currentThreadId = threadIdRef.current;
-          if (
-            currentChatId &&
-            currentThreadId &&
-            data.chat_id &&
-            currentChatId === data.chat_id
-          ) {
-            try {
-              const signed2 = await auth.getSignedMessage();
-              if (!signed2) break;
-              const client2 = authApiClient(signed2.signedMessage);
-              const msgData = await client2.message.list(
-                currentChatId,
-                currentThreadId,
-              );
-              const rawMessages: Message[] = msgData.messages ?? [];
-              chat.setTotalMessages(msgData.total ?? 0);
-              await mergeAndDecryptNewMessages(rawMessages);
-            } catch {
-              // failed to refresh messages
-            }
-          }
           return true;
         }
         case "added_to_group": {
           try {
             const signed = await auth.getSignedMessage();
-            if (!signed) break;
+            if (!signed) return false;
             const client = authApiClient(signed.signedMessage);
             const groups = await client.chat.list();
             chat.setGroups(groups);
           } catch {
-            // failed to refresh groups
+            return false;
           }
           return true;
         }
@@ -565,12 +567,12 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           if (currentChatId && data.chat_id && currentChatId === data.chat_id) {
             try {
               const signed = await auth.getSignedMessage();
-              if (!signed) break;
+              if (!signed) return false;
               const client = authApiClient(signed.signedMessage);
               const detail = await client.chat.get(data.chat_id);
               chat.setThreads(detail.threads ?? []);
             } catch {
-              // failed to refresh threads
+              return false;
             }
           }
           return true;
@@ -579,7 +581,9 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           return handleRealtimeOffer(data);
         }
         case "realtime_answer": {
-          if (!data.session_id || !data.sender_id || !data.answer) break;
+          if (!data.session_id || !data.sender_id || !data.answer) {
+            return false;
+          }
           try {
             await realtime.handleIncomingAnswer(
               data.session_id,
@@ -587,12 +591,12 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
               data.answer,
             );
           } catch {
-            // answer適用失敗
+            return false;
           }
           return true;
         }
       }
-      return true;
+      return false;
     },
     [
       auth.getSignedMessage,

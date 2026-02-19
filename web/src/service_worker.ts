@@ -10,7 +10,7 @@ import {
 const sw: ServiceWorkerGlobalScope = self;
 
 const NOTIFY_ACK_WAIT_MS = 1500;
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "/api";
+const ORIGIN = sw.location.origin;
 
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -18,12 +18,15 @@ const sleep = (ms: number) =>
 const resolveNotificationIconUrl = (iconUrl?: string): string | undefined => {
   if (!iconUrl) return undefined;
   if (/^https?:\/\//i.test(iconUrl)) return iconUrl;
-  if (!iconUrl.startsWith("/")) return iconUrl;
-  if (!iconUrl.startsWith("/v1/")) return iconUrl;
-  const base = API_BASE_URL.endsWith("/")
-    ? API_BASE_URL.slice(0, -1)
-    : API_BASE_URL;
-  return `${base}${iconUrl}`;
+  if (iconUrl.startsWith("/api/")) return `${ORIGIN}${iconUrl}`;
+  if (iconUrl.startsWith("/v1/")) return `${ORIGIN}/api${iconUrl}`;
+  if (iconUrl.startsWith("/")) return `${ORIGIN}${iconUrl}`;
+  return `${ORIGIN}/${iconUrl}`;
+};
+
+const buildSenderIconUrl = (senderId?: string): string | undefined => {
+  if (!senderId) return undefined;
+  return `${ORIGIN}/api/v1/user/${encodeURIComponent(senderId)}/icon`;
 };
 
 sw.addEventListener("install", (event) => {
@@ -45,42 +48,54 @@ const shouldSuppressNonContact = async (
   senderId: string,
   recipientId?: string,
 ): Promise<boolean> => {
-  let accountIds: string[];
+  try {
+    let accountIds: string[];
 
-  if (recipientId) {
-    // recipient_id指定時はそのアカウントのみ確認
-    accountIds = [recipientId];
-  } else {
-    // フォールバック: 全アカウントを確認
-    const idsRaw = await getKey("accountIds");
-    if (!idsRaw) return false;
-    try {
-      accountIds = JSON.parse(idsRaw);
-    } catch {
-      return false;
+    if (recipientId) {
+      // recipient_id指定時はそのアカウントのみ確認
+      accountIds = [recipientId];
+    } else {
+      // フォールバック: 全アカウントを確認
+      const idsRaw = await getKey("accountIds");
+      if (!idsRaw) return false;
+      try {
+        accountIds = JSON.parse(idsRaw);
+      } catch {
+        return false;
+      }
+      if (accountIds.length === 0) return false;
     }
-    if (accountIds.length === 0) return false;
-  }
 
-  for (const acctId of accountIds) {
-    const hide = await getKey(`account:${acctId}:hideNonContactChannels`);
-    if (hide !== "true") return false; // このアカウントはフィルタ無効 → 表示
+    for (const acctId of accountIds) {
+      const hide = await getKey(`account:${acctId}:hideNonContactChannels`);
+      if (hide !== "true") return false; // このアカウントはフィルタ無効 → 表示
 
-    const contactsRaw = await getKey(`account:${acctId}:contactIds`);
-    if (!contactsRaw) continue; // キャッシュなし → 判定不能、次のアカウントへ
-    try {
-      const contactIds: string[] = JSON.parse(contactsRaw);
-      if (contactIds.includes(senderId)) return false; // 連絡先にいる → 表示
-    } catch {
-      continue;
+      const contactsRaw = await getKey(`account:${acctId}:contactIds`);
+      if (!contactsRaw) continue; // キャッシュなし → 判定不能、次のアカウントへ
+      try {
+        const contactIds: string[] = JSON.parse(contactsRaw);
+        if (contactIds.includes(senderId)) return false; // 連絡先にいる → 表示
+      } catch {
+        continue;
+      }
     }
-  }
 
-  return true; // 対象アカウントが抑制に同意
+    return true; // 対象アカウントが抑制に同意
+  } catch {
+    // IDB障害時は通知抑制しない（受信欠落を防ぐ）
+    return false;
+  }
 };
 
 sw.addEventListener("push", (ev) => {
-  const data = Notification.safeParse(ev.data?.json());
+  let rawData: unknown;
+  try {
+    rawData = ev.data?.json();
+  } catch {
+    return;
+  }
+
+  const data = Notification.safeParse(rawData);
   if (!data.success) {
     return;
   }
@@ -88,7 +103,22 @@ sw.addEventListener("push", (ev) => {
   const notification = data.data;
   ev.waitUntil(
     (async () => {
-      const inboxKey = await enqueuePushNotification(notification);
+      let inboxKey: string | null = null;
+      try {
+        inboxKey = await enqueuePushNotification(notification);
+      } catch {
+        // IndexedDB 書き込み失敗時も通知表示は継続する
+      }
+
+      const shouldShowAfterAckWait = async () => {
+        await sleep(NOTIFY_ACK_WAIT_MS);
+        if (!inboxKey) return true;
+        try {
+          return await hasPushInboxEntry(inboxKey);
+        } catch {
+          return true;
+        }
+      };
 
       switch (notification.type) {
         case "message": {
@@ -100,9 +130,10 @@ sw.addEventListener("push", (ev) => {
             );
             if (shouldSuppress) return;
           }
-          await sleep(NOTIFY_ACK_WAIT_MS);
-          if (!(await hasPushInboxEntry(inboxKey))) return;
-          const icon = resolveNotificationIconUrl(notification.icon_url);
+          if (!(await shouldShowAfterAckWait())) return;
+          const icon =
+            resolveNotificationIconUrl(notification.icon_url) ??
+            buildSenderIconUrl(notification.sender_id);
           await sw.registration.showNotification(
             notification.sender_name || "New message",
             {
@@ -119,8 +150,7 @@ sw.addEventListener("push", (ev) => {
         }
 
         case "added_to_group": {
-          await sleep(NOTIFY_ACK_WAIT_MS);
-          if (!(await hasPushInboxEntry(inboxKey))) return;
+          if (!(await shouldShowAfterAckWait())) return;
           await sw.registration.showNotification("New group", {
             body: `Added to group '${notification.name}'`,
             data: { chatId: notification.chat_id },
@@ -129,8 +159,7 @@ sw.addEventListener("push", (ev) => {
         }
 
         case "new_thread": {
-          await sleep(NOTIFY_ACK_WAIT_MS);
-          if (!(await hasPushInboxEntry(inboxKey))) return;
+          if (!(await shouldShowAfterAckWait())) return;
           await sw.registration.showNotification("New thread", {
             body: `New thread '${notification.name}'`,
             data: { chatId: notification.chat_id },
@@ -139,8 +168,7 @@ sw.addEventListener("push", (ev) => {
         }
 
         case "realtime_offer": {
-          await sleep(NOTIFY_ACK_WAIT_MS);
-          if (!(await hasPushInboxEntry(inboxKey))) return;
+          if (!(await shouldShowAfterAckWait())) return;
           await sw.registration.showNotification("Real-time Chat", {
             body: `Real-time chat: ${notification.name}`,
             data: {
