@@ -626,12 +626,7 @@ async fn get_icon(
     let user_id = UserId::resolve(&id, &state.config.server_hostname)
         .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
 
-    // まずローカルDBを検索
-    if let Ok(icon) = fetch_local_icon(&state, &user_id).await {
-        return Ok(icon);
-    }
-
-    // DBにない場合、ドメインが自サーバ以外ならリモートプロキシ
+    // 外部ドメインの場合、リモートプロキシを優先する。
     if let Some(domain) = user_id.domain()
         && domain != state.config.server_hostname
     {
@@ -647,7 +642,7 @@ async fn get_icon(
                 }
             };
 
-        // DNS解決後のドメインが自サーバ → 元ドメインを保持してローカル検索
+        // DNS解決後のドメインが自サーバ → カスタムドメインユーザ、ローカル検索
         if resolved_domain == state.config.server_hostname {
             let local_user_id = UserId::new_local(&resolved_local, domain)
                 .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
@@ -690,5 +685,6 @@ async fn get_icon(
             .unwrap());
     }
 
-    Err(AppError::NotFound("icon not found".into()))
+    // ローカルユーザ
+    fetch_local_icon(&state, &user_id).await
 }
