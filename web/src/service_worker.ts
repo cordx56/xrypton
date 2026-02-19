@@ -10,9 +10,21 @@ import {
 const sw: ServiceWorkerGlobalScope = self;
 
 const NOTIFY_ACK_WAIT_MS = 1500;
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "/api";
 
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+const resolveNotificationIconUrl = (iconUrl?: string): string | undefined => {
+  if (!iconUrl) return undefined;
+  if (/^https?:\/\//i.test(iconUrl)) return iconUrl;
+  if (!iconUrl.startsWith("/")) return iconUrl;
+  if (!iconUrl.startsWith("/v1/")) return iconUrl;
+  const base = API_BASE_URL.endsWith("/")
+    ? API_BASE_URL.slice(0, -1)
+    : API_BASE_URL;
+  return `${base}${iconUrl}`;
+};
 
 sw.addEventListener("install", (event) => {
   const a = z.object({});
@@ -90,11 +102,13 @@ sw.addEventListener("push", (ev) => {
           }
           await sleep(NOTIFY_ACK_WAIT_MS);
           if (!(await hasPushInboxEntry(inboxKey))) return;
+          const icon = resolveNotificationIconUrl(notification.icon_url);
           await sw.registration.showNotification(
             notification.sender_name || "New message",
             {
               body: "You have a new message",
               tag: `msg-${notification.thread_id ?? notification.chat_id ?? "default"}`,
+              icon,
               data: {
                 chatId: notification.chat_id,
                 threadId: notification.thread_id,

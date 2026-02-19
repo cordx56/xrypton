@@ -45,6 +45,7 @@ export const Notification = z.discriminatedUnion("type", [
     type: z.literal("message"),
     sender_id: z.string().optional(),
     sender_name: z.string().optional(),
+    icon_url: z.string().optional(),
     chat_id: z.string().optional(),
     thread_id: z.string().optional(),
     message_id: z.string().optional(),
@@ -134,15 +135,22 @@ export const GetKeysResponse = z.object({
 export const Profile = z.object({
   user_id: z.string(),
   display_name: z.string(),
+  display_name_signature: z.string(),
   status: z.string(),
+  status_signature: z.string(),
   bio: z.string(),
+  bio_signature: z.string(),
   icon_url: z.string().nullable(),
+  icon_signature: z.string(),
 });
 
 export const UpdateProfileRequest = z.object({
   display_name: z.string().optional(),
+  display_name_signature: z.string().optional(),
   status: z.string().optional(),
+  status_signature: z.string().optional(),
   bio: z.string().optional(),
+  bio_signature: z.string().optional(),
 });
 
 // POST /v1/chat

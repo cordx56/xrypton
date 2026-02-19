@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { bytesToBase64, base64ToBytes } from "@/utils/base64";
+import { bytesToBase64 } from "@/utils/base64";
 
 export type VerifyState = "verified" | "warning" | "loading";
 
 type Props = {
   name: string;
   iconUrl?: string | null;
+  iconSignature?: string | null;
   publicKey?: string;
   size?: "xs" | "sm" | "md" | "lg" | "xl";
   onVerifyStateChange?: (state: VerifyState) => void;
@@ -33,6 +34,7 @@ const warningBadgeSizes = {
 const Avatar = ({
   name,
   iconUrl,
+  iconSignature,
   publicKey,
   size = "md",
   onVerifyStateChange,
@@ -70,34 +72,27 @@ const Avatar = ({
         const arrayBuf = await resp.arrayBuffer();
         const rawBytes = new Uint8Array(arrayBuf);
 
-        if (publicKey && worker) {
+        if (publicKey && worker && iconSignature) {
           setVerifyState("loading");
           const dataBase64 = bytesToBase64(rawBytes);
 
-          const result = await new Promise<
-            | { success: true; data: { data: string; fingerprint: string } }
-            | { success: false }
-          >((resolve) => {
-            worker.eventWaiter("verify_extract_bytes", (r) => {
-              if (r.success) {
-                resolve({ success: true, data: r.data });
-              } else {
-                resolve({ success: false });
-              }
+          const verified = await new Promise<boolean>((resolve) => {
+            worker.eventWaiter("verify_detached_signature", (r) => {
+              resolve(r.success);
             });
             worker.postMessage({
-              call: "verify_extract_bytes",
+              call: "verify_detached_signature",
               publicKey,
+              signature: iconSignature,
               data: dataBase64,
             });
           });
 
           if (cancelled) return;
 
-          if (result.success) {
-            // 検証成功: 抽出した画像バイトでblob URLを生成
-            const imageBytes = base64ToBytes(result.data.data);
-            const blob = new Blob([imageBytes.buffer as ArrayBuffer]);
+          if (verified) {
+            // 検証成功: 生画像バイトでblob URLを生成
+            const blob = new Blob([rawBytes.buffer as ArrayBuffer]);
             const url = URL.createObjectURL(blob);
             prevUrlRef.current = url;
             setResolvedUrl(url);
@@ -123,7 +118,7 @@ const Avatar = ({
     return () => {
       cancelled = true;
     };
-  }, [iconUrl, publicKey, auth.worker]);
+  }, [iconUrl, iconSignature, publicKey, auth.worker]);
 
   if (resolvedUrl) {
     return (

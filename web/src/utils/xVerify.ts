@@ -12,12 +12,14 @@ export async function verifyXPost(
   postUrl: string,
   userId: string,
   expectedAuthorUrl: string,
-  _worker: WorkerBridge,
+  worker: WorkerBridge,
 ): Promise<boolean> {
+  void worker;
   try {
     // oEmbed API で投稿情報を取得
     const resp = await fetch(
-      `https://publish.twitter.com/oembed?url=${encodeURIComponent(postUrl)}`,
+      `https://publish.twitter.com/oembed?url=${encodeURIComponent(postUrl)}&_=${Date.now()}`,
+      { cache: "no-store" },
     );
     if (!resp.ok) return false;
     const data = await resp.json();
@@ -63,7 +65,7 @@ export async function verifyXPost(
     if (!fpMatch) return false;
 
     // ユーザの公開鍵 fingerprint と照合
-    const keys = await apiClient().user.getKeys(userId);
+    const keys = await apiClient().user.getKeys(userId, { fresh: true });
     const primaryFingerprint: string = keys.primary_key_fingerprint;
     const expectedFpTail = primaryFingerprint.slice(-16).toUpperCase();
     const extractedFp = fpMatch[1].replace(/\s/g, "").toUpperCase();

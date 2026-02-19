@@ -1,25 +1,15 @@
 use super::models::{ProfileRow, UserRow};
 use super::{Db, sql};
 use crate::types::UserId;
-use xrypton_common::keys::PublicKeys;
 
-const PGP_MESSAGE_PREFIX: &str = "-----BEGIN PGP MESSAGE-----";
-
-/// 表示名を取得する。署名済み(PGP armored)の場合は検証して平文を抽出する。
+/// 表示名を取得する。
 pub async fn resolve_display_name(pool: &Db, user_id: &UserId) -> Option<String> {
     let profile = get_profile(pool, user_id).await.ok()??;
     let name = profile.display_name;
     if name.is_empty() {
         return None;
     }
-    if !name.starts_with(PGP_MESSAGE_PREFIX) {
-        return Some(name);
-    }
-    // 署名済み display_name → 公開鍵で検証して平文を抽出
-    let user = get_user(pool, user_id).await.ok()??;
-    let pub_keys = PublicKeys::try_from(user.signing_public_key.as_str()).ok()?;
-    let plaintext_bytes = pub_keys.verify_and_extract(&name).ok()?;
-    String::from_utf8(plaintext_bytes).ok()
+    Some(name)
 }
 
 #[tracing::instrument(skip(pool), err)]
@@ -126,21 +116,34 @@ pub async fn get_profile(pool: &Db, user_id: &UserId) -> Result<Option<ProfileRo
         .await
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct UpdateProfileFields<'a> {
+    pub display_name: Option<&'a str>,
+    pub display_name_signature: Option<&'a str>,
+    pub status: Option<&'a str>,
+    pub status_signature: Option<&'a str>,
+    pub bio: Option<&'a str>,
+    pub bio_signature: Option<&'a str>,
+    pub icon_key: Option<&'a str>,
+    pub icon_signature: Option<&'a str>,
+}
+
 #[tracing::instrument(skip(pool), err)]
 pub async fn update_profile(
     pool: &Db,
     user_id: &UserId,
-    display_name: Option<&str>,
-    status: Option<&str>,
-    bio: Option<&str>,
-    icon_key: Option<&str>,
+    fields: UpdateProfileFields<'_>,
 ) -> Result<bool, sqlx::Error> {
     let now = chrono::Utc::now();
     let q = sql("UPDATE profiles SET
             display_name = COALESCE(?, display_name),
+            display_name_signature = COALESCE(?, display_name_signature),
             status = COALESCE(?, status),
+            status_signature = COALESCE(?, status_signature),
             bio = COALESCE(?, bio),
+            bio_signature = COALESCE(?, bio_signature),
             icon_key = COALESCE(?, icon_key),
+            icon_signature = COALESCE(?, icon_signature),
             updated_at = ?
          WHERE user_id = ?");
     #[cfg(not(feature = "postgres"))]
@@ -148,10 +151,14 @@ pub async fn update_profile(
     #[cfg(feature = "postgres")]
     let now_bind = now;
     let result = sqlx::query(&q)
-        .bind(display_name)
-        .bind(status)
-        .bind(bio)
-        .bind(icon_key)
+        .bind(fields.display_name)
+        .bind(fields.display_name_signature)
+        .bind(fields.status)
+        .bind(fields.status_signature)
+        .bind(fields.bio)
+        .bind(fields.bio_signature)
+        .bind(fields.icon_key)
+        .bind(fields.icon_signature)
         .bind(now_bind)
         .bind(user_id.as_str())
         .execute(pool)

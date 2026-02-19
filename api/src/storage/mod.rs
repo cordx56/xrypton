@@ -8,6 +8,12 @@ pub struct S3Storage {
     bucket: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct StoredObject {
+    pub data: Vec<u8>,
+    pub content_type: Option<String>,
+}
+
 impl S3Storage {
     pub async fn new(config: &AppConfig) -> Self {
         let mut s3_config = aws_config::defaults(aws_config::BehaviorVersion::latest());
@@ -45,6 +51,11 @@ impl S3Storage {
     }
 
     pub async fn get_object(&self, key: &str) -> Result<Vec<u8>, String> {
+        let object = self.get_object_with_metadata(key).await?;
+        Ok(object.data)
+    }
+
+    pub async fn get_object_with_metadata(&self, key: &str) -> Result<StoredObject, String> {
         let resp = self
             .client
             .get_object()
@@ -59,7 +70,10 @@ impl S3Storage {
             .await
             .map_err(|e| e.to_string())?
             .into_bytes();
-        Ok(bytes.to_vec())
+        Ok(StoredObject {
+            data: bytes.to_vec(),
+            content_type: resp.content_type,
+        })
     }
 
     pub async fn delete_object(&self, key: &str) -> Result<(), String> {

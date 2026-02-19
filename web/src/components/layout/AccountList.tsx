@@ -21,6 +21,7 @@ import { apiClient, getApiBaseUrl } from "@/api/client";
 import { displayUserId } from "@/utils/schema";
 import { useI18n } from "@/contexts/I18nContext";
 import type { AccountInfo } from "@/types/user";
+import { bytesToBase64 } from "@/utils/base64";
 
 type Props = {
   accountIds: string[];
@@ -50,23 +51,26 @@ const AccountList = ({ accountIds, activeId, showAdd = false }: Props) => {
               client.user.getKeys(id),
             ]);
             let dn: string | undefined = p.display_name || undefined;
-            if (dn?.startsWith("-----") && auth.worker) {
-              const plaintext = await new Promise<string | null>((resolve) => {
-                auth.worker!.eventWaiter("verify_extract_string", (r) => {
-                  resolve(r.success ? r.data.plaintext : null);
+            if (dn && p.display_name_signature && auth.worker) {
+              const verified = await new Promise<boolean>((resolve) => {
+                auth.worker!.eventWaiter("verify_detached_signature", (r) => {
+                  resolve(r.success);
                 });
                 auth.worker!.postMessage({
-                  call: "verify_extract_string",
+                  call: "verify_detached_signature",
                   publicKey: keys.signing_public_key,
-                  armored: dn!,
+                  signature: p.display_name_signature,
+                  data: bytesToBase64(new TextEncoder().encode(dn)),
                 });
               });
-              dn = plaintext ?? undefined;
+              if (!verified) dn = undefined;
             }
             const info: AccountInfo = {
               userId: id,
               displayName: dn,
+              displayNameSignature: p.display_name_signature || null,
               iconUrl: p.icon_url ? `${getApiBaseUrl()}${p.icon_url}` : null,
+              iconSignature: p.icon_signature || null,
               signingPublicKey: keys.signing_public_key,
             };
             await setCachedProfile(id, info);
@@ -134,6 +138,7 @@ const AccountList = ({ accountIds, activeId, showAdd = false }: Props) => {
             <Avatar
               name={p.displayName || p.userId}
               iconUrl={p.iconUrl}
+              iconSignature={p.iconSignature}
               publicKey={p.signingPublicKey}
             />
             <div className="min-w-0 flex-1">

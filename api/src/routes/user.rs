@@ -318,9 +318,13 @@ async fn get_profile(
         return Ok(Json(serde_json::json!({
             "user_id": profile.user_id,
             "display_name": profile.display_name,
+            "display_name_signature": profile.display_name_signature,
             "status": profile.status,
+            "status_signature": profile.status_signature,
             "bio": profile.bio,
+            "bio_signature": profile.bio_signature,
             "icon_url": icon_url,
+            "icon_signature": profile.icon_signature,
             "external_accounts": external_accounts,
         })));
     }
@@ -332,9 +336,13 @@ async fn get_profile(
         return Ok(Json(serde_json::json!({
             "user_id": user_id.as_str(),
             "display_name": "",
+            "display_name_signature": "",
             "status": "",
+            "status_signature": "",
             "bio": "",
+            "bio_signature": "",
             "icon_url": null,
+            "icon_signature": "",
             "external_accounts": external_accounts,
         })));
     }
@@ -363,8 +371,38 @@ async fn get_profile(
 #[derive(Deserialize)]
 struct UpdateProfileBody {
     display_name: Option<String>,
+    display_name_signature: Option<String>,
     status: Option<String>,
+    status_signature: Option<String>,
     bio: Option<String>,
+    bio_signature: Option<String>,
+}
+
+fn validate_detached_signature(
+    field_name: &str,
+    value: Option<&str>,
+    signature: Option<&str>,
+) -> Result<(), AppError> {
+    if let Some(v) = value
+        && !v.is_empty()
+        && signature.map(str::is_empty).unwrap_or(true)
+    {
+        return Err(AppError::BadRequest(format!(
+            "{field_name}_signature is required when {field_name} is not empty"
+        )));
+    }
+    Ok(())
+}
+
+fn normalize_detached_signature<'a>(
+    value: Option<&'a str>,
+    signature: Option<&'a str>,
+) -> Option<&'a str> {
+    match value {
+        Some("") => Some(""),
+        Some(_) => signature,
+        None => None,
+    }
 }
 
 async fn update_profile(
@@ -379,13 +417,40 @@ async fn update_profile(
         return Err(AppError::Forbidden("can only update own profile".into()));
     }
 
+    validate_detached_signature(
+        "display_name",
+        body.display_name.as_deref(),
+        body.display_name_signature.as_deref(),
+    )?;
+    validate_detached_signature(
+        "status",
+        body.status.as_deref(),
+        body.status_signature.as_deref(),
+    )?;
+    validate_detached_signature("bio", body.bio.as_deref(), body.bio_signature.as_deref())?;
+
+    let display_name_signature = normalize_detached_signature(
+        body.display_name.as_deref(),
+        body.display_name_signature.as_deref(),
+    );
+    let status_signature =
+        normalize_detached_signature(body.status.as_deref(), body.status_signature.as_deref());
+    let bio_signature =
+        normalize_detached_signature(body.bio.as_deref(), body.bio_signature.as_deref());
+
     db::users::update_profile(
         &state.pool,
         &user_id,
-        body.display_name.as_deref(),
-        body.status.as_deref(),
-        body.bio.as_deref(),
-        None,
+        db::users::UpdateProfileFields {
+            display_name: body.display_name.as_deref(),
+            display_name_signature,
+            status: body.status.as_deref(),
+            status_signature,
+            bio: body.bio.as_deref(),
+            bio_signature,
+            icon_key: None,
+            icon_signature: None,
+        },
     )
     .await?;
 
@@ -405,17 +470,47 @@ async fn upload_icon(
         return Err(AppError::Forbidden("can only update own icon".into()));
     }
 
-    let field = multipart
+    let mut icon_content_type = String::from("application/octet-stream");
+    let mut icon_data: Option<Vec<u8>> = None;
+    let mut icon_signature = String::new();
+
+    while let Some(field) = multipart
         .next_field()
         .await
         .map_err(|e| AppError::BadRequest(format!("multipart error: {e}")))?
-        .ok_or_else(|| AppError::BadRequest("no file field".into()))?;
+    {
+        match field.name() {
+            Some("icon") => {
+                if let Some(content_type) = field.content_type() {
+                    icon_content_type = content_type.to_string();
+                }
+                icon_data = Some(
+                    field
+                        .bytes()
+                        .await
+                        .map_err(|e| AppError::BadRequest(format!("failed to read icon: {e}")))?
+                        .to_vec(),
+                );
+            }
+            Some("icon_signature") => {
+                icon_signature = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(format!("failed to read signature: {e}")))?;
+            }
+            _ => {}
+        }
+    }
 
-    let content_type = "application/octet-stream";
-    let data = field
-        .bytes()
-        .await
-        .map_err(|e| AppError::BadRequest(format!("failed to read file: {e}")))?;
+    let data = icon_data.ok_or_else(|| AppError::BadRequest("icon field is required".into()))?;
+    if icon_signature.is_empty() {
+        return Err(AppError::BadRequest("icon_signature is required".into()));
+    }
+    if !icon_content_type.starts_with("image/") {
+        return Err(AppError::BadRequest(
+            "icon content-type must be image/*".into(),
+        ));
+    }
 
     const MAX_ICON_SIZE: usize = 5 * 1024 * 1024;
     if data.len() > MAX_ICON_SIZE {
@@ -427,12 +522,26 @@ async fn upload_icon(
     let s3_key = format!("profiles/{}/icon", user_id.as_str());
     state
         .storage
-        .put_object(&s3_key, data.to_vec(), content_type)
+        .put_object(&s3_key, data, icon_content_type.as_str())
         .await
         .map_err(|e| AppError::Internal(format!("storage error: {e}")))?;
 
     // プロフィールの icon_key を更新
-    db::users::update_profile(&state.pool, &user_id, None, None, None, Some(&s3_key)).await?;
+    db::users::update_profile(
+        &state.pool,
+        &user_id,
+        db::users::UpdateProfileFields {
+            display_name: None,
+            display_name_signature: None,
+            status: None,
+            status_signature: None,
+            bio: None,
+            bio_signature: None,
+            icon_key: Some(&s3_key),
+            icon_signature: Some(icon_signature.as_str()),
+        },
+    )
+    .await?;
 
     Ok(Json(serde_json::json!({ "uploaded": true })))
 }
@@ -453,16 +562,19 @@ async fn get_icon(
             .icon_key
             .ok_or_else(|| AppError::NotFound("no icon set".into()))?;
 
-        let data = state
+        let object = state
             .storage
-            .get_object(&s3_key)
+            .get_object_with_metadata(&s3_key)
             .await
             .map_err(|e| AppError::Internal(format!("storage error: {e}")))?;
+        let content_type = object
+            .content_type
+            .unwrap_or_else(|| "application/octet-stream".to_string());
 
         return Ok(Response::builder()
-            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .header(header::CONTENT_TYPE, content_type)
             .header(header::CACHE_CONTROL, "public, max-age=3600")
-            .body(Body::from(data))
+            .body(Body::from(object.data))
             .unwrap());
     }
 
@@ -482,12 +594,18 @@ async fn get_icon(
             .send()
             .await
             .map_err(|e| AppError::BadGateway(format!("proxy request failed: {e}")))?;
+        let content_type = resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("application/octet-stream")
+            .to_string();
         let bytes = resp
             .bytes()
             .await
             .map_err(|e| AppError::BadGateway(format!("proxy response failed: {e}")))?;
         return Ok(Response::builder()
-            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .header(header::CONTENT_TYPE, content_type)
             .header(header::CACHE_CONTROL, "public, max-age=3600")
             .body(Body::from(bytes))
             .unwrap());

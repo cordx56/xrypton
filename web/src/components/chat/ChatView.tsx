@@ -15,6 +15,7 @@ import type { Message } from "@/types/chat";
 type MemberProfile = {
   display_name: string;
   icon_url: string | null;
+  icon_signature: string;
   signing_public_key: string | null;
   status: string;
 };
@@ -176,6 +177,7 @@ const ChatView = ({
                   (senderId ? displayUserId(senderId) : t("chat.deleted_user"))
                 }
                 iconUrl={profile?.icon_url ?? null}
+                iconSignature={profile?.icon_signature ?? ""}
                 publicKey={profile?.signing_public_key ?? undefined}
                 status={profile?.status ?? ""}
                 onClickUser={

@@ -1,5 +1,6 @@
 use pgp::composed::*;
 use pgp::packet::{Packet, PacketParser, Signature};
+use pgp::ser::Serialize;
 use pgp::types::{KeyDetails, PublicKeyTrait, SignedUser, SignedUserAttribute, Tag};
 
 use crate::error::XryptonError;
@@ -253,11 +254,10 @@ pub fn parse_certification_signature_info_from_bytes(
     })
 }
 
-fn verify_against_users(
-    sig: &Signature,
-    target_key: &SignedPublicKey,
-    signer_key: &SignedPublicKey,
-) -> bool {
+fn verify_against_users<S>(sig: &Signature, target_key: &SignedPublicKey, signer_key: &S) -> bool
+where
+    S: PublicKeyTrait + Serialize,
+{
     let verify_user = |u: &SignedUser| {
         sig.verify_third_party_certification(target_key, signer_key, Tag::UserId, &u.id)
             .is_ok()
@@ -269,6 +269,21 @@ fn verify_against_users(
 
     target_key.details.users.iter().any(verify_user)
         || target_key.details.user_attributes.iter().any(verify_attr)
+}
+
+fn verify_against_signer_candidates(
+    sig: &Signature,
+    target_key: &SignedPublicKey,
+    signer_key: &SignedPublicKey,
+) -> bool {
+    // 署名がサブキーで作成されるケースもあるため、
+    // 主鍵に加えて署名可能サブキーも検証候補に含める。
+    verify_against_users(sig, target_key, signer_key)
+        || signer_key
+            .public_subkeys
+            .iter()
+            .filter(|subkey| subkey.key.is_signing_key())
+            .any(|subkey| verify_against_users(sig, target_key, subkey))
 }
 
 pub fn verify_certification_signature_for_target(
@@ -286,7 +301,11 @@ pub fn verify_certification_signature_for_target(
         return Ok(false);
     }
 
-    Ok(verify_against_users(&sig, &target_key, &signer_key))
+    Ok(verify_against_signer_candidates(
+        &sig,
+        &target_key,
+        &signer_key,
+    ))
 }
 
 /// Server-side public key holder for signature verification.
@@ -567,5 +586,94 @@ mod tests {
         let pk = PublicKeys::try_from(pub_armored.as_str()).unwrap();
         let payload = pk.verify_and_extract(&armored).unwrap();
         assert_eq!(payload, b"test payload");
+    }
+
+    /// サブキーで作成された certification 署名も検証できることを確認。
+    #[test]
+    fn verify_certification_with_signing_subkey() {
+        use pgp::packet::{PacketTrait, SignatureConfig, SignatureType, SignatureVersionSpecific};
+        use pgp::types::{Password, Tag};
+
+        let make_key = |uid: &str| {
+            let signing_sub = SubkeyParamsBuilder::default()
+                .version(KeyVersion::V4)
+                .key_type(KeyType::Ed25519Legacy)
+                .can_sign(true)
+                .can_encrypt(false)
+                .passphrase(Some("pass".into()))
+                .build()
+                .unwrap();
+            let encryption_sub = SubkeyParamsBuilder::default()
+                .version(KeyVersion::V4)
+                .key_type(KeyType::ECDH(crypto::ecc_curve::ECCCurve::Curve25519))
+                .can_sign(false)
+                .can_encrypt(true)
+                .passphrase(Some("pass".into()))
+                .build()
+                .unwrap();
+            let params = SecretKeyParamsBuilder::default()
+                .version(KeyVersion::V4)
+                .key_type(KeyType::Ed25519Legacy)
+                .can_sign(true)
+                .can_encrypt(false)
+                .passphrase(Some("pass".into()))
+                .subkeys(vec![signing_sub, encryption_sub])
+                .primary_user_id(uid.into())
+                .build()
+                .unwrap();
+            params
+                .generate(OsRng)
+                .unwrap()
+                .sign(OsRng, &"pass".into())
+                .unwrap()
+        };
+
+        let signer = make_key("signer <signer@example.com>");
+        let target = make_key("target <target@example.com>");
+
+        let signer_subkey = signer
+            .secret_subkeys
+            .iter()
+            .find(|k| k.public_key().is_signing_key())
+            .expect("signing subkey");
+        let target_public = target.signed_public_key();
+        let target_uid = target_public.details.users.first().expect("target user id");
+
+        let cfg = SignatureConfig {
+            typ: SignatureType::CertGeneric,
+            pub_alg: signer_subkey.key.algorithm(),
+            hash_alg: pgp::crypto::hash::HashAlgorithm::Sha512,
+            hashed_subpackets: vec![],
+            unhashed_subpackets: vec![],
+            version_specific: SignatureVersionSpecific::V4,
+        };
+        let sig = cfg
+            .sign_certification_third_party(
+                &signer_subkey.key,
+                &Password::from("pass"),
+                &target_public,
+                Tag::UserId,
+                &target_uid.id,
+            )
+            .unwrap();
+        let mut raw_sig = Vec::new();
+        sig.to_writer_with_header(&mut raw_sig).unwrap();
+
+        let signer_public = signer
+            .signed_public_key()
+            .to_armored_string(ArmorOptions::default())
+            .unwrap();
+        let target_public_armored = target_public
+            .to_armored_string(ArmorOptions::default())
+            .unwrap();
+
+        assert!(
+            verify_certification_signature_for_target(
+                &signer_public,
+                &target_public_armored,
+                &raw_sig,
+            )
+            .unwrap()
+        );
     }
 }

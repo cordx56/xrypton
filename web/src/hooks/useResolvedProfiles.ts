@@ -8,6 +8,7 @@ export type ResolvedProfile = {
   userId: string;
   displayName: string;
   iconUrl: string | null;
+  iconSignature?: string;
   signingPublicKey?: string;
 };
 
@@ -44,11 +45,13 @@ export function useResolvedProfiles(userIds: string[]) {
             const displayName = await resolveDisplayName(
               uid,
               profile.display_name || uid,
+              profile.display_name_signature || undefined,
             );
             return {
               userId: uid,
               displayName,
               iconUrl,
+              iconSignature: profile.icon_signature ?? undefined,
               signingPublicKey: keys.signing_public_key ?? undefined,
             };
           } catch {

@@ -424,6 +424,7 @@ const ContactsView = () => {
                   <Avatar
                     name={c.displayName}
                     iconUrl={c.iconUrl}
+                    iconSignature={c.iconSignature}
                     publicKey={c.signingPublicKey}
                   />
                   <div className="min-w-0 flex-1">

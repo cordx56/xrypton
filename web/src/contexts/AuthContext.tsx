@@ -484,13 +484,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (Notification.permission !== "granted") return false;
       }
 
-      // 既にアクティブな購読があればスキップ
-      const reg = serviceWorker.registration;
-      if (reg) {
-        const existing = await reg.pushManager.getSubscription();
-        if (existing) return true;
-      }
-
       const signed = await new Promise<string | null>((resolve) => {
         workerCtx.eventWaiter("sign", (result) => {
           if (result.success) {

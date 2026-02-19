@@ -8,9 +8,13 @@ export type UserKeys = {
 export type UserProfile = {
   user_id: string;
   display_name: string;
+  display_name_signature: string;
   status: string;
+  status_signature: string;
   bio: string;
+  bio_signature: string;
   icon_url: string | null;
+  icon_signature: string;
 };
 
 export type Account = {
@@ -24,6 +28,8 @@ export type Account = {
 export type AccountInfo = {
   userId: string;
   displayName?: string;
+  displayNameSignature?: string | null;
   iconUrl?: string | null;
+  iconSignature?: string | null;
   signingPublicKey?: string;
 };

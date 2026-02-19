@@ -7,6 +7,7 @@ import { useI18n } from "@/contexts/I18nContext";
 import { displayUserId } from "@/utils/schema";
 import Dialog from "@/components/common/Dialog";
 import { createElement } from "react";
+import { bytesToBase64 } from "@/utils/base64";
 
 const PGP_MESSAGE_PREFIX = "-----BEGIN PGP MESSAGE-----";
 
@@ -104,6 +105,30 @@ export function useSignatureVerifier() {
     [auth.worker],
   );
 
+  /** detached signature を検証する。 */
+  const verifyDetachedSignature = useCallback(
+    async (
+      publicKey: string,
+      signature: string,
+      data: Uint8Array,
+    ): Promise<boolean> => {
+      if (!auth.worker || !signature) return false;
+
+      return new Promise((resolve) => {
+        auth.worker!.eventWaiter("verify_detached_signature", (result) => {
+          resolve(result.success);
+        });
+        auth.worker!.postMessage({
+          call: "verify_detached_signature",
+          publicKey,
+          signature,
+          data: bytesToBase64(data),
+        });
+      });
+    },
+    [auth.worker],
+  );
+
   /**
    * 署名を検証しつつ平文を抽出する。
    * 検証失敗でも平文が取得できれば返す。パース自体の失敗時のみ null。
@@ -136,5 +161,11 @@ export function useSignatureVerifier() {
     [auth.worker],
   );
 
-  return { verifyExtract, extractAndVerify, isSignedMessage, showWarning };
+  return {
+    verifyExtract,
+    verifyDetachedSignature,
+    extractAndVerify,
+    isSignedMessage,
+    showWarning,
+  };
 }

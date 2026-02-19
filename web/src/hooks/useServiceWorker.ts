@@ -20,11 +20,16 @@ export const useServiceWorker = () => {
     async (signedMessage: string) => {
       if (!registration) return false;
       try {
-        const key = await apiClient().notification.publicKey();
-        const subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: fromBase64Url(key).buffer as ArrayBuffer,
-        });
+        // 既存の購読があればそれを再利用し、なければ新規作成
+        let subscription = await registration.pushManager.getSubscription();
+        if (!subscription) {
+          const key = await apiClient().notification.publicKey();
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: fromBase64Url(key).buffer as ArrayBuffer,
+          });
+        }
+        // 現在のアカウントの署名でバックエンドに登録（アカウント切替時も確実に紐付ける）
         await authApiClient(signedMessage).notification.subscribe(subscription);
         return true;
       } catch {

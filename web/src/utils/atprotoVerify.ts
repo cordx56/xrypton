@@ -35,12 +35,16 @@ export async function verifyPubkeyPostOnPds(
     });
 
     // 2. Xryptonサーバからこの投稿の署名を取得
-    const sigs = await apiClient().atproto.getSignature(pubkeyPostUri);
+    const sigs = await apiClient().atproto.getSignature(
+      pubkeyPostUri,
+      undefined,
+      { fresh: true },
+    );
     if (sigs.length === 0) return false;
     const sig = sigs[0];
 
     // 3. Xryptonサーバから公開鍵情報を取得
-    const keys = await apiClient().user.getKeys(userId);
+    const keys = await apiClient().user.getKeys(userId, { fresh: true });
     const signingPublicKey: string = keys.signing_public_key;
     const primaryFingerprint: string = keys.primary_key_fingerprint;
 

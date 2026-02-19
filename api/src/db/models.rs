@@ -21,9 +21,13 @@ pub struct UserRow {
 pub struct ProfileRow {
     pub user_id: String,
     pub display_name: String,
+    pub display_name_signature: String,
     pub status: String,
+    pub status_signature: String,
     pub bio: String,
+    pub bio_signature: String,
     pub icon_key: Option<String>,
+    pub icon_signature: String,
     pub updated_at: Timestamp,
 }
 

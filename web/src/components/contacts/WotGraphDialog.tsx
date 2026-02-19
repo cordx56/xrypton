@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { useI18n } from "@/contexts/I18nContext";
+import Avatar from "@/components/common/Avatar";
 import dagre from "@dagrejs/dagre";
 import {
   Background,
@@ -29,6 +30,8 @@ type GraphEdge = {
 type ProfileMeta = {
   displayName: string;
   iconUrl: string | null;
+  iconSignature: string;
+  signingPublicKey?: string;
 };
 
 type Props = {
@@ -44,6 +47,8 @@ type Props = {
 type NodeData = {
   name: string;
   iconUrl: string | null;
+  iconSignature: string;
+  signingPublicKey?: string;
   userId: string | null;
   onOpenProfile: (userId: string) => void;
 };
@@ -61,17 +66,13 @@ function FlowNode({ data }: { data: NodeData }) {
     >
       <Handle type="target" position={Position.Top} />
       <div className="flex flex-col items-center gap-1">
-        {data.iconUrl ? (
-          <img
-            src={data.iconUrl}
-            alt={data.name}
-            className="w-8 h-8 rounded-full object-cover"
-          />
-        ) : (
-          <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-bold">
-            {data.name.charAt(0).toUpperCase() || "?"}
-          </div>
-        )}
+        <Avatar
+          name={data.name}
+          iconUrl={data.iconUrl}
+          iconSignature={data.iconSignature}
+          publicKey={data.signingPublicKey}
+          size="xs"
+        />
         <div className="text-[11px] text-muted leading-tight line-clamp-2">
           {data.name}
         </div>
@@ -131,6 +132,8 @@ export default function WotGraphDialog({
         data: {
           name: label,
           iconUrl: profile?.iconUrl ?? null,
+          iconSignature: profile?.iconSignature ?? "",
+          signingPublicKey: profile?.signingPublicKey,
           userId,
           onOpenProfile,
         },

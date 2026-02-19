@@ -28,7 +28,7 @@ export function usePublicKeyResolver() {
   const auth = useAuth();
   const { t } = useI18n();
   const { confirm } = useConfirmDialog();
-  const { verifyExtract } = useSignatureVerifier();
+  const { verifyExtract, verifyDetachedSignature } = useSignatureVerifier();
   const refreshingUsers = useRef<Map<string, Promise<RefreshResult>>>(
     new Map(),
   );
@@ -211,16 +211,31 @@ export function usePublicKeyResolver() {
     [resolveKeys, refreshKeys],
   );
 
-  /** 署名済み display_name を平文に解決する。未署名ならそのまま返す。 */
+  /** display_name を検証して解決する。detached signature があれば優先して検証する。 */
   const resolveDisplayName = useCallback(
-    async (userId: string, rawName: string): Promise<string> => {
-      if (!isSignedMessage(rawName)) return rawName;
+    async (
+      userId: string,
+      rawName: string,
+      detachedSignature?: string,
+    ): Promise<string> => {
+      if (!rawName) return rawName;
       const keys = await resolveKeys(userId);
-      if (!keys) return rawName;
+      if (!keys) return userId;
+
+      if (detachedSignature) {
+        const ok = await verifyDetachedSignature(
+          keys.signing_public_key,
+          detachedSignature,
+          new TextEncoder().encode(rawName),
+        );
+        return ok ? rawName : userId;
+      }
+
+      if (!isSignedMessage(rawName)) return rawName;
       const plain = await verifyExtract(keys.signing_public_key, rawName);
-      return plain ?? rawName;
+      return plain ?? userId;
     },
-    [resolveKeys, verifyExtract],
+    [resolveKeys, verifyDetachedSignature, verifyExtract],
   );
 
   return { resolveKeys, refreshKeys, withKeyRetry, resolveDisplayName };

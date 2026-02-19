@@ -50,6 +50,8 @@ type PublicKeyMap = Record<string, { name: string; publicKeys: string }>;
 type ContactWithProfile = Contact & {
   display_name: string;
   icon_url: string | null;
+  icon_signature: string;
+  signing_public_key: string | null;
 };
 
 /** グループ作成ダイアログ（連絡先からメンバーを選択可能） */
@@ -58,7 +60,8 @@ const NewGroupDialog: DialogComponent = ({ close, setOnClose }) => {
   const chatCtx = useChat();
   const { t } = useI18n();
   const { showError } = useErrorToast();
-  const { resolveDisplayName: resolveName } = usePublicKeyResolver();
+  const { resolveDisplayName: resolveName, resolveKeys } =
+    usePublicKeyResolver();
   const [contacts, setContacts] = useState<ContactWithProfile[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loadingContacts, setLoadingContacts] = useState(true);
@@ -87,13 +90,27 @@ const NewGroupDialog: DialogComponent = ({ close, setOnClose }) => {
               const iconUrl = profile.icon_url
                 ? `${getApiBaseUrl()}${profile.icon_url}`
                 : null;
+              const keys = await resolveKeys(c.contact_user_id);
               const name = await resolveName(
                 c.contact_user_id,
                 profile.display_name || c.contact_user_id,
+                profile.display_name_signature || undefined,
               );
-              return { ...c, display_name: name, icon_url: iconUrl };
+              return {
+                ...c,
+                display_name: name,
+                icon_url: iconUrl,
+                icon_signature: profile.icon_signature ?? "",
+                signing_public_key: keys?.signing_public_key ?? null,
+              };
             } catch {
-              return { ...c, display_name: c.contact_user_id, icon_url: null };
+              return {
+                ...c,
+                display_name: c.contact_user_id,
+                icon_url: null,
+                icon_signature: "",
+                signing_public_key: null,
+              };
             }
           }),
         );
@@ -190,6 +207,8 @@ const NewGroupDialog: DialogComponent = ({ close, setOnClose }) => {
                   <Avatar
                     name={c.display_name}
                     iconUrl={c.icon_url}
+                    iconSignature={c.icon_signature}
+                    publicKey={c.signing_public_key ?? undefined}
                     size="sm"
                   />
                   <div className="min-w-0 flex-1">
@@ -256,6 +275,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   type MemberProfile = {
     display_name: string;
     icon_url: string | null;
+    icon_signature: string;
     signing_public_key: string | null;
     status: string;
   };
@@ -414,37 +434,58 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           const senderId = data.sender_id ?? "unknown";
           let displayName = displayUserId(senderId);
           let iconUrl: string | null = null;
+          let iconSignature: string | null = null;
+          let publicKey: string | undefined;
           const cached = memberProfilesRef.current[senderId];
           if (cached) {
             displayName = cached.display_name;
             iconUrl = cached.icon_url;
+            iconSignature = cached.icon_signature;
+            publicKey = cached.signing_public_key ?? undefined;
           } else if (data.sender_name) {
             // サーバが平文解決済みの sender_name を付与している場合はそれを使う
             displayName = data.sender_name;
             try {
-              const profile = await apiClient().user.getProfile(senderId);
+              const [profile, keys] = await Promise.all([
+                apiClient().user.getProfile(senderId),
+                resolveKeys(senderId),
+              ]);
               iconUrl = profile.icon_url
                 ? `${getApiBaseUrl()}${profile.icon_url}`
                 : null;
+              iconSignature = profile.icon_signature ?? "";
+              publicKey = keys?.signing_public_key ?? undefined;
             } catch {
               // アイコン取得失敗は無視
             }
           } else {
             try {
-              const profile = await apiClient().user.getProfile(senderId);
+              const [profile, keys] = await Promise.all([
+                apiClient().user.getProfile(senderId),
+                resolveKeys(senderId),
+              ]);
               displayName = await resolveDisplayName(
                 senderId,
                 profile.display_name || displayUserId(senderId),
+                profile.display_name_signature || undefined,
               );
               iconUrl = profile.icon_url
                 ? `${getApiBaseUrl()}${profile.icon_url}`
                 : null;
+              iconSignature = profile.icon_signature ?? "";
+              publicKey = keys?.signing_public_key ?? undefined;
             } catch {
               // プロフィール取得失敗時はsenderIdを使用
             }
           }
 
-          showNotification({ displayName, iconUrl, body });
+          showNotification({
+            displayName,
+            iconUrl,
+            iconSignature,
+            publicKey,
+            body,
+          });
 
           // チャンネルとスレッドの更新日時を更新
           if (data.chat_id) {
@@ -714,12 +755,14 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           const resolvedName = await resolveDisplayName(
             member.user_id,
             profile.display_name || member.user_id,
+            profile.display_name_signature || undefined,
           );
           profiles[member.user_id] = {
             display_name: resolvedName,
             icon_url: profile.icon_url
               ? `${getApiBaseUrl()}${profile.icon_url}`
               : null,
+            icon_signature: profile.icon_signature ?? "",
             signing_public_key: signingKey,
             status: profile.status ?? "",
           };
@@ -727,6 +770,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           profiles[member.user_id] = {
             display_name: member.user_id,
             icon_url: null,
+            icon_signature: "",
             signing_public_key: signingKey,
             status: "",
           };

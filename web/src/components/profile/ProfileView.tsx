@@ -13,13 +13,13 @@ import {
 import { useErrorToast } from "@/contexts/ErrorToastContext";
 import Avatar from "@/components/common/Avatar";
 import { setCachedProfile } from "@/utils/accountStore";
+import { bytesToBase64 } from "@/utils/base64";
+import { useDialogs } from "@/contexts/DialogContext";
+import XVerificationDialog from "@/components/x/XVerificationDialog";
 import {
   useSignatureVerifier,
   isSignedMessage,
 } from "@/hooks/useSignatureVerifier";
-import { bytesToBase64, base64ToBytes } from "@/utils/base64";
-import { useDialogs } from "@/contexts/DialogContext";
-import XVerificationDialog from "@/components/x/XVerificationDialog";
 
 /** プロフィール編集画面 */
 const ProfileEditView = () => {
@@ -34,14 +34,38 @@ const ProfileEditView = () => {
   const [status, setStatus] = useState("");
   const [bio, setBio] = useState("");
   const [iconUrl, setIconUrl] = useState<string | undefined>(undefined);
+  const [iconSignature, setIconSignature] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 署名済みフィールドから平文を抽出する
-  const extractField = async (value: string): Promise<string> => {
-    if (!value || !isSignedMessage(value) || !auth.publicKeys) return value;
-    const plaintext = await verifyExtract(auth.publicKeys, value);
-    return plaintext ?? value;
+  const signDetachedBase64 = async (payloadBase64: string): Promise<string> => {
+    if (!auth.worker || !auth.privateKeys || !auth.subPassphrase) {
+      throw new Error("signing context not available");
+    }
+    const worker = auth.worker;
+    const privateKeys = auth.privateKeys;
+    const subPassphrase = auth.subPassphrase;
+    return new Promise<string>((resolve, reject) => {
+      worker.eventWaiter("sign_detached", (result) => {
+        if (result.success) {
+          resolve(result.data.signature);
+        } else {
+          reject(new Error(result.message));
+        }
+      });
+      worker.postMessage({
+        call: "sign_detached",
+        keys: privateKeys,
+        passphrase: subPassphrase,
+        payload: payloadBase64,
+      });
+    });
+  };
+
+  const signDetachedText = async (value: string): Promise<string> => {
+    if (!value) return "";
+    const payloadBase64 = bytesToBase64(new TextEncoder().encode(value));
+    return signDetachedBase64(payloadBase64);
   };
 
   useEffect(() => {
@@ -50,15 +74,21 @@ const ProfileEditView = () => {
     (async () => {
       try {
         const profile = await apiClient().user.getProfile(userId);
-        // 署名済みフィールドは検証して平文に戻す
+        const resolveLegacyField = async (value: string): Promise<string> => {
+          if (!value || !isSignedMessage(value) || !auth.publicKeys)
+            return value;
+          const plaintext = await verifyExtract(auth.publicKeys, value);
+          return plaintext ?? value;
+        };
         const [dn, st, bi] = await Promise.all([
-          extractField(profile.display_name ?? ""),
-          extractField(profile.status ?? ""),
-          extractField(profile.bio ?? ""),
+          resolveLegacyField(profile.display_name ?? ""),
+          resolveLegacyField(profile.status ?? ""),
+          resolveLegacyField(profile.bio ?? ""),
         ]);
         setDisplayName(dn);
         setStatus(st);
         setBio(bi);
+        setIconSignature(profile.icon_signature || null);
         const resolvedIconUrl = profile.icon_url
           ? `${getApiBaseUrl()}${profile.icon_url}?t=${Date.now()}`
           : undefined;
@@ -67,7 +97,7 @@ const ProfileEditView = () => {
         showError(t("error.unknown"));
       }
     })();
-  }, [auth.userId, auth.publicKeys]);
+  }, [auth.publicKeys, auth.userId, showError, t, verifyExtract]);
 
   const handleSave = async () => {
     if (!auth.userId) return;
@@ -76,23 +106,28 @@ const ProfileEditView = () => {
 
     setSaving(true);
     try {
-      // 非空フィールドを個別に署名
-      const [signedDn, signedSt, signedBi] = await Promise.all([
-        displayName ? auth.signText(displayName) : Promise.resolve(""),
-        status ? auth.signText(status) : Promise.resolve(""),
-        bio ? auth.signText(bio) : Promise.resolve(""),
-      ]);
+      const [displayNameSignature, statusSignature, bioSignature] =
+        await Promise.all([
+          signDetachedText(displayName),
+          signDetachedText(status),
+          signDetachedText(bio),
+        ]);
 
       const client = authApiClient(signed.signedMessage);
       await client.user.updateProfile(auth.userId, {
-        display_name: signedDn || displayName,
-        status: signedSt || status,
-        bio: signedBi || bio,
+        display_name: displayName,
+        display_name_signature: displayNameSignature,
+        status,
+        status_signature: statusSignature,
+        bio,
+        bio_signature: bioSignature,
       });
       await setCachedProfile(auth.userId, {
         userId: auth.userId,
         displayName: displayName || undefined,
+        displayNameSignature: displayNameSignature || null,
         iconUrl: iconUrl ?? null,
+        iconSignature: iconSignature ?? null,
       });
       window.dispatchEvent(new Event("profile-updated"));
       router.push("/profile");
@@ -113,45 +148,24 @@ const ProfileEditView = () => {
 
     const previewUrl = URL.createObjectURL(file);
     setIconUrl(previewUrl);
+    setIconSignature(null);
 
     const signed = await auth.getSignedMessage();
     if (!signed) return;
     try {
-      // 画像バイト列をbase64エンコードしてWorkerで署名
       const arrayBuf = await file.arrayBuffer();
       const imageBase64 = bytesToBase64(new Uint8Array(arrayBuf));
-
-      const signedData = await new Promise<string>((resolve, reject) => {
-        auth.worker!.eventWaiter("sign_bytes", (result) => {
-          if (result.success) {
-            resolve(result.data.data);
-          } else {
-            reject(new Error(result.message));
-          }
-        });
-        auth.worker!.postMessage({
-          call: "sign_bytes",
-          keys: auth.privateKeys!,
-          passphrase: auth.subPassphrase!,
-          payload: imageBase64,
-        });
-      });
-
-      // 署名済みraw PGP bytesをBlobに変換してアップロード
-      const signedBlob = new Blob(
-        [base64ToBytes(signedData).buffer as ArrayBuffer],
-        {
-          type: "application/octet-stream",
-        },
-      );
+      const signature = await signDetachedBase64(imageBase64);
       const client = authApiClient(signed.signedMessage);
-      await client.user.uploadIcon(auth.userId, signedBlob);
+      await client.user.uploadIcon(auth.userId, file, signature);
       // キャッシュバスター付きのサーバURLで保存し、ヘッダーに通知
       const serverIconUrl = `${getApiBaseUrl()}/v1/user/${encodeURIComponent(auth.userId)}/icon?t=${Date.now()}`;
       setIconUrl(serverIconUrl);
+      setIconSignature(signature);
       await setCachedProfile(auth.userId, {
         userId: auth.userId,
         displayName: displayName || undefined,
+        iconSignature: signature,
         iconUrl: serverIconUrl,
       });
       window.dispatchEvent(new Event("profile-updated"));
@@ -177,6 +191,7 @@ const ProfileEditView = () => {
           <Avatar
             name={displayName || "?"}
             iconUrl={iconUrl ?? null}
+            iconSignature={iconSignature}
             publicKey={auth.publicKeys}
             size="xl"
           />

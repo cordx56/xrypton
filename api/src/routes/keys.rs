@@ -157,6 +157,9 @@ async fn post_signature(
             "authenticated signer fingerprint mismatch".into(),
         ));
     }
+    if signer_primary_fingerprint == fingerprint {
+        return Err(AppError::BadRequest("self-signature is not allowed".into()));
+    }
 
     let target_user = db::users::get_user_by_fingerprint(&state.pool, &fingerprint)
         .await?
@@ -342,6 +345,10 @@ async fn get_signatures(
         let mut next_candidates: HashSet<String> = HashSet::new();
 
         for edge in edges {
+            if edge.signer_fingerprint == edge.target_fingerprint {
+                // 自己署名は表示・探索対象から除外する
+                continue;
+            }
             let is_relevant = match direction {
                 EdgeDirection::Inbound => frontier_set.contains(edge.target_fingerprint.as_str()),
                 EdgeDirection::Outbound => frontier_set.contains(edge.signer_fingerprint.as_str()),

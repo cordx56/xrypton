@@ -60,6 +60,20 @@ export class ApiError extends Error {
   }
 }
 
+type FreshFetchOption = {
+  fresh?: boolean;
+};
+
+function withFreshPath(path: string, fresh?: boolean): string {
+  if (!fresh) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}_=${Date.now()}`;
+}
+
+function freshRequestInit(fresh?: boolean): RequestInit {
+  return fresh ? { cache: "no-store" } : {};
+}
+
 /**
  * APIベースURLを取得する。
  * NEXT_PUBLIC_API_BASE_URL が設定されていればそれを使い、
@@ -139,15 +153,23 @@ export function apiClient() {
         );
         return resp.json();
       },
-      getProfile: async (userId: string) => {
+      getProfile: async (userId: string, options?: FreshFetchOption) => {
         const resp = await apiFetch(
-          `/v1/user/${encodeURIComponent(userId)}/profile`,
+          withFreshPath(
+            `/v1/user/${encodeURIComponent(userId)}/profile`,
+            options?.fresh,
+          ),
+          freshRequestInit(options?.fresh),
         );
         return resp.json();
       },
-      getKeys: async (userId: string) => {
+      getKeys: async (userId: string, options?: FreshFetchOption) => {
         const resp = await apiFetch(
-          `/v1/user/${encodeURIComponent(userId)}/keys`,
+          withFreshPath(
+            `/v1/user/${encodeURIComponent(userId)}/keys`,
+            options?.fresh,
+          ),
+          freshRequestInit(options?.fresh),
         );
         return resp.json();
       },
@@ -174,10 +196,17 @@ export function apiClient() {
       },
     },
     atproto: {
-      getSignature: async (uri: string, cid?: string) => {
+      getSignature: async (
+        uri: string,
+        cid?: string,
+        options?: FreshFetchOption,
+      ) => {
         const params = new URLSearchParams({ uri });
         if (cid) params.set("cid", cid);
-        const resp = await apiFetch(`/v1/atproto/signature?${params}`);
+        const resp = await apiFetch(
+          withFreshPath(`/v1/atproto/signature?${params}`, options?.fresh),
+          freshRequestInit(options?.fresh),
+        );
         const json = await resp.json();
         return AtprotoSignatureSchema.array().parse(json.signatures);
       },
@@ -211,17 +240,27 @@ export function authApiClient(signedMessage: string) {
 
   return {
     user: {
-      getKeys: async (userId: string) => {
+      getKeys: async (userId: string, options?: FreshFetchOption) => {
         const resp = await apiFetch(
-          `/v1/user/${encodeURIComponent(userId)}/keys`,
-          {},
+          withFreshPath(
+            `/v1/user/${encodeURIComponent(userId)}/keys`,
+            options?.fresh,
+          ),
+          freshRequestInit(options?.fresh),
           auth,
         );
         return resp.json();
       },
       updateProfile: async (
         id: string,
-        body: { display_name?: string; status?: string; bio?: string },
+        body: {
+          display_name?: string;
+          display_name_signature?: string;
+          status?: string;
+          status_signature?: string;
+          bio?: string;
+          bio_signature?: string;
+        },
       ) => {
         const resp = await apiFetch(
           `/v1/user/${encodeURIComponent(id)}/profile`,
@@ -256,9 +295,10 @@ export function authApiClient(signedMessage: string) {
         );
         return resp.json();
       },
-      uploadIcon: async (id: string, blob: Blob) => {
+      uploadIcon: async (id: string, blob: Blob, iconSignature: string) => {
         const formData = new FormData();
         formData.append("icon", blob);
+        formData.append("icon_signature", iconSignature);
         const baseUrl = getApiBaseUrl();
         const url = baseUrl.startsWith("/")
           ? `${baseUrl}/v1/user/${encodeURIComponent(id)}/icon`

@@ -75,9 +75,13 @@ function getOwnKeyServerBaseUrl(): string {
 // プロフィールAPIレスポンスのセッション中キャッシュ
 type ProfileResponse = {
   display_name?: string;
+  display_name_signature?: string;
   status?: string;
+  status_signature?: string;
   bio?: string;
+  bio_signature?: string;
   icon_url?: string | null;
+  icon_signature?: string;
   external_accounts?: ExternalAccount[];
 };
 const profileCache = new Map<string, ProfileResponse>();
@@ -95,12 +99,14 @@ const UserProfileView = ({ userId }: Props) => {
   const { pushDialog } = useDialogs();
   const { t } = useI18n();
   const { showError } = useErrorToast();
-  const { extractAndVerify, showWarning } = useSignatureVerifier();
+  const { verifyDetachedSignature, extractAndVerify, showWarning } =
+    useSignatureVerifier();
   const { withKeyRetry, resolveKeys } = usePublicKeyResolver();
   const [displayName, setDisplayName] = useState("");
   const [status, setStatus] = useState("");
   const [bio, setBio] = useState("");
   const [iconUrl, setIconUrl] = useState<string | null>(null);
+  const [iconSignature, setIconSignature] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAccounts, setShowAccounts] = useState(false);
   const [externalAccounts, setExternalAccounts] = useState<ExternalAccount[]>(
@@ -168,26 +174,30 @@ const UserProfileView = ({ userId }: Props) => {
           ? "pending"
           : "verified";
 
-  // 署名済みフィールドから平文を抽出し検証状態を判定する。
-  // 検証失敗でも平文が取れれば返す。
+  // detached signature を検証して検証状態を判定する。
   const verifyField = useCallback(
     async (
       publicKey: string,
       value: string,
+      signature: string,
     ): Promise<{ text: string; verified: boolean }> => {
       if (!value) return { text: "", verified: true };
-      if (!isSignedMessage(value)) {
+      if (!signature) {
+        if (isSignedMessage(value)) {
+          const legacy = await extractAndVerify(publicKey, value);
+          if (legacy) return legacy;
+        }
         // 未署名データ（レガシー）
         return { text: value, verified: false };
       }
-      const result = await extractAndVerify(publicKey, value);
-      if (result) {
-        return result;
-      }
-      // パース自体の失敗
-      return { text: value, verified: false };
+      const verified = await verifyDetachedSignature(
+        publicKey,
+        signature,
+        new TextEncoder().encode(value),
+      );
+      return { text: value, verified };
     },
-    [extractAndVerify],
+    [extractAndVerify, verifyDetachedSignature],
   );
 
   type FieldResults = {
@@ -202,13 +212,16 @@ const UserProfileView = ({ userId }: Props) => {
     async (
       signingKey: string,
       rawDn: string,
+      dnSig: string,
       rawSt: string,
+      stSig: string,
       rawBi: string,
+      biSig: string,
     ): Promise<FieldResults> => {
       const [dnResult, stResult, biResult] = await Promise.all([
-        verifyField(signingKey, rawDn),
-        verifyField(signingKey, rawSt),
-        verifyField(signingKey, rawBi),
+        verifyField(signingKey, rawDn, dnSig),
+        verifyField(signingKey, rawSt, stSig),
+        verifyField(signingKey, rawBi, biSig),
       ]);
       const results = { dnResult, stResult, biResult };
       const allVerified =
@@ -229,16 +242,23 @@ const UserProfileView = ({ userId }: Props) => {
     setLoading(true);
     try {
       // プロフィールページを開いたタイミングでは常に最新を取得する
-      const profile: ProfileResponse =
-        await apiClient().user.getProfile(userId);
+      const profile: ProfileResponse = await apiClient().user.getProfile(
+        userId,
+        { fresh: true },
+      );
       profileCache.set(userId, profile);
       const rawDn = profile.display_name ?? "";
+      const dnSig = profile.display_name_signature ?? "";
       const rawSt = profile.status ?? "";
+      const stSig = profile.status_signature ?? "";
       const rawBi = profile.bio ?? "";
+      const biSig = profile.bio_signature ?? "";
+      const rawIconSig = profile.icon_signature ?? "";
       setExternalAccounts(profile.external_accounts ?? []);
 
-      // 署名済みフィールドがあるか判定
-      const hasSigned =
+      // detached signature または旧形式（signed message）があるか判定
+      const hasSignedMaterial =
+        !!(dnSig || stSig || biSig) ||
         isSignedMessage(rawDn) ||
         isSignedMessage(rawSt) ||
         isSignedMessage(rawBi);
@@ -249,12 +269,14 @@ const UserProfileView = ({ userId }: Props) => {
       let localSigningKey: string | undefined;
       let localDisplayName = "";
 
-      if (!hasSigned) {
+      if (!hasSignedMaterial) {
         // 未署名データ（レガシー）
         setDisplayName(rawDn);
         setStatus(rawSt);
         setBio(rawBi);
-        setTextVerificationState("pending");
+        setTextVerificationState(
+          rawDn || rawSt || rawBi ? "unverified" : "pending",
+        );
         localDisplayName = rawDn;
       } else if (isOwnProfile) {
         // 自分のプロフィール: auth.publicKeys で検証
@@ -263,9 +285,9 @@ const UserProfileView = ({ userId }: Props) => {
         localSigningKey = signingKey ?? undefined;
         if (signingKey) {
           const [dnResult, stResult, biResult] = await Promise.all([
-            verifyField(signingKey, rawDn),
-            verifyField(signingKey, rawSt),
-            verifyField(signingKey, rawBi),
+            verifyField(signingKey, rawDn, dnSig),
+            verifyField(signingKey, rawSt, stSig),
+            verifyField(signingKey, rawBi, biSig),
           ]);
           setDisplayName(dnResult.text);
           setStatus(stResult.text);
@@ -294,7 +316,15 @@ const UserProfileView = ({ userId }: Props) => {
             setSigningPublicKey(signingKey);
             localSigningKey = signingKey;
             try {
-              return await verifyAllFields(signingKey, rawDn, rawSt, rawBi);
+              return await verifyAllFields(
+                signingKey,
+                rawDn,
+                dnSig,
+                rawSt,
+                stSig,
+                rawBi,
+                biSig,
+              );
             } catch (e) {
               if (e && typeof e === "object" && "results" in e) {
                 lastResults = (e as any).results;
@@ -329,15 +359,17 @@ const UserProfileView = ({ userId }: Props) => {
       } else {
         // 未ログイン: 認証不要APIで公開鍵を取得し、署名内容を抽出
         try {
-          const keysRaw = await apiClient().user.getKeys(userId);
+          const keysRaw = await apiClient().user.getKeys(userId, {
+            fresh: true,
+          });
           const signingKey = keysRaw?.signing_public_key;
           if (signingKey) {
             setSigningPublicKey(signingKey);
             localSigningKey = signingKey;
             const [dnResult, stResult, biResult] = await Promise.all([
-              verifyField(signingKey, rawDn),
-              verifyField(signingKey, rawSt),
-              verifyField(signingKey, rawBi),
+              verifyField(signingKey, rawDn, dnSig),
+              verifyField(signingKey, rawSt, stSig),
+              verifyField(signingKey, rawBi, biSig),
             ]);
             setDisplayName(dnResult.text);
             setStatus(stResult.text);
@@ -370,10 +402,11 @@ const UserProfileView = ({ userId }: Props) => {
         ? `${getApiBaseUrl()}${profile.icon_url}?t=${Date.now()}`
         : null;
       setIconUrl(resolvedIconUrl);
+      setIconSignature(rawIconSig || null);
 
-      // アイコンの PGP 検証（テキストと合わせて警告判定するため fetchProfile 内で実施）
+      // アイコン detached signature 検証
       const worker = auth.worker;
-      if (resolvedIconUrl && localSigningKey && worker) {
+      if (resolvedIconUrl && localSigningKey && worker && rawIconSig) {
         try {
           const resp = await fetch(resolvedIconUrl);
           if (resp.ok) {
@@ -383,12 +416,13 @@ const UserProfileView = ({ userId }: Props) => {
 
             const iconResult = await new Promise<{ success: boolean }>(
               (resolve) => {
-                worker.eventWaiter("verify_extract_bytes", (r) => {
+                worker.eventWaiter("verify_detached_signature", (r) => {
                   resolve({ success: r.success });
                 });
                 worker.postMessage({
-                  call: "verify_extract_bytes",
+                  call: "verify_detached_signature",
                   publicKey: localSigningKey!,
+                  signature: rawIconSig,
                   data: dataBase64,
                 });
               },
@@ -427,14 +461,16 @@ const UserProfileView = ({ userId }: Props) => {
       // 自分のプロフィールの場合、アカウントセレクタ表示用にキャッシュ（平文を保存）
       if (isOwnProfile) {
         let resolvedDn = rawDn;
-        if (hasSigned && auth.publicKeys) {
-          const dnParsed = await verifyField(auth.publicKeys, rawDn);
+        if (auth.publicKeys) {
+          const dnParsed = await verifyField(auth.publicKeys, rawDn, dnSig);
           resolvedDn = dnParsed.text;
         }
         await setCachedProfile(userId, {
           userId,
           displayName: resolvedDn || undefined,
+          displayNameSignature: dnSig || null,
           iconUrl: resolvedIconUrl,
+          iconSignature: rawIconSig || null,
         });
       }
 
@@ -551,8 +587,10 @@ const UserProfileView = ({ userId }: Props) => {
       try {
         const signed = isLoggedIn ? await auth.getSignedMessage() : null;
         const keys = signed
-          ? await authApiClient(signed.signedMessage).user.getKeys(userId)
-          : await apiClient().user.getKeys(userId);
+          ? await authApiClient(signed.signedMessage).user.getKeys(userId, {
+              fresh: true,
+            })
+          : await apiClient().user.getKeys(userId, { fresh: true });
         if (!cancelled) {
           setTargetFingerprint(keys?.primary_key_fingerprint ?? null);
         }
@@ -706,7 +744,7 @@ const UserProfileView = ({ userId }: Props) => {
   const showOtherUserPublicKeys = async () => {
     try {
       // ログイン状態に関わらず認証不要APIで取得
-      const raw = await apiClient().user.getKeys(userId);
+      const raw = await apiClient().user.getKeys(userId, { fresh: true });
       const signingKey = raw?.signing_public_key;
       if (!signingKey) {
         showError(t("error.unknown"));
@@ -810,9 +848,22 @@ const UserProfileView = ({ userId }: Props) => {
     const profileMap = Object.fromEntries(
       trustedProfiles.map((p) => [
         p.userId,
-        { displayName: p.displayName, iconUrl: p.iconUrl },
+        {
+          displayName: p.displayName,
+          iconUrl: p.iconUrl,
+          iconSignature: p.iconSignature ?? "",
+          signingPublicKey: p.signingPublicKey,
+        },
       ]),
-    ) as Record<string, { displayName: string; iconUrl: string | null }>;
+    ) as Record<
+      string,
+      {
+        displayName: string;
+        iconUrl: string | null;
+        iconSignature: string;
+        signingPublicKey?: string;
+      }
+    >;
 
     const rootFingerprint =
       activeNodes.find((n) => n.user_id === auth.userId)?.fingerprint ??
@@ -897,6 +948,7 @@ const UserProfileView = ({ userId }: Props) => {
         <Avatar
           name={displayName || userId}
           iconUrl={iconUrl}
+          iconSignature={iconSignature}
           publicKey={signingPublicKey}
           size="xl"
           onVerifyStateChange={setIconVerifyState}
@@ -945,6 +997,8 @@ const UserProfileView = ({ userId }: Props) => {
                     key={trustedUserId}
                     name={profile?.displayName ?? trustedUserId}
                     iconUrl={profile?.iconUrl}
+                    iconSignature={profile?.iconSignature}
+                    publicKey={profile?.signingPublicKey}
                     size="sm"
                   />
                 );

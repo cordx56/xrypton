@@ -7,6 +7,10 @@ use crate::config::AppConfig;
 use crate::db;
 use crate::types::{ChatId, MessageId, ThreadId, UserId};
 
+fn build_user_icon_path(user_id: &str) -> String {
+    format!("/v1/user/{user_id}/icon")
+}
+
 /// 1ユーザの全サブスクリプションにPush通知を送信する内部ヘルパー。
 async fn send_push_to_user(
     pool: &db::Db,
@@ -71,7 +75,8 @@ async fn send_push_to_user(
 
 /// チャットグループの全メンバーにPush通知を送信する。
 /// 送信者自身にも送信し、ペイロードに `is_self: true` を付与する（他デバイス同期用）。
-/// ペイロードはJSON形式: {"type":"message","sender_id":"...","sender_name":"...","chat_id":"...","thread_id":"...","message_id":"...","is_self":bool}
+/// ペイロードはJSON形式:
+/// {"type":"message","sender_id":"...","sender_name":"...","icon_url":"...","chat_id":"...","thread_id":"...","message_id":"...","is_self":bool}
 pub async fn send_to_members(
     pool: &db::Db,
     config: &AppConfig,
@@ -102,6 +107,12 @@ pub async fn send_to_members(
     let sender_name = db::users::resolve_display_name(pool, sender_id)
         .await
         .unwrap_or_else(|| qualified_sender_id.clone());
+    let sender_icon_url = db::users::get_profile(pool, sender_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|profile| profile.icon_key)
+        .map(|_| build_user_icon_path(qualified_sender_id.as_str()));
 
     // 各メンバーにrecipient_id付きのペイロードを送信
     for member in &members {
@@ -111,7 +122,7 @@ pub async fn send_to_members(
             format!("{}@{}", member.user_id, config.server_hostname)
         };
         let is_sender = qualified_member == qualified_sender_id;
-        let member_payload = serde_json::json!({
+        let mut member_payload = serde_json::json!({
             "type": "message",
             "sender_id": qualified_sender_id,
             "sender_name": sender_name,
@@ -120,8 +131,16 @@ pub async fn send_to_members(
             "message_id": message_id.0,
             "is_self": is_sender,
             "recipient_id": qualified_member,
-        })
-        .to_string();
+        });
+        if let Some(icon_url) = sender_icon_url.as_ref()
+            && let Some(obj) = member_payload.as_object_mut()
+        {
+            obj.insert(
+                "icon_url".into(),
+                serde_json::Value::String(icon_url.clone()),
+            );
+        }
+        let member_payload = member_payload.to_string();
         let member_user_id = UserId(member.user_id.clone());
         send_push_to_user(
             pool,
