@@ -134,7 +134,7 @@ const ContactsView = () => {
 
             try {
               await apiClient().user.getProfile(targetUserId);
-              p.close();
+              p.closeWithoutHistory();
               router.push(`/profile/${encodeURIComponent(targetUserId)}`);
             } catch (e) {
               if (e instanceof ApiError && e.status === 404) {
@@ -247,7 +247,7 @@ const ContactsView = () => {
               <button
                 type="button"
                 onClick={() => {
-                  p.close();
+                  p.closeWithoutHistory();
                   void submitWotSignature(request);
                 }}
                 className="px-3 py-1.5 rounded bg-accent/20 text-sm hover:bg-accent/30"
