@@ -467,21 +467,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     workerCtx.postMessage,
   ]);
 
-  // 通知許可を取得し、Push購読を行う共通ヘルパー
-  // requestPermission=true の場合、未許可ならプロンプトを表示する
+  // Push購読を行う共通ヘルパー
+  // requestPermission=true の場合のみ通知許可プロンプトを表示する。
+  // requestPermission=false の場合は Notification.permission で止めず、
+  // 既存購読の再登録/未購読時の購読試行を行う（iOSの状態不整合対策）。
   const ensurePushSubscription = useCallback(
     async (requestPermission: boolean, force = false): Promise<boolean> => {
       if (!force && !notificationsEnabled) return false;
-      if (!("Notification" in window)) return false;
       if (!privateKeys || !subPassphrase || !userId || !workerCtx.worker)
         return false;
 
       if (requestPermission) {
+        if (!("Notification" in window)) return false;
         const permission = await Notification.requestPermission();
         if (permission !== "granted") return false;
-      } else {
-        // 既に許可済みでなければ何もしない
-        if (Notification.permission !== "granted") return false;
       }
 
       const signed = await new Promise<string | null>((resolve) => {
@@ -592,7 +591,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!notificationsEnabled) return;
     if (!privateKeys || !subPassphrase || !userId || !workerCtx.worker) return;
 
-    // 許可済みの場合のみ自動購読（プロンプトは出さない）
+    // 自動再購読（プロンプトは出さない）。
+    // 既存購読があれば再登録し、未購読なら購読を試行する。
     ensurePushSubscription(false).catch(() => {});
   }, [
     isInitialized,
