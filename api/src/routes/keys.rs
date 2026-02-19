@@ -478,8 +478,16 @@ async fn get_signatures(
     node_fingerprints.sort_unstable();
     let users = db::wot::get_users_by_fingerprints(&state.pool, &node_fingerprints).await?;
 
+    // 削除済みユーザーの fingerprint を除外
+    let deleted_fps: HashSet<String> =
+        db::deleted_users::get_deleted_fingerprints(&state.pool, &node_fingerprints)
+            .await?
+            .into_iter()
+            .collect();
+
     let nodes = node_fingerprints
         .iter()
+        .filter(|fp| !deleted_fps.contains(fp.as_str()))
         .map(|fp| SignatureNodeResponse {
             fingerprint: fp.clone(),
             user_id: users.get(fp).map(|u| u.id.clone()),
@@ -489,6 +497,10 @@ async fn get_signatures(
 
     let edges = collected_edges
         .into_iter()
+        .filter(|edge| {
+            !deleted_fps.contains(&edge.signer_fingerprint)
+                && !deleted_fps.contains(&edge.target_fingerprint)
+        })
         .map(|edge| SignatureEdgeResponse {
             signature_id: edge.id,
             from_fingerprint: edge.signer_fingerprint,

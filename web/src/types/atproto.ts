@@ -9,6 +9,15 @@ export type AtprotoAccount = {
   updated_at: string;
 };
 
+// プロフィールに埋め込まれるpubkey投稿の署名データ
+export type EmbeddedAtprotoSignature = {
+  atproto_uri: string;
+  atproto_cid: string;
+  record_json: string;
+  signature: string;
+  signing_public_key: string;
+};
+
 // Profile API の external_accounts に含まれるATProtoアカウント情報
 export type ExternalAtprotoAccount = {
   type: "atproto";
@@ -16,6 +25,7 @@ export type ExternalAtprotoAccount = {
   handle: string | null;
   pds_url: string;
   pubkey_post_uri: string | null;
+  pubkey_post_signature?: EmbeddedAtprotoSignature;
 };
 
 // Profile API の external_accounts に含まれるXアカウント情報
@@ -24,6 +34,8 @@ export type ExternalXAccount = {
   handle: string;
   author_url: string;
   post_url: string;
+  proof_json?: string;
+  signature?: string;
 };
 
 // 外部アカウントのunion型

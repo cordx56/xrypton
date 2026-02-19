@@ -123,14 +123,70 @@ async fn create_chat(
     })))
 }
 
+/// 表示名を解決する。ローカルDB・リモートの両方からプロフィールを取得して表示名を返す。
+async fn resolve_display_name(state: &AppState, user_id: &UserId) -> Option<String> {
+    let profile = super::user::fetch_profile(state, user_id).await.ok()?;
+    let name = profile.get("display_name")?.as_str()?;
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+/// グループの表示名を解決する。
+/// リクエストユーザ以外のメンバーの表示名をソートして結合する。
+/// 自分だけの場合は自分の表示名を返す。メンバーが見つからない場合は `None`。
+async fn resolve_group_display_name(
+    state: &AppState,
+    chat_id: &ChatId,
+    requester: &UserId,
+) -> Option<String> {
+    let members = db::chat::get_chat_members(&state.pool, chat_id)
+        .await
+        .ok()?;
+    if members.is_empty() {
+        return None;
+    }
+
+    let mut names: Vec<(bool, String)> = Vec::with_capacity(members.len());
+    for m in &members {
+        let uid = UserId(m.user_id.clone());
+        let display = resolve_display_name(state, &uid)
+            .await
+            .unwrap_or_else(|| m.user_id.clone());
+        let is_self = m.user_id == requester.as_str();
+        names.push((is_self, display));
+    }
+
+    let mut others: Vec<&str> = names
+        .iter()
+        .filter(|(is_self, _)| !is_self)
+        .map(|(_, name)| name.as_str())
+        .collect();
+    others.sort_unstable();
+
+    if others.is_empty() {
+        // 自分だけのグループ
+        names
+            .into_iter()
+            .find(|(is_self, _)| *is_self)
+            .map(|(_, n)| n)
+    } else {
+        Some(others.join(", "))
+    }
+}
+
 /// 空名グループの `name` を解決済み表示名で上書きする。
-async fn resolve_empty_group_names(pool: &db::Db, groups: &mut [ChatGroupRow], requester: &UserId) {
+async fn resolve_empty_group_names(
+    state: &AppState,
+    groups: &mut [ChatGroupRow],
+    requester: &UserId,
+) {
     for group in groups.iter_mut() {
         if group.name.is_empty() {
             let chat_id = ChatId(group.id.clone());
-            if let Some(resolved) =
-                db::chat::resolve_group_display_name(pool, &chat_id, requester).await
-            {
+            if let Some(resolved) = resolve_group_display_name(state, &chat_id, requester).await {
                 group.name = resolved;
             }
         }
@@ -142,7 +198,7 @@ async fn list_chats(
     auth: AuthenticatedUser,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let mut groups = db::chat::get_user_chat_groups(&state.pool, &auth.user_id).await?;
-    resolve_empty_group_names(&state.pool, &mut groups, &auth.user_id).await;
+    resolve_empty_group_names(&state, &mut groups, &auth.user_id).await;
     Ok(Json(serde_json::json!(groups)))
 }
 
@@ -199,8 +255,7 @@ async fn get_chat(
     // 空名グループの場合、メンバー表示名で代替
     let mut group = group;
     if group.name.is_empty()
-        && let Some(resolved) =
-            db::chat::resolve_group_display_name(&state.pool, &chat_id, &auth.user_id).await
+        && let Some(resolved) = resolve_group_display_name(&state, &chat_id, &auth.user_id).await
     {
         group.name = resolved;
     }
@@ -218,7 +273,7 @@ async fn list_archived_chats(
     auth: AuthenticatedUser,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let mut groups = db::chat::get_user_archived_chat_groups(&state.pool, &auth.user_id).await?;
-    resolve_empty_group_names(&state.pool, &mut groups, &auth.user_id).await;
+    resolve_empty_group_names(&state, &mut groups, &auth.user_id).await;
     Ok(Json(serde_json::json!(groups)))
 }
 

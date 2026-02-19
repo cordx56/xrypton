@@ -4,6 +4,7 @@ import { buildSignatureTarget } from "@/utils/canonicalize";
 import type { WorkerEventWaiter } from "@/hooks/useWorker";
 import type { WorkerCallMessage } from "@/utils/schema";
 import type { z } from "zod";
+import type { EmbeddedAtprotoSignature } from "@/types/atproto";
 
 export type WorkerBridge = {
   eventWaiter: WorkerEventWaiter;
@@ -14,7 +15,7 @@ export type WorkerBridge = {
  * 公開鍵投稿をフロントエンドで検証する（ATProto未ログインでも動作）。
  *
  * 1. ATProtoライブラリでPDSから投稿を取得
- * 2. Xryptonサーバから署名と公開鍵を取得
+ * 2. Xryptonサーバから署名と公開鍵を取得（埋め込み署名がある場合はスキップ）
  * 3. PGP署名をWorkerで検証
  * 4. 投稿テキスト中のfingerprintがサーバの主鍵fingerprintと一致するか確認
  */
@@ -23,6 +24,7 @@ export async function verifyPubkeyPostOnPds(
   pdsUrl: string,
   userId: string,
   worker: WorkerBridge,
+  embeddedSignature?: EmbeddedAtprotoSignature,
 ): Promise<boolean> {
   try {
     // 1. AT URIをパースしPDSから投稿レコードを取得
@@ -34,18 +36,36 @@ export async function verifyPubkeyPostOnPds(
       rkey: atUri.rkey,
     });
 
-    // 2. Xryptonサーバからこの投稿の署名を取得
-    const sigs = await apiClient().atproto.getSignature(
-      pubkeyPostUri,
-      undefined,
-      { fresh: true },
-    );
-    if (sigs.length === 0) return false;
-    const sig = sigs[0];
+    // 2. 署名データを取得: 埋め込みがあればそれを使い、なければAPIから取得
+    let sig: {
+      atproto_cid: string;
+      record_json: string;
+      signature: string;
+    };
+    let signingPublicKey: string;
 
-    // 3. Xryptonサーバから公開鍵情報を取得
+    if (embeddedSignature) {
+      sig = {
+        atproto_cid: embeddedSignature.atproto_cid,
+        record_json: embeddedSignature.record_json,
+        signature: embeddedSignature.signature,
+      };
+      signingPublicKey = embeddedSignature.signing_public_key;
+    } else {
+      // ローカルユーザ用フォールバック: APIから署名を取得
+      const sigs = await apiClient().atproto.getSignature(
+        pubkeyPostUri,
+        undefined,
+        { fresh: true },
+      );
+      if (sigs.length === 0) return false;
+      sig = sigs[0];
+      const keys = await apiClient().user.getKeys(userId, { fresh: true });
+      signingPublicKey = keys.signing_public_key;
+    }
+
+    // 3. Xryptonサーバから主鍵fingerprintを取得（埋め込みの有無に関わらず必要）
     const keys = await apiClient().user.getKeys(userId, { fresh: true });
-    const signingPublicKey: string = keys.signing_public_key;
     const primaryFingerprint: string = keys.primary_key_fingerprint;
 
     // 4. 署名対象の正規化JSONを構築し、PGP署名を検証

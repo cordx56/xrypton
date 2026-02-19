@@ -1,6 +1,7 @@
 pub mod atproto;
 pub mod chat;
 pub mod contacts;
+pub mod deleted_users;
 pub mod files;
 pub mod messages;
 pub mod models;

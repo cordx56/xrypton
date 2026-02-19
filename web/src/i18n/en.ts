@@ -223,6 +223,7 @@ export const en: TranslationKeys = {
   "wot.confirm_sign_server": "Server URL",
   "wot.confirm_sign_target": "Target User",
   "wot.confirm_sign_fingerprint_suffix": "Fingerprint suffix",
+  "error.user_deleted": "This user has been deleted.",
   "error.x_verification_failed": "X account verification failed.",
   "error.x_invalid_url": "Invalid X post URL.",
 };

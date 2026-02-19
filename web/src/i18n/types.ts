@@ -196,6 +196,7 @@ export type TranslationKeys = {
   "wot.confirm_sign_server": string;
   "wot.confirm_sign_target": string;
   "wot.confirm_sign_fingerprint_suffix": string;
+  "error.user_deleted": string;
   "error.x_verification_failed": string;
   "error.x_invalid_url": string;
 };

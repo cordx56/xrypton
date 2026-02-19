@@ -227,6 +227,7 @@ export const ja: TranslationKeys = {
   "wot.confirm_sign_server": "サーバURL",
   "wot.confirm_sign_target": "対象ユーザ",
   "wot.confirm_sign_fingerprint_suffix": "フィンガープリント末尾",
+  "error.user_deleted": "削除されたユーザーです。",
   "error.x_verification_failed": "Xアカウントの認証に失敗しました。",
   "error.x_invalid_url": "無効なXのポストURLです。",
 };

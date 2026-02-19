@@ -63,9 +63,27 @@ pub async fn create_user(
 }
 
 #[tracing::instrument(skip(pool), err)]
-pub async fn delete_user(pool: &Db, id: &UserId) -> Result<bool, sqlx::Error> {
-    let q = sql("DELETE FROM users WHERE id = ?");
-    let result = sqlx::query(&q).bind(id.as_str()).execute(pool).await?;
+pub async fn delete_user(
+    pool: &Db,
+    id: &UserId,
+    primary_key_fingerprint: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    let insert_q = sql("INSERT INTO deleted_users (id, primary_key_fingerprint) VALUES (?, ?)");
+    sqlx::query(&insert_q)
+        .bind(id.as_str())
+        .bind(primary_key_fingerprint)
+        .execute(&mut *tx)
+        .await?;
+
+    let delete_q = sql("DELETE FROM users WHERE id = ?");
+    let result = sqlx::query(&delete_q)
+        .bind(id.as_str())
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
     Ok(result.rows_affected() > 0)
 }
 

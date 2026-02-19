@@ -9,7 +9,7 @@ use serde::Deserialize;
 use crate::AppState;
 use crate::auth::AuthenticatedUser;
 use crate::db;
-use crate::db::models::ExternalAccount;
+use crate::db::models::{EmbeddedAtprotoSignature, ExternalAccount};
 use crate::error::AppError;
 use crate::types::UserId;
 
@@ -155,15 +155,20 @@ async fn fetch_local_user_keys(
     state: &AppState,
     user_id: &UserId,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let user = db::users::get_user(&state.pool, user_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("user not found".into()))?;
-    Ok(Json(serde_json::json!({
-        "id": user.id,
-        "encryption_public_key": user.encryption_public_key,
-        "signing_public_key": user.signing_public_key,
-        "primary_key_fingerprint": user.primary_key_fingerprint,
-    })))
+    if let Some(user) = db::users::get_user(&state.pool, user_id).await? {
+        return Ok(Json(serde_json::json!({
+            "id": user.id,
+            "encryption_public_key": user.encryption_public_key,
+            "signing_public_key": user.signing_public_key,
+            "primary_key_fingerprint": user.primary_key_fingerprint,
+        })));
+    }
+
+    if db::deleted_users::is_deleted(&state.pool, user_id.as_str()).await? {
+        return Err(AppError::Gone("user has been deleted".into()));
+    }
+
+    Err(AppError::NotFound("user not found".into()))
 }
 
 /// 公開鍵取得（認証不要）
@@ -177,8 +182,10 @@ async fn get_keys(
         // まずはリクエストIDそのままでローカルDBを検索し、DNSクエリを避ける。
         let raw_user_id = UserId::validate_full(&id)
             .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
-        if let Ok(keys) = fetch_local_user_keys(&state, &raw_user_id).await {
-            return Ok(keys);
+        match fetch_local_user_keys(&state, &raw_user_id).await {
+            Ok(keys) => return Ok(keys),
+            Err(AppError::NotFound(_)) => {}
+            Err(e) => return Err(e),
         }
 
         // ローカルにない外部検索は認証済みリクエストのみ許可。
@@ -275,18 +282,64 @@ async fn delete_user(
     if auth.user_id != user_id {
         return Err(AppError::Forbidden("can only delete own account".into()));
     }
-    db::users::delete_user(&state.pool, &user_id).await?;
+    let fingerprint = db::users::get_user(&state.pool, &user_id)
+        .await?
+        .map(|u| u.primary_key_fingerprint);
+    db::users::delete_user(&state.pool, &user_id, fingerprint.as_deref()).await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
 /// ATProto・Xアカウント等から外部アカウント情報を構築する。
+/// ATProtoアカウントの pubkey_post_uri に対応する署名を一括取得し埋め込む。
 async fn build_external_accounts(state: &AppState, user_id: &str) -> Vec<ExternalAccount> {
-    let mut accounts: Vec<ExternalAccount> = db::atproto::list_accounts(&state.pool, user_id)
+    let atproto_rows = db::atproto::list_accounts(&state.pool, user_id)
         .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(ExternalAccount::from)
+        .unwrap_or_default();
+
+    // pubkey_post_uri を収集し、署名を一括取得
+    let uris: Vec<&str> = atproto_rows
+        .iter()
+        .filter_map(|a| a.pubkey_post_uri.as_deref())
         .collect();
+    let sig_rows = if uris.is_empty() {
+        Vec::new()
+    } else {
+        db::atproto::get_signatures_by_uris(&state.pool, &uris)
+            .await
+            .unwrap_or_default()
+    };
+
+    // URI → 署名データのマップ
+    let sig_map: std::collections::HashMap<&str, &crate::db::models::AtprotoSignatureWithKeyRow> =
+        sig_rows
+            .iter()
+            .map(|s| (s.atproto_uri.as_str(), s))
+            .collect();
+
+    let mut accounts: Vec<ExternalAccount> = atproto_rows
+        .into_iter()
+        .map(|a| {
+            let embedded = a
+                .pubkey_post_uri
+                .as_deref()
+                .and_then(|uri| sig_map.get(uri))
+                .map(|s| EmbeddedAtprotoSignature {
+                    atproto_uri: s.atproto_uri.clone(),
+                    atproto_cid: s.atproto_cid.clone(),
+                    record_json: s.record_json.clone(),
+                    signature: s.signature.clone(),
+                    signing_public_key: s.signing_public_key.clone(),
+                });
+            ExternalAccount::Atproto {
+                did: a.atproto_did,
+                handle: a.atproto_handle,
+                pds_url: a.pds_url,
+                pubkey_post_uri: a.pubkey_post_uri,
+                pubkey_post_signature: embedded,
+            }
+        })
+        .collect();
+
     accounts.extend(
         db::x::list_accounts(&state.pool, user_id)
             .await
@@ -343,19 +396,22 @@ async fn fetch_local_profile(
         })));
     }
 
+    if db::deleted_users::is_deleted(&state.pool, user_id.as_str()).await? {
+        return Err(AppError::Gone("user has been deleted".into()));
+    }
+
     Err(AppError::NotFound("profile not found".into()))
 }
 
-async fn get_profile(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
+/// ユーザのプロフィールを取得する。
+/// 外部ドメインの場合はリモートサーバにプロキシし、ローカルの場合はDBから取得する。
+/// upsert_external_userはusers行のみ作成するため、外部ユーザのプロフィールは
+/// 常にリモートから取得する。
+pub(crate) async fn fetch_profile(
+    state: &AppState,
+    user_id: &UserId,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let user_id = UserId::resolve(&id, &state.config.server_hostname)
-        .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
-
     // 外部ドメインの場合、リモートプロキシを優先する。
-    // upsert_external_userはusers行のみ作成するため、fetch_local_profileを先に呼ぶと
-    // 「ユーザ行あり・プロフィール行なし」のケースで空プロフィールが返されてしまう。
     if let Some(domain) = user_id.domain()
         && domain != state.config.server_hostname
     {
@@ -375,7 +431,7 @@ async fn get_profile(
         if resolved_domain == state.config.server_hostname {
             let local_user_id = UserId::new_local(&resolved_local, domain)
                 .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
-            return fetch_local_profile(&state, &local_user_id).await;
+            return fetch_local_profile(state, &local_user_id).await;
         }
 
         let remote_id = format!("{resolved_local}@{resolved_domain}");
@@ -392,6 +448,9 @@ async fn get_profile(
             .map_err(|e| AppError::BadGateway(format!("proxy request failed: {e}")))?;
         if !resp.status().is_success() {
             let status = resp.status();
+            if status == reqwest::StatusCode::GONE {
+                return Err(AppError::Gone("user has been deleted".into()));
+            }
             let body = resp.text().await.unwrap_or_default();
             return Err(AppError::BadGateway(format!(
                 "federation profile proxy returned {status}: {body}"
@@ -405,7 +464,16 @@ async fn get_profile(
     }
 
     // ローカルユーザ
-    fetch_local_profile(&state, &user_id).await
+    fetch_local_profile(state, user_id).await
+}
+
+async fn get_profile(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user_id = UserId::resolve(&id, &state.config.server_hostname)
+        .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
+    fetch_profile(&state, &user_id).await
 }
 
 #[derive(Deserialize)]
@@ -613,6 +681,10 @@ async fn fetch_local_icon(state: &AppState, user_id: &UserId) -> Result<Response
 
     if db::users::get_user(&state.pool, user_id).await?.is_some() {
         return Err(AppError::NotFound("no icon set".into()));
+    }
+
+    if db::deleted_users::is_deleted(&state.pool, user_id.as_str()).await? {
+        return Err(AppError::Gone("user has been deleted".into()));
     }
 
     Err(AppError::NotFound("icon not found".into()))

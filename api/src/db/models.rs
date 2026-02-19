@@ -170,6 +170,16 @@ pub struct WotSignatureRow {
 
 // --- 外部アカウント ---
 
+/// プロフィールに埋め込むpubkey投稿の署名データ
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddedAtprotoSignature {
+    pub atproto_uri: String,
+    pub atproto_cid: String,
+    pub record_json: String,
+    pub signature: String,
+    pub signing_public_key: String,
+}
+
 /// プロフィールレスポンスに含める外部アカウント情報
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -179,11 +189,15 @@ pub enum ExternalAccount {
         handle: Option<String>,
         pds_url: String,
         pubkey_post_uri: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pubkey_post_signature: Option<EmbeddedAtprotoSignature>,
     },
     X {
         handle: String,
         author_url: String,
         post_url: String,
+        proof_json: String,
+        signature: String,
     },
 }
 
@@ -194,6 +208,7 @@ impl From<AtprotoAccountRow> for ExternalAccount {
             handle: a.atproto_handle,
             pds_url: a.pds_url,
             pubkey_post_uri: a.pubkey_post_uri,
+            pubkey_post_signature: None,
         }
     }
 }
@@ -204,6 +219,8 @@ impl From<XAccountRow> for ExternalAccount {
             handle: a.x_handle,
             author_url: a.x_author_url,
             post_url: a.x_post_url,
+            proof_json: a.proof_json,
+            signature: a.signature,
         }
     }
 }

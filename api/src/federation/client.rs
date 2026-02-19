@@ -42,6 +42,9 @@ pub async fn fetch_user_keys(
 
     if !resp.status().is_success() {
         let status = resp.status();
+        if status == reqwest::StatusCode::GONE {
+            return Err(AppError::Gone("user has been deleted".into()));
+        }
         let body = resp.text().await.unwrap_or_default();
         return Err(AppError::BadGateway(format!(
             "federation server returned {status}: {body}"

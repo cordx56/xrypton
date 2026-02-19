@@ -108,6 +108,7 @@ const UserProfileView = ({ userId }: Props) => {
   const [iconUrl, setIconUrl] = useState<string | null>(null);
   const [iconSignature, setIconSignature] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deletedUser, setDeletedUser] = useState(false);
   const [showAccounts, setShowAccounts] = useState(false);
   const [externalAccounts, setExternalAccounts] = useState<ExternalAccount[]>(
     [],
@@ -479,8 +480,12 @@ const UserProfileView = ({ userId }: Props) => {
 
       // 検証失敗の警告ダイアログが出ている場合、閉じるまでローディングを維持
       if (warningPromise) await warningPromise;
-    } catch {
-      showError(t("error.unknown"));
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 410) {
+        setDeletedUser(true);
+      } else {
+        showError(t("error.unknown"));
+      }
     } finally {
       setLoading(false);
       isFetchingRef.current = false;
@@ -548,6 +553,7 @@ const UserProfileView = ({ userId }: Props) => {
               account.pds_url,
               userId,
               auth.worker!,
+              account.pubkey_post_signature,
             );
             results.set(account.did, valid ? "verified" : "unverified");
           } else {
@@ -753,15 +759,32 @@ const UserProfileView = ({ userId }: Props) => {
     );
   }, [trustGraph, viewerFingerprint, targetFingerprint]);
 
-  const { profiles: trustedProfiles } = useResolvedProfiles(trustedPathUserIds);
-  const trustedProfilesByUserId = useMemo(
+  // 信頼グラフに含まれるすべてのノードのプロフィールを取得
+  // （ターゲットは既にコンポーネント内で保持しているため除外）
+  const graphNodeUserIds = useMemo(() => {
+    if (!trustGraph || isOwnProfile) return [];
+    const ids = new Set<string>();
+    for (const node of trustGraph.nodes) {
+      if (!node.revoked && node.user_id && node.user_id !== userId) {
+        ids.add(node.user_id);
+      }
+    }
+    if (auth.userId) ids.add(auth.userId);
+    return [...ids];
+  }, [trustGraph, isOwnProfile, userId, auth.userId]);
+
+  const { profiles: graphNodeProfiles } = useResolvedProfiles(graphNodeUserIds);
+
+  const graphProfilesByUserId = useMemo(
     () =>
-      Object.fromEntries(trustedProfiles.map((p) => [p.userId, p])) as Record<
+      Object.fromEntries(graphNodeProfiles.map((p) => [p.userId, p])) as Record<
         string,
-        (typeof trustedProfiles)[number]
+        (typeof graphNodeProfiles)[number]
       >,
-    [trustedProfiles],
+    [graphNodeProfiles],
   );
+
+  const trustedProfilesByUserId = graphProfilesByUserId;
 
   const handleAddContact = async () => {
     const signed = await auth.getSignedMessage();
@@ -907,7 +930,7 @@ const UserProfileView = ({ userId }: Props) => {
         signingPublicKey?: string;
       }
     > = Object.fromEntries(
-      trustedProfiles.map((p) => [
+      graphNodeProfiles.map((p) => [
         p.userId,
         {
           displayName: p.displayName,
@@ -955,6 +978,28 @@ const UserProfileView = ({ userId }: Props) => {
     return (
       <div className="flex items-center justify-center h-full">
         <Spinner />
+      </div>
+    );
+  }
+
+  if (deletedUser) {
+    return (
+      <div className="max-w-lg mx-auto p-4 space-y-6">
+        <div className="flex items-center gap-2">
+          {canGoBack && (
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="p-2 hover:bg-accent/10 rounded"
+            >
+              <FontAwesomeIcon icon={faArrowLeft} />
+            </button>
+          )}
+          <h2 className="text-lg font-semibold flex-1">{t("tab.profile")}</h2>
+        </div>
+        <div className="flex flex-col items-center justify-center py-12">
+          <p className="text-muted">{t("error.user_deleted")}</p>
+        </div>
       </div>
     );
   }
