@@ -14,6 +14,7 @@ import {
 export type DialogComponent<P extends object = object> = FC<
   {
     close: () => void;
+    closeWithoutHistory: () => void;
     setOnClose: (close: () => void) => void;
   } & P
 >;
@@ -40,14 +41,23 @@ export const DialogProvider = ({ children }: { children: ReactNode }) => {
     return counter + 1;
   };
 
+  const removeDialog = (id: number) => {
+    setDialogs((v) => v.filter(([i]) => i !== id));
+    setOnCloses((v) => v.filter(([i]) => i !== id));
+  };
+
   const popDialog = (id: number) => {
     return () => {
-      setDialogs((v) => v.filter(([i]) => i !== id));
-      setOnCloses((v) => v.filter(([i]) => i !== id));
-      // popstate 経由でない場合のみ履歴エントリを戻す
+      removeDialog(id);
       if (!closingFromPopState.current) {
         history.back();
       }
+    };
+  };
+
+  const popDialogWithoutHistory = (id: number) => {
+    return () => {
+      removeDialog(id);
     };
   };
 
@@ -93,7 +103,11 @@ export const DialogProvider = ({ children }: { children: ReactNode }) => {
   const display = dialogs.map(([id, Fc], i) => (
     <div className="overlay" onClick={() => onClose(id)} key={i}>
       <div className="dialog" onClick={(e) => e.stopPropagation()}>
-        <Fc close={popDialog(id)} setOnClose={setOnClose(id)} />
+        <Fc
+          close={popDialog(id)}
+          closeWithoutHistory={popDialogWithoutHistory(id)}
+          setOnClose={setOnClose(id)}
+        />
       </div>
     </div>
   ));

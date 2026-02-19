@@ -59,9 +59,10 @@ function LandingPageContent() {
     <div className="h-dvh overflow-y-auto flex flex-col bg-bg text-fg">
       {/* Hero */}
       <section className="flex-1 flex flex-col items-center justify-center px-6 py-16 text-center">
-        <h1 className="text-5xl font-bold tracking-tight mb-4">
+        <h1 className="text-5xl font-bold tracking-tight mb-1">
           {t("app.name")}
         </h1>
+        <p className="text-lg text-muted mb-4">/ˈkrɪp.tɒn/</p>
         <p className="text-lg text-muted max-w-lg mb-8">
           {t("landing.tagline")}
         </p>

@@ -211,6 +211,7 @@ export const en: TranslationKeys = {
   "x.verifying": "Verifying...",
   "x.unlink_account": "Unlink",
   "profile.external_accounts": "External Accounts",
+  "wot.directly_trusted": "You trust this user",
   "wot.trusted_by_contacts": "Your trusted contacts trust this user",
   "wot.results_truncated": "Some results may have been omitted",
   "wot.trust_graph": "Trust Graph",

@@ -214,6 +214,7 @@ export const ja: TranslationKeys = {
   "x.verifying": "認証中...",
   "x.unlink_account": "連携解除",
   "profile.external_accounts": "外部アカウント",
+  "wot.directly_trusted": "あなたはこのユーザーを信頼しています",
   "wot.trusted_by_contacts":
     "あなたが信頼するユーザがこのユーザを信頼しています",
   "wot.results_truncated": "結果の一部が省略されている可能性があります",

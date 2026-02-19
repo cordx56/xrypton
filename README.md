@@ -10,6 +10,7 @@ Xrypton is an end-to-end encrypted chat application built with a Rust backend an
 - **Group Chat with Threads** — Create chat groups with multiple members, organize conversations into threads.
 - **Web Push Notifications** — Receive push notifications via the VAPID protocol, handled by a Service Worker.
 - **Distributed-Ready Architecture** — Designed to support distributed deployment across multiple domains/servers.
+- **Web of Trust** — Verify other users' identities face-to-face via QR code signing. Trust is evaluated entirely on the client — the server never issues trust scores.
 
 ## Architecture
 

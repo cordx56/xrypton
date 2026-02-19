@@ -742,6 +742,17 @@ const UserProfileView = ({ userId }: Props) => {
     return pathUserIds;
   }, [targetFingerprint, viewerFingerprint, trustGraph, userId, auth.userId]);
 
+  // 閲覧者がターゲットを直接署名しているか
+  const directlyTrusted = useMemo(() => {
+    if (!trustGraph || !viewerFingerprint || !targetFingerprint) return false;
+    return trustGraph.edges.some(
+      (e) =>
+        !e.revoked &&
+        e.from_fingerprint === viewerFingerprint &&
+        e.to_fingerprint === targetFingerprint,
+    );
+  }, [trustGraph, viewerFingerprint, targetFingerprint]);
+
   const { profiles: trustedProfiles } = useResolvedProfiles(trustedPathUserIds);
   const trustedProfilesByUserId = useMemo(
     () =>
@@ -887,7 +898,15 @@ const UserProfileView = ({ userId }: Props) => {
       activeNodes.map((n) => [n.fingerprint, n.user_id]),
     ) as Record<string, string | null>;
 
-    const profileMap = Object.fromEntries(
+    const profileMap: Record<
+      string,
+      {
+        displayName: string;
+        iconUrl: string | null;
+        iconSignature: string;
+        signingPublicKey?: string;
+      }
+    > = Object.fromEntries(
       trustedProfiles.map((p) => [
         p.userId,
         {
@@ -897,15 +916,14 @@ const UserProfileView = ({ userId }: Props) => {
           signingPublicKey: p.signingPublicKey,
         },
       ]),
-    ) as Record<
-      string,
-      {
-        displayName: string;
-        iconUrl: string | null;
-        iconSignature: string;
-        signingPublicKey?: string;
-      }
-    >;
+    );
+    // ターゲットユーザーのプロフィールを追加
+    profileMap[userId] = {
+      displayName: displayName || userId,
+      iconUrl,
+      iconSignature: "",
+      signingPublicKey,
+    };
 
     const rootFingerprint = viewerFingerprint ?? targetFingerprint;
 
@@ -925,7 +943,7 @@ const UserProfileView = ({ userId }: Props) => {
           profiles={profileMap}
           userIdByFingerprint={userIdByFingerprint}
           onOpenProfile={(nextUserId) => {
-            p.close();
+            p.closeWithoutHistory();
             router.push(`/profile/${encodeURIComponent(nextUserId)}`);
           }}
         />
@@ -1020,6 +1038,12 @@ const UserProfileView = ({ userId }: Props) => {
               ? t("profile.verified")
               : t("profile.unverified")}
           </span>
+        )}
+
+        {!isOwnProfile && directlyTrusted && (
+          <p className="mt-3 text-sm text-green-500 text-center">
+            {t("wot.directly_trusted")}
+          </p>
         )}
 
         {!isOwnProfile && trustedPathUserIds.length > 0 && (

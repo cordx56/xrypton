@@ -185,6 +185,7 @@ export type TranslationKeys = {
   "x.verifying": string;
   "x.unlink_account": string;
   "profile.external_accounts": string;
+  "wot.directly_trusted": string;
   "wot.trusted_by_contacts": string;
   "wot.results_truncated": string;
   "wot.trust_graph": string;

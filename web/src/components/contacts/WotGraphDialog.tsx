@@ -256,7 +256,7 @@ export default function WotGraphDialog({
     const NodeProgram = createNodeImageProgram({
       drawingMode: "background",
       keepWithinCircle: true,
-      padding: 0.15,
+      padding: 0,
     });
 
     const BigArrowProgram = createEdgeArrowProgram({
