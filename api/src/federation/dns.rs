@@ -46,7 +46,7 @@ impl DnsTxtResolver {
         let entries = match self.get_txt_entries(domain).await {
             Some(entries) => entries,
             None => {
-                tracing::warn!("DNS TXT entries not available for {domain}, treating as Original");
+                tracing::debug!("DNS TXT entries not available for {domain}, treating as Original");
                 return ResolvedDomain::Original;
             }
         };
@@ -101,7 +101,7 @@ async fn query_txt_records(domain: &str) -> Option<Vec<String>> {
         .txt_lookup(lookup_name.as_str())
         .await
         .map_err(|e| {
-            tracing::warn!("DNS TXT lookup for {lookup_name} failed: {e}");
+            tracing::debug!("DNS TXT lookup for {lookup_name} failed: {e}");
         })
         .ok()?;
 

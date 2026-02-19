@@ -173,6 +173,13 @@ async fn get_chat(
             .send()
             .await
             .map_err(|e| AppError::BadGateway(format!("proxy request failed: {e}")))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let resp_body = resp.text().await.unwrap_or_default();
+            return Err(AppError::BadGateway(format!(
+                "home server returned {status}: {resp_body}"
+            )));
+        }
         let mut body: serde_json::Value = resp
             .json()
             .await

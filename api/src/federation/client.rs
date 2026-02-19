@@ -17,6 +17,11 @@ pub struct UserKeysResponse {
     pub primary_key_fingerprint: String,
 }
 
+/// URLパスに含めるユーザIDをパーセントエンコードする。
+pub fn encode_user_id(user_id: &str) -> String {
+    urlencoding::encode(user_id).into_owned()
+}
+
 /// 外部サーバからユーザの公開鍵を取得する（認証不要）。
 pub async fn fetch_user_keys(
     domain: &str,
@@ -24,7 +29,8 @@ pub async fn fetch_user_keys(
     allow_http: bool,
 ) -> Result<UserKeysResponse, AppError> {
     let base = base_url(domain, allow_http);
-    let url = format!("{base}/v1/user/{user_id}/keys");
+    let encoded = encode_user_id(user_id);
+    let url = format!("{base}/v1/user/{encoded}/keys");
     tracing::debug!("fetch_user_keys: url={url} domain={domain} user_id={user_id}");
 
     let client = reqwest::Client::new();

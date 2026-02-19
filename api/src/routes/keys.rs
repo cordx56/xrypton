@@ -231,14 +231,14 @@ struct SignatureQuery {
     direction: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct SignatureNodeResponse {
     fingerprint: String,
     user_id: Option<String>,
     revoked: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct SignatureEdgeResponse {
     signature_id: String,
     from_fingerprint: String,
@@ -249,7 +249,7 @@ struct SignatureEdgeResponse {
     revoked: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct LimitsApplied {
     depth_capped: bool,
     node_capped: bool,
@@ -257,7 +257,7 @@ struct LimitsApplied {
     time_budget_ms: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct SignatureMeta {
     server_time: String,
     truncated: bool,
@@ -266,7 +266,7 @@ struct SignatureMeta {
     data_freshness_sec: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct SignatureQueryEcho {
     max_depth: u32,
     max_nodes: usize,
@@ -274,7 +274,7 @@ struct SignatureQueryEcho {
     direction: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct SignatureGraphResponse {
     root_fingerprint: String,
     query: SignatureQueryEcho,
@@ -283,17 +283,76 @@ struct SignatureGraphResponse {
     meta: SignatureMeta,
 }
 
+/// 外部ユーザのホームサーバに署名グラフリクエストをプロキシする。
+async fn proxy_get_signatures(
+    state: &AppState,
+    domain: &str,
+    fingerprint: &str,
+    query: &SignatureQuery,
+    auth_header: &str,
+) -> Result<Json<SignatureGraphResponse>, AppError> {
+    let base = crate::federation::client::base_url(domain, state.config.federation_allow_http);
+    let mut params = Vec::new();
+    if let Some(d) = query.max_depth {
+        params.push(format!("max_depth={d}"));
+    }
+    if let Some(n) = query.max_nodes {
+        params.push(format!("max_nodes={n}"));
+    }
+    if let Some(e) = query.max_edges {
+        params.push(format!("max_edges={e}"));
+    }
+    if let Some(ref dir) = query.direction {
+        params.push(format!("direction={dir}"));
+    }
+    let qs = if params.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", params.join("&"))
+    };
+    let url = format!(
+        "{base}/v1/keys/{}/signatures{qs}",
+        urlencoding::encode(fingerprint),
+    );
+
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .header("Authorization", auth_header)
+        .send()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("federation signatures proxy failed: {e}")))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AppError::BadGateway(format!(
+            "federation signatures proxy returned {status}: {body}"
+        )));
+    }
+    resp.json::<SignatureGraphResponse>()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("invalid federation signatures response: {e}")))
+        .map(Json)
+}
+
 async fn get_signatures(
     State(state): State<AppState>,
     Path(fingerprint): Path<String>,
     Query(query): Query<SignatureQuery>,
-    _auth: AuthenticatedUser,
+    auth: AuthenticatedUser,
 ) -> Result<Json<SignatureGraphResponse>, AppError> {
     validate_fingerprint(&fingerprint)?;
 
-    db::users::get_user_by_fingerprint(&state.pool, &fingerprint)
+    let user = db::users::get_user_by_fingerprint(&state.pool, &fingerprint)
         .await?
         .ok_or_else(|| AppError::NotFound("key not found".into()))?;
+
+    // 外部ユーザの場合、ホームサーバにプロキシ
+    if let Some((_local, domain)) = user.id.split_once('@')
+        && domain != state.config.server_hostname
+    {
+        return proxy_get_signatures(&state, domain, &fingerprint, &query, &auth.raw_auth_header)
+            .await;
+    }
 
     let direction = match query.direction.as_deref().unwrap_or("inbound") {
         "inbound" => EdgeDirection::Inbound,

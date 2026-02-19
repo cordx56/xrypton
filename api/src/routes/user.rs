@@ -227,10 +227,11 @@ async fn get_keys(
             return fetch_local_user_keys(&state, &user_id).await;
         }
 
-        // 外部サーバのユーザ → 連合リクエスト（DNS解決後のドメインで取得）
+        // 外部サーバのユーザ → 連合リクエスト（ドメイン込みIDで取得）
+        let remote_id = format!("{resolved_local}@{resolved_domain}");
         let remote_keys = crate::federation::client::fetch_user_keys(
             &resolved_domain,
-            &resolved_local,
+            &remote_id,
             state.config.federation_allow_http,
         )
         .await?;
@@ -296,24 +297,20 @@ async fn build_external_accounts(state: &AppState, user_id: &str) -> Vec<Externa
     accounts
 }
 
-async fn get_profile(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
+/// ローカルユーザのプロフィールをJSON形式で返すヘルパー
+async fn fetch_local_profile(
+    state: &AppState,
+    user_id: &UserId,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let user_id = UserId::resolve(&id, &state.config.server_hostname)
-        .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
-
-    // まずDBに存在するか確認（ドメイン付きIDで検索）
-    let profile = db::users::get_profile(&state.pool, &user_id).await?;
+    let profile = db::users::get_profile(&state.pool, user_id).await?;
 
     if let Some(profile) = profile {
-        // ローカルユーザ
         let icon_url = profile
             .icon_key
             .as_ref()
             .map(|_| format!("/v1/user/{}/icon", user_id.as_str()));
 
-        let external_accounts = build_external_accounts(&state, user_id.as_str()).await;
+        let external_accounts = build_external_accounts(state, user_id.as_str()).await;
 
         return Ok(Json(serde_json::json!({
             "user_id": profile.user_id,
@@ -329,9 +326,8 @@ async fn get_profile(
         })));
     }
 
-    // usersテーブルに存在すればローカルユーザ（プロフィール未設定）
-    if db::users::get_user(&state.pool, &user_id).await?.is_some() {
-        let external_accounts = build_external_accounts(&state, user_id.as_str()).await;
+    if db::users::get_user(&state.pool, user_id).await?.is_some() {
+        let external_accounts = build_external_accounts(state, user_id.as_str()).await;
 
         return Ok(Json(serde_json::json!({
             "user_id": user_id.as_str(),
@@ -347,17 +343,60 @@ async fn get_profile(
         })));
     }
 
-    // DBにない場合、ドメインが自サーバ以外ならリモートプロキシ
+    Err(AppError::NotFound("profile not found".into()))
+}
+
+async fn get_profile(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user_id = UserId::resolve(&id, &state.config.server_hostname)
+        .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
+
+    // 外部ドメインの場合、リモートプロキシを優先する。
+    // upsert_external_userはusers行のみ作成するため、fetch_local_profileを先に呼ぶと
+    // 「ユーザ行あり・プロフィール行なし」のケースで空プロフィールが返されてしまう。
     if let Some(domain) = user_id.domain()
         && domain != state.config.server_hostname
     {
-        let base = crate::federation::client::base_url(domain, state.config.federation_allow_http);
-        let url = format!("{base}/v1/user/{}/profile", user_id.local_part());
+        let local_part = user_id.local_part();
+        let (resolved_local, resolved_domain) =
+            match state.dns_resolver.resolve(domain, local_part).await {
+                crate::federation::dns::ResolvedDomain::Mapped {
+                    local_part: rl,
+                    domain: rd,
+                } => (rl, rd),
+                crate::federation::dns::ResolvedDomain::Original => {
+                    (local_part.to_string(), domain.to_string())
+                }
+            };
+
+        // DNS解決後のドメインが自サーバ → カスタムドメインユーザ、ローカル検索
+        if resolved_domain == state.config.server_hostname {
+            let local_user_id = UserId::new_local(&resolved_local, domain)
+                .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
+            return fetch_local_profile(&state, &local_user_id).await;
+        }
+
+        let remote_id = format!("{resolved_local}@{resolved_domain}");
+        let base = crate::federation::client::base_url(
+            &resolved_domain,
+            state.config.federation_allow_http,
+        );
+        let encoded_id = crate::federation::client::encode_user_id(&remote_id);
+        let url = format!("{base}/v1/user/{encoded_id}/profile");
         let resp = reqwest::Client::new()
             .get(&url)
             .send()
             .await
             .map_err(|e| AppError::BadGateway(format!("proxy request failed: {e}")))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::BadGateway(format!(
+                "federation profile proxy returned {status}: {body}"
+            )));
+        }
         let body: serde_json::Value = resp
             .json()
             .await
@@ -365,7 +404,8 @@ async fn get_profile(
         return Ok(Json(body));
     }
 
-    Err(AppError::NotFound("profile not found".into()))
+    // ローカルユーザ
+    fetch_local_profile(&state, &user_id).await
 }
 
 #[derive(Deserialize)]
@@ -546,16 +586,9 @@ async fn upload_icon(
     Ok(Json(serde_json::json!({ "uploaded": true })))
 }
 
-/// アイコン画像を取得
-async fn get_icon(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Response, AppError> {
-    let user_id = UserId::resolve(&id, &state.config.server_hostname)
-        .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
-
-    // まずDBに存在するか確認
-    let profile = db::users::get_profile(&state.pool, &user_id).await?;
+/// ローカルユーザのアイコン画像を返すヘルパー
+async fn fetch_local_icon(state: &AppState, user_id: &UserId) -> Result<Response, AppError> {
+    let profile = db::users::get_profile(&state.pool, user_id).await?;
 
     if let Some(profile) = profile {
         let s3_key = profile
@@ -573,28 +606,73 @@ async fn get_icon(
 
         return Ok(Response::builder()
             .header(header::CONTENT_TYPE, content_type)
-            // 署名検証と整合させるため、最新バイトを常に取得させる。
             .header(header::CACHE_CONTROL, "no-store")
             .body(Body::from(object.data))
             .unwrap());
     }
 
-    // usersテーブルに存在すればローカルユーザ（アイコン未設定）
-    if db::users::get_user(&state.pool, &user_id).await?.is_some() {
+    if db::users::get_user(&state.pool, user_id).await?.is_some() {
         return Err(AppError::NotFound("no icon set".into()));
+    }
+
+    Err(AppError::NotFound("icon not found".into()))
+}
+
+/// アイコン画像を取得
+async fn get_icon(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, AppError> {
+    let user_id = UserId::resolve(&id, &state.config.server_hostname)
+        .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
+
+    // まずローカルDBを検索
+    if let Ok(icon) = fetch_local_icon(&state, &user_id).await {
+        return Ok(icon);
     }
 
     // DBにない場合、ドメインが自サーバ以外ならリモートプロキシ
     if let Some(domain) = user_id.domain()
         && domain != state.config.server_hostname
     {
-        let base = crate::federation::client::base_url(domain, state.config.federation_allow_http);
-        let url = format!("{base}/v1/user/{}/icon", user_id.local_part());
+        let local_part = user_id.local_part();
+        let (resolved_local, resolved_domain) =
+            match state.dns_resolver.resolve(domain, local_part).await {
+                crate::federation::dns::ResolvedDomain::Mapped {
+                    local_part: rl,
+                    domain: rd,
+                } => (rl, rd),
+                crate::federation::dns::ResolvedDomain::Original => {
+                    (local_part.to_string(), domain.to_string())
+                }
+            };
+
+        // DNS解決後のドメインが自サーバ → 元ドメインを保持してローカル検索
+        if resolved_domain == state.config.server_hostname {
+            let local_user_id = UserId::new_local(&resolved_local, domain)
+                .map_err(|e| AppError::BadRequest(format!("invalid user ID: {e}")))?;
+            return fetch_local_icon(&state, &local_user_id).await;
+        }
+
+        let remote_id = format!("{resolved_local}@{resolved_domain}");
+        let base = crate::federation::client::base_url(
+            &resolved_domain,
+            state.config.federation_allow_http,
+        );
+        let encoded_id = crate::federation::client::encode_user_id(&remote_id);
+        let url = format!("{base}/v1/user/{encoded_id}/icon");
         let resp = reqwest::Client::new()
             .get(&url)
             .send()
             .await
             .map_err(|e| AppError::BadGateway(format!("proxy request failed: {e}")))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::BadGateway(format!(
+                "federation icon proxy returned {status}: {body}"
+            )));
+        }
         let content_type = resp
             .headers()
             .get(header::CONTENT_TYPE)
@@ -607,7 +685,6 @@ async fn get_icon(
             .map_err(|e| AppError::BadGateway(format!("proxy response failed: {e}")))?;
         return Ok(Response::builder()
             .header(header::CONTENT_TYPE, content_type)
-            // 署名検証と整合させるため、最新バイトを常に取得させる。
             .header(header::CACHE_CONTROL, "no-store")
             .body(Body::from(bytes))
             .unwrap());
