@@ -114,6 +114,54 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
     [auth],
   );
 
+  // iOSではユーザー操作中に許可プロンプトを出す必要があるため、
+  // 鍵生成/インポートの登録フロー内で明示的に要求する。
+  const requestNotificationPermission =
+    useCallback(async (): Promise<boolean> => {
+      if (!auth.notificationsEnabled) return false;
+      if (typeof window === "undefined" || !("Notification" in window)) {
+        return false;
+      }
+      try {
+        const permission = await Notification.requestPermission();
+        return permission === "granted";
+      } catch {
+        return false;
+      }
+    }, [auth.notificationsEnabled]);
+
+  const signAuthMessage = useCallback(
+    async (keys: string, passphrase: string): Promise<string | null> => {
+      if (!worker) return null;
+      return new Promise<string | null>((resolve) => {
+        worker.eventWaiter("sign", (result) => {
+          resolve(result.success ? result.data.signed_message : null);
+        });
+        worker.postMessage({
+          call: "sign",
+          keys,
+          passphrase,
+          payload: buildAuthPayload(),
+        });
+      });
+    },
+    [worker],
+  );
+
+  const subscribePushForKeys = useCallback(
+    async (
+      keys: string,
+      passphrase: string,
+      permissionGranted: boolean,
+    ): Promise<void> => {
+      if (!permissionGranted) return;
+      const signedMessage = await signAuthMessage(keys, passphrase);
+      if (!signedMessage) return;
+      await auth.serviceWorker.subscribe(signedMessage);
+    },
+    [auth.serviceWorker, signAuthMessage],
+  );
+
   const generate = () => {
     if (!worker || processing) return;
     const targetUserId = isUpdateMode ? auth.userId! : userId;
@@ -176,6 +224,10 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
       return;
     }
     setProcessing(true);
+
+    const pushPermissionGranted = isUpdateMode
+      ? false
+      : await requestNotificationPermission();
 
     const validated = await new Promise<boolean>((resolve) => {
       worker.eventWaiter("validate_passphrases", (data) => {
@@ -277,6 +329,16 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
       auth.setSubPassphraseSession(confirmedSubPass);
     }
 
+    try {
+      await subscribePushForKeys(
+        generatedKeys,
+        confirmedSubPass,
+        pushPermissionGranted,
+      );
+    } catch {
+      // push subscription failed
+    }
+
     // markRegistered は handleContinue で呼ぶ（ここで呼ぶと
     // isRegistered=true で layout が GenerateKey をアンマウントし、
     // エクスポート画面が表示されない）
@@ -309,6 +371,8 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
     }
     setProcessing(true);
     (async () => {
+      const pushPermissionGranted = await requestNotificationPermission();
+
       // パスフレーズ検証
       const validated = await new Promise<boolean>((resolve) => {
         worker.eventWaiter("validate_passphrases", (data) => {
@@ -389,6 +453,15 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
         // activateAccount直後はmarkRegisteredのクロージャが古いuserIdを参照するため、
         // IndexedDBに直接書き込む
         await setAccountValue(accountId, "isRegistered", "true");
+        try {
+          await subscribePushForKeys(
+            trimmedKey,
+            subPassphrase,
+            pushPermissionGranted,
+          );
+        } catch {
+          // push subscription failed
+        }
         window.location.reload();
         return;
       }
@@ -432,6 +505,16 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
       );
       if (!saveSubPass) {
         auth.setSubPassphraseSession(subPassphrase);
+      }
+
+      try {
+        await subscribePushForKeys(
+          trimmedKey,
+          subPassphrase,
+          pushPermissionGranted,
+        );
+      } catch {
+        // push subscription failed
       }
 
       setCompletedKeys(trimmedKey);

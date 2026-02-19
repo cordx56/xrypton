@@ -16,15 +16,26 @@ export const useServiceWorker = () => {
     }
   }, []);
 
+  const resolveRegistration = useCallback(async () => {
+    if (registration) return registration;
+    if (!("serviceWorker" in navigator)) return undefined;
+    try {
+      return await navigator.serviceWorker.ready;
+    } catch {
+      return undefined;
+    }
+  }, [registration]);
+
   const subscribe = useCallback(
     async (signedMessage: string) => {
-      if (!registration) return false;
+      const reg = await resolveRegistration();
+      if (!reg) return false;
       try {
         // 既存の購読があればそれを再利用し、なければ新規作成
-        let subscription = await registration.pushManager.getSubscription();
+        let subscription = await reg.pushManager.getSubscription();
         if (!subscription) {
           const key = await apiClient().notification.publicKey();
-          subscription = await registration.pushManager.subscribe({
+          subscription = await reg.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: fromBase64Url(key).buffer as ArrayBuffer,
           });
@@ -37,7 +48,7 @@ export const useServiceWorker = () => {
         return false;
       }
     },
-    [registration],
+    [resolveRegistration],
   );
 
   return { registration, subscribe };
