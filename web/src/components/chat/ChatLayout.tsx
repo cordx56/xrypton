@@ -407,22 +407,42 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
                   data.message_id,
                 );
                 if (typeof msg.content === "string" && msg.content.length > 0) {
-                  body = await new Promise<string>((resolve, reject) => {
-                    auth.worker!.eventWaiter("decrypt", (result) => {
-                      if (result.success) {
-                        resolve(decodeBase64Url(result.data.payload));
-                      } else {
-                        reject(new Error(result.message));
+                  const decryptWithKnownKeys = async (): Promise<string> =>
+                    new Promise<string>((resolve, reject) => {
+                      auth.worker!.eventWaiter("decrypt", (result) => {
+                        if (result.success) {
+                          resolve(decodeBase64Url(result.data.payload));
+                        } else {
+                          reject(new Error(result.message));
+                        }
+                      });
+                      auth.worker!.postMessage({
+                        call: "decrypt",
+                        passphrase: auth.subPassphrase!,
+                        privateKeys: auth.privateKeys!,
+                        knownPublicKeys: knownPublicKeys.current,
+                        message: msg.content,
+                      });
+                    });
+
+                  try {
+                    body = await decryptWithKnownKeys();
+                  } catch {
+                    // チャット未選択時などに送信者鍵が未キャッシュなケースを補完して再試行
+                    if (data.sender_id) {
+                      const senderKeys = await resolveKeys(data.sender_id);
+                      if (senderKeys) {
+                        knownPublicKeys.current = {
+                          ...knownPublicKeys.current,
+                          [senderKeys.primary_key_fingerprint]: {
+                            name: data.sender_id,
+                            publicKeys: senderKeys.signing_public_key,
+                          },
+                        };
+                        body = await decryptWithKnownKeys();
                       }
-                    });
-                    auth.worker!.postMessage({
-                      call: "decrypt",
-                      passphrase: auth.subPassphrase!,
-                      privateKeys: auth.privateKeys!,
-                      knownPublicKeys: knownPublicKeys.current,
-                      message: msg.content,
-                    });
-                  });
+                    }
+                  }
                 }
               }
             } catch {
@@ -582,6 +602,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
       chat,
       handleRealtimeOffer,
       resolveDisplayName,
+      resolveKeys,
       realtime.handleIncomingAnswer,
       showNotification,
     ],
