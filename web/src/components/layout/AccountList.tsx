@@ -69,7 +69,9 @@ const AccountList = ({ accountIds, activeId, showAdd = false }: Props) => {
               userId: id,
               displayName: dn,
               displayNameSignature: p.display_name_signature || null,
-              iconUrl: p.icon_url ? `${getApiBaseUrl()}${p.icon_url}` : null,
+              iconUrl: p.icon_url
+                ? `${getApiBaseUrl()}${p.icon_url}?t=${Date.now()}`
+                : null,
               iconSignature: p.icon_signature || null,
               signingPublicKey: keys.signing_public_key,
             };

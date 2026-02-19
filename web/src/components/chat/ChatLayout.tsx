@@ -88,7 +88,7 @@ const NewGroupDialog: DialogComponent = ({ close, setOnClose }) => {
                 c.contact_user_id,
               );
               const iconUrl = profile.icon_url
-                ? `${getApiBaseUrl()}${profile.icon_url}`
+                ? `${getApiBaseUrl()}${profile.icon_url}?t=${Date.now()}`
                 : null;
               const keys = await resolveKeys(c.contact_user_id);
               const name = await resolveName(
@@ -451,7 +451,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
                 resolveKeys(senderId),
               ]);
               iconUrl = profile.icon_url
-                ? `${getApiBaseUrl()}${profile.icon_url}`
+                ? `${getApiBaseUrl()}${profile.icon_url}?t=${Date.now()}`
                 : null;
               iconSignature = profile.icon_signature ?? "";
               publicKey = keys?.signing_public_key ?? undefined;
@@ -470,7 +470,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
                 profile.display_name_signature || undefined,
               );
               iconUrl = profile.icon_url
-                ? `${getApiBaseUrl()}${profile.icon_url}`
+                ? `${getApiBaseUrl()}${profile.icon_url}?t=${Date.now()}`
                 : null;
               iconSignature = profile.icon_signature ?? "";
               publicKey = keys?.signing_public_key ?? undefined;
@@ -760,7 +760,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           profiles[member.user_id] = {
             display_name: resolvedName,
             icon_url: profile.icon_url
-              ? `${getApiBaseUrl()}${profile.icon_url}`
+              ? `${getApiBaseUrl()}${profile.icon_url}?t=${Date.now()}`
               : null,
             icon_signature: profile.icon_signature ?? "",
             signing_public_key: signingKey,

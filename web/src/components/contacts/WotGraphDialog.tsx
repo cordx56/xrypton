@@ -51,6 +51,7 @@ const HORIZONTAL_GAP = 4;
 const VERTICAL_GAP = 2.4;
 
 type ThemeColors = {
+  foreground: string;
   rootNode: string;
   targetNode: string;
   defaultNode: string;
@@ -59,6 +60,7 @@ type ThemeColors = {
 };
 
 const DEFAULT_THEME_COLORS: ThemeColors = {
+  foreground: "#171717",
   rootNode: "#171717",
   targetNode: "#6c8ebf",
   defaultNode: "#6b7280",
@@ -74,6 +76,7 @@ function readThemeColors(): ThemeColors {
   const foreground = styles.getPropertyValue("--foreground").trim();
 
   return {
+    foreground: foreground || DEFAULT_THEME_COLORS.foreground,
     rootNode: foreground || DEFAULT_THEME_COLORS.rootNode,
     targetNode: accent || DEFAULT_THEME_COLORS.targetNode,
     defaultNode: muted || DEFAULT_THEME_COLORS.defaultNode,
@@ -87,18 +90,18 @@ function buildNodePositions(
   nodes: GraphNode[],
   edges: GraphEdge[],
 ): Map<string, { x: number; y: number }> {
-  const outgoing = new Map<string, string[]>();
+  const adjacency = new Map<string, string[]>();
   for (const node of nodes) {
-    outgoing.set(node.fingerprint, []);
+    adjacency.set(node.fingerprint, []);
   }
 
   for (const edge of edges) {
-    const next = outgoing.get(edge.from);
-    if (next) next.push(edge.to);
+    adjacency.get(edge.from)?.push(edge.to);
+    adjacency.get(edge.to)?.push(edge.from);
   }
 
   const depthByFingerprint = new Map<string, number>();
-  if (outgoing.has(rootFingerprint)) {
+  if (adjacency.has(rootFingerprint)) {
     depthByFingerprint.set(rootFingerprint, 0);
     const queue: string[] = [rootFingerprint];
 
@@ -108,7 +111,7 @@ function buildNodePositions(
       const currentDepth = depthByFingerprint.get(current);
       if (currentDepth === undefined) continue;
 
-      for (const next of outgoing.get(current) ?? []) {
+      for (const next of adjacency.get(current) ?? []) {
         if (depthByFingerprint.has(next)) continue;
         depthByFingerprint.set(next, currentDepth + 1);
         queue.push(next);
@@ -117,12 +120,12 @@ function buildNodePositions(
   }
 
   const knownDepths = [...depthByFingerprint.values()];
-  let fallbackDepth = knownDepths.length > 0 ? Math.max(...knownDepths) + 1 : 0;
+  const fallbackDepth =
+    knownDepths.length > 0 ? Math.max(...knownDepths) + 1 : 0;
 
   for (const node of nodes) {
     if (depthByFingerprint.has(node.fingerprint)) continue;
     depthByFingerprint.set(node.fingerprint, fallbackDepth);
-    fallbackDepth += 1;
   }
 
   const groupedByDepth = new Map<number, string[]>();
@@ -253,6 +256,7 @@ export default function WotGraphDialog({
       labelRenderedSizeThreshold: 0,
       labelDensity: 1.2,
       labelSize: 12,
+      labelColor: { color: themeColors.foreground },
       zIndex: true,
       maxCameraRatio: 3,
       minCameraRatio: 0.08,
@@ -298,10 +302,10 @@ export default function WotGraphDialog({
       renderer.off("leaveNode", leaveNode);
       renderer.kill();
     };
-  }, [graph, onOpenProfile]);
+  }, [graph, onOpenProfile, themeColors.foreground]);
 
   return (
-    <div className="h-[60vh] w-[min(90vw,860px)]">
+    <div className="h-[60vh] w-full">
       <div className="text-xs text-muted mb-2">
         {t("wot.trust_graph")}: {rootFingerprint.slice(0, 8)}... →{" "}
         {targetFingerprint.slice(0, 8)}...

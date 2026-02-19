@@ -536,14 +536,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return false;
       }
 
-      const subscribed = await ensurePushSubscription(true, true);
-      if (!subscribed) {
-        setNotificationsEnabledState(false);
-        if (userId) {
-          await setAccountValue(userId, "notificationsEnabled", "false");
-        }
-      }
-      return subscribed;
+      // 購読リクエストが失敗しても設定はONのまま維持する。
+      // iOSなどで一時的に購読できない場合でも、次回起動時に再試行される。
+      await ensurePushSubscription(true, true);
+      return true;
     },
     [userId, serviceWorker.registration, ensurePushSubscription],
   );

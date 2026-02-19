@@ -573,7 +573,8 @@ async fn get_icon(
 
         return Ok(Response::builder()
             .header(header::CONTENT_TYPE, content_type)
-            .header(header::CACHE_CONTROL, "public, max-age=3600")
+            // 署名検証と整合させるため、最新バイトを常に取得させる。
+            .header(header::CACHE_CONTROL, "no-store")
             .body(Body::from(object.data))
             .unwrap());
     }
@@ -606,7 +607,8 @@ async fn get_icon(
             .map_err(|e| AppError::BadGateway(format!("proxy response failed: {e}")))?;
         return Ok(Response::builder()
             .header(header::CONTENT_TYPE, content_type)
-            .header(header::CACHE_CONTROL, "public, max-age=3600")
+            // 署名検証と整合させるため、最新バイトを常に取得させる。
+            .header(header::CACHE_CONTROL, "no-store")
             .body(Body::from(bytes))
             .unwrap());
     }
