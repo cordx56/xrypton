@@ -21,7 +21,7 @@ These keys are used to verify that what you send truly comes from you, and to al
 - **Main Passphrase** : Used to encrypt your main private key. You won't use this often, but it is important, so store it in a safe place.
 - **Sub Passphrase** : Used to encrypt your sub private key. This is the key you'll use day-to-day. You can have your browser remember this passphrase.
 
-> **Important** : Passphrases are never sent to the server. If you lose them, your account cannot be recovered. Be sure to store them in a safe place.
+> **Important** : Secret key and passphrases are never sent to the server. If you lose them, your account cannot be recovered. Be sure to store them in a safe place.
 
 You can also [set up a custom domain](/docs/en/custom-domain) for your User ID.
 
@@ -76,9 +76,10 @@ Here's how to chat with other people.
 First, add the person you want to chat with to your contacts.
 
 1. Click the contacts tab at the bottom of the screen.
-1. Once contacts opens, click the + button at the top of the screen.
+1. Once contacts opens, click the magnifying glass button at the top of the screen.
 1. In the window that opens, enter the User ID of the person you want to chat with.
-1. Press OK. If the person appears in your contacts, you're all set.
+1. Press OK and verify the profile of the person you want to chat with.
+1. Click the + button in the upper right to add them to your contacts.
 
 Once the contact is added, you can start chatting.
 
