@@ -160,6 +160,7 @@ export const en: TranslationKeys = {
   "error.file_upload_failed": "Failed to upload file.",
   "error.file_download_failed": "Failed to download file.",
   "settings.hide_non_contact_channels": "Hide channels from non-contacts",
+  "settings.enter_to_send": "Send with Enter key",
   "tab.social": "Social",
   "atproto.connect": "Connect to AT Protocol server",
   "atproto.disconnect": "Disconnect",

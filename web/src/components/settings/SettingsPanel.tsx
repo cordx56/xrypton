@@ -32,11 +32,15 @@ const SettingsPanel = () => {
   const { showError } = useErrorToast();
   const [deleting, setDeleting] = useState(false);
   const [hideNonContact, setHideNonContact] = useState(false);
+  const [enterToSend, setEnterToSend] = useState(true);
 
   useEffect(() => {
     if (!auth.userId) return;
     getAccountValue(auth.userId, "hideNonContactChannels").then((v) => {
       if (v === "true") setHideNonContact(true);
+    });
+    getAccountValue(auth.userId, "enterToSend").then((v) => {
+      if (v === "false") setEnterToSend(false);
     });
   }, [auth.userId]);
 
@@ -180,6 +184,24 @@ const SettingsPanel = () => {
           <span className="text-sm">
             {t("settings.hide_non_contact_channels")}
           </span>
+        </label>
+      </section>
+
+      {/* Enter to Send */}
+      <section>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={enterToSend}
+            onChange={(e) => {
+              const val = e.target.checked;
+              setEnterToSend(val);
+              if (auth.userId)
+                setAccountValue(auth.userId, "enterToSend", String(val));
+            }}
+            className="accent-accent"
+          />
+          <span className="text-sm">{t("settings.enter_to_send")}</span>
         </label>
       </section>
 

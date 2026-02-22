@@ -164,6 +164,7 @@ export const ja: TranslationKeys = {
   "error.file_download_failed": "ファイルのダウンロードに失敗しました。",
   "settings.hide_non_contact_channels":
     "連絡先にないユーザのみからの受信を非表示",
+  "settings.enter_to_send": "Enterキーで送信",
   "tab.social": "ソーシャル",
   "atproto.connect": "ATProtoサーバに接続",
   "atproto.disconnect": "切断",

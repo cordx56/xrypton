@@ -9,11 +9,18 @@ type Props = {
   onSendFile?: (file: File) => Promise<void>;
   disabled?: boolean;
   placeholder?: string;
+  enterToSend?: boolean;
 };
 
 const MAX_ROWS = 5;
 
-const ChatInput = ({ onSend, onSendFile, disabled, placeholder }: Props) => {
+const ChatInput = ({
+  onSend,
+  onSendFile,
+  disabled,
+  placeholder,
+  enterToSend = true,
+}: Props) => {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const { t } = useI18n();
@@ -47,9 +54,16 @@ const ChatInput = ({ onSend, onSendFile, disabled, placeholder }: Props) => {
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+    if (enterToSend) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleSend();
+      }
+    } else {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        handleSend();
+      }
     }
   };
 

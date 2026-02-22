@@ -141,6 +141,7 @@ export type TranslationKeys = {
   "error.file_upload_failed": string;
   "error.file_download_failed": string;
   "settings.hide_non_contact_channels": string;
+  "settings.enter_to_send": string;
   "tab.social": string;
   "atproto.connect": string;
   "atproto.disconnect": string;

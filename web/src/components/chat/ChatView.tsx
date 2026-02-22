@@ -31,6 +31,7 @@ type Props = {
   onLoadMore: () => void;
   onBack: () => void;
   inputPlaceholder?: string;
+  enterToSend?: boolean;
 };
 
 const ChatView = ({
@@ -44,6 +45,7 @@ const ChatView = ({
   onLoadMore,
   onBack,
   inputPlaceholder,
+  enterToSend,
 }: Props) => {
   const { messages, totalMessages } = useChat();
   const { t } = useI18n();
@@ -215,6 +217,7 @@ const ChatView = ({
         onSend={onSend}
         onSendFile={onSendFile}
         placeholder={inputPlaceholder}
+        enterToSend={enterToSend}
       />
     </div>
   );

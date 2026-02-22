@@ -22,7 +22,7 @@ import {
   buildFileMessageContent,
   isImageType,
 } from "@/utils/fileMessage";
-import { setCachedContactIds } from "@/utils/accountStore";
+import { setCachedContactIds, getAccountValue } from "@/utils/accountStore";
 import { loadPushInbox, removePushInboxEntry } from "@/utils/pushInboxStore";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
 import ChatGroupList from "./ChatGroupList";
@@ -252,6 +252,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     usePublicKeyResolver();
   const realtime = useRealtime();
   const [loading, setLoading] = useState(false);
+  const [enterToSend, setEnterToSend] = useState(true);
   const [realtimeFocused, setRealtimeFocused] = useState(false);
   const [selectedGroupName, setSelectedGroupName] = useState("");
   const [selectedThreadName, setSelectedThreadName] = useState("");
@@ -285,6 +286,13 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const [memberProfiles, setMemberProfiles] = useState<
     Record<string, MemberProfile>
   >({});
+
+  useEffect(() => {
+    if (!auth.userId) return;
+    getAccountValue(auth.userId, "enterToSend").then((v) => {
+      if (v === "false") setEnterToSend(false);
+    });
+  }, [auth.userId]);
 
   // チャンネルとスレッドの updated_at をローカルで更新する
   const touchTimestamps = (targetChatId: string, targetThreadId?: string) => {
@@ -1775,6 +1783,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           onLoadMore={isRealtimeView ? async () => {} : handleLoadMore}
           inputPlaceholder={chatInputPlaceholder}
           onBack={handleBackFromChatView}
+          enterToSend={enterToSend}
         />
       );
     }
@@ -1852,6 +1861,7 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
             onLoadMore={isRealtimeView ? async () => {} : handleLoadMore}
             inputPlaceholder={chatInputPlaceholder}
             onBack={handleBackFromChatView}
+            enterToSend={enterToSend}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-muted text-sm">
