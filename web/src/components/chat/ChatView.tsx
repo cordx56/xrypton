@@ -1,4 +1,4 @@
-import { useState, useRef, useLayoutEffect, useCallback } from "react";
+import { useState, useRef, useLayoutEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useChat } from "@/contexts/ChatContext";
 import { useI18n } from "@/contexts/I18nContext";
@@ -54,8 +54,18 @@ const ChatView = ({
   const prevScrollHeightRef = useRef(0);
   const prevMessageCountRef = useRef(0);
   const isLoadingMore = useRef(false);
-  const isAtBottomRef = useRef(true);
   const [isDragging, setIsDragging] = useState(false);
+
+  // children を監視し、サイズ変更時に差分スクロール
+  const observer = useMemo(() => {
+    return new ResizeObserver((_entries) => {
+      const el = scrollRef.current;
+      if (el) {
+        el.scrollTop += el.scrollHeight - prevScrollHeightRef.current;
+        prevScrollHeightRef.current = el.scrollHeight;
+      }
+    });
+  }, [messages]);
 
   // 追加ロード前にスクロール高さを記録
   const handleLoadMoreWrapped = () => {
@@ -80,31 +90,9 @@ const ChatView = ({
     } else if (messages.length !== prevMessageCountRef.current) {
       // 新メッセージ or 初回ロード: 最下部へ
       el.scrollTop = el.scrollHeight;
-      isAtBottomRef.current = true;
-    } else if (isAtBottomRef.current) {
-      // 内容変更（復号など）で高さが変わっても最下部を維持
-      el.scrollTop = el.scrollHeight;
     }
     prevMessageCountRef.current = messages.length;
   }, [messages]);
-
-  // 画像読み込み完了時のスクロール補正
-  const handleImageLoad = useCallback(
-    (e: React.SyntheticEvent<HTMLImageElement>) => {
-      const el = scrollRef.current;
-      if (!el) return;
-
-      if (isAtBottomRef.current) {
-        el.scrollTop = el.scrollHeight;
-      } else {
-        const img = e.currentTarget;
-        if (img.offsetTop < el.scrollTop) {
-          el.scrollTop += img.clientHeight;
-        }
-      }
-    },
-    [],
-  );
 
   // ドラッグカウンタでネストされたenter/leaveを追跡
   const dragCounter = useRef(0);
@@ -162,8 +150,6 @@ const ChatView = ({
         className="flex-1 overflow-y-auto px-3 py-2"
         onScroll={(e) => {
           const el = e.currentTarget;
-          isAtBottomRef.current =
-            el.scrollTop + el.clientHeight >= el.scrollHeight - 50;
           if (
             el.scrollTop < 100 &&
             messages.length < totalMessages &&
@@ -187,7 +173,14 @@ const ChatView = ({
           const senderId = msg.sender_id;
           const profile = senderId ? memberProfiles[senderId] : undefined;
           return (
-            <div key={msg.id}>
+            <div
+              key={msg.id}
+              ref={(ref) => {
+                if (ref) {
+                  observer.observe(ref);
+                }
+              }}
+            >
               {separator}
               <MessageBubble
                 message={msg}
@@ -206,7 +199,6 @@ const ChatView = ({
                     : undefined
                 }
                 onDownloadFile={onDownloadFile}
-                onImageLoad={handleImageLoad}
               />
             </div>
           );
