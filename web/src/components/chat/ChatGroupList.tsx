@@ -15,6 +15,7 @@ import {
   faBoxOpen,
   faCircleInfo,
 } from "@fortawesome/free-solid-svg-icons";
+import Spinner from "@/components/common/Spinner";
 import type { ChatGroup } from "@/types/chat";
 
 type Props = {
@@ -36,7 +37,7 @@ const ChatGroupList = ({
 }: Props) => {
   const router = useRouter();
   const auth = useAuth();
-  const { groups, unreadGroupIds } = useChat();
+  const { groups, unreadGroupIds, loadingGroups } = useChat();
   const { t } = useI18n();
   const [showArchived, setShowArchived] = useState(false);
   const [hideNonContact, setHideNonContact] = useState(false);
@@ -140,7 +141,9 @@ const ChatGroupList = ({
         </div>
       </div>
       <div className="flex-1 overflow-y-auto">
-        {displayGroups.length === 0 ? (
+        {!showArchived && loadingGroups && displayGroups.length === 0 ? (
+          <Spinner />
+        ) : displayGroups.length === 0 ? (
           <p className="text-center text-muted p-8">
             {showArchived
               ? t("chat.no_archived_channels")

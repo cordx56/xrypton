@@ -13,6 +13,7 @@ import {
   faClock,
   faRightFromBracket,
 } from "@fortawesome/free-solid-svg-icons";
+import Spinner from "@/components/common/Spinner";
 import type { Thread } from "@/types/chat";
 
 type Props = {
@@ -38,7 +39,7 @@ const ThreadList = ({
   onJoinRealtime,
   onLeaveRealtime,
 }: Props) => {
-  const { threads, unreadThreadIds } = useChat();
+  const { threads, unreadThreadIds, loadingThreads } = useChat();
   const { pendingSessions, activeSession } = useRealtime();
   const { t } = useI18n();
   const [showArchived, setShowArchived] = useState(false);
@@ -164,9 +165,15 @@ const ThreadList = ({
           </ul>
         )}
         {/* 通常スレッド一覧 */}
-        {displayThreads.length === 0 &&
+        {!showArchived &&
+        loadingThreads &&
+        displayThreads.length === 0 &&
         pendingSessions.length === 0 &&
         !activeSession ? (
+          <Spinner />
+        ) : displayThreads.length === 0 &&
+          pendingSessions.length === 0 &&
+          !activeSession ? (
           <p className="text-center text-muted p-8">
             {showArchived
               ? t("chat.no_archived_threads")

@@ -31,6 +31,12 @@ type ChatContextType = {
   markGroupRead: (groupId: string) => void;
   /** スレッドの未読を解除する */
   markThreadRead: (threadId: string) => void;
+  /** チャンネル一覧読み込み中 */
+  loadingGroups: boolean;
+  setLoadingGroups: (v: boolean) => void;
+  /** スレッド一覧読み込み中 */
+  loadingThreads: boolean;
+  setLoadingThreads: (v: boolean) => void;
 };
 
 const ChatContext = createContext<ChatContextType>({
@@ -47,6 +53,10 @@ const ChatContext = createContext<ChatContextType>({
   markUnread: () => {},
   markGroupRead: () => {},
   markThreadRead: () => {},
+  loadingGroups: false,
+  setLoadingGroups: () => {},
+  loadingThreads: false,
+  setLoadingThreads: () => {},
 });
 
 export const ChatProvider = ({ children }: { children: ReactNode }) => {
@@ -58,6 +68,8 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
   const [unreadThreadIds, setUnreadThreadIds] = useState<Set<string>>(
     new Set(),
   );
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [loadingThreads, setLoadingThreads] = useState(false);
 
   const markUnread = useCallback((groupId: string, threadId?: string) => {
     setUnreadGroupIds((prev) => {
@@ -110,6 +122,10 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
         markUnread,
         markGroupRead,
         markThreadRead,
+        loadingGroups,
+        setLoadingGroups,
+        loadingThreads,
+        setLoadingThreads,
       }}
     >
       {children}

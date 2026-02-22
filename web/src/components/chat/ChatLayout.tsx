@@ -733,12 +733,15 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     (async () => {
       const signed = await auth.getSignedMessage();
       if (!signed) return;
+      chat.setLoadingGroups(true);
       try {
         const client = authApiClient(signed.signedMessage);
         const groups = await client.chat.list();
         chat.setGroups(groups);
       } catch {
         // failed to load groups
+      } finally {
+        chat.setLoadingGroups(false);
       }
     })();
   }, [auth.userId, auth.publicKeys]);
@@ -747,17 +750,23 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   const fetchGroupDetail = useCallback(
     async (groupId: string) => {
       const requestVersion = ++groupDetailVersionRef.current;
+      chat.setLoadingThreads(true);
       const signed = await auth.getSignedMessage();
-      if (!signed) return;
+      if (!signed) {
+        chat.setLoadingThreads(false);
+        return;
+      }
       const client = authApiClient(signed.signedMessage);
       const data = await client.chat.get(groupId);
       if (
         chatIdRef.current !== groupId ||
         groupDetailVersionRef.current !== requestVersion
       ) {
+        chat.setLoadingThreads(false);
         return;
       }
       chat.setThreads(data.threads ?? []);
+      chat.setLoadingThreads(false);
       setArchivedThreads(data.archived_threads ?? []);
 
       const pubKeys: PublicKeyMap = {};
