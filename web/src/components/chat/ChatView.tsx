@@ -1,4 +1,4 @@
-import { useState, useRef, useLayoutEffect } from "react";
+import { useState, useRef, useLayoutEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useChat } from "@/contexts/ChatContext";
 import { useI18n } from "@/contexts/I18nContext";
@@ -85,6 +85,24 @@ const ChatView = ({
     }
     prevMessageCountRef.current = messages.length;
   }, [messages]);
+
+  // 画像読み込み完了時のスクロール補正
+  const handleImageLoad = useCallback(
+    (e: React.SyntheticEvent<HTMLImageElement>) => {
+      const el = scrollRef.current;
+      if (!el) return;
+
+      if (isAtBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+      } else {
+        const img = e.currentTarget;
+        if (img.offsetTop < el.scrollTop) {
+          el.scrollTop += img.clientHeight;
+        }
+      }
+    },
+    [],
+  );
 
   // ドラッグカウンタでネストされたenter/leaveを追跡
   const dragCounter = useRef(0);
@@ -186,6 +204,7 @@ const ChatView = ({
                     : undefined
                 }
                 onDownloadFile={onDownloadFile}
+                onImageLoad={handleImageLoad}
               />
             </div>
           );

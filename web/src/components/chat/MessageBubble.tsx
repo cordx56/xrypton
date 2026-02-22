@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, type SyntheticEvent } from "react";
 import Avatar from "@/components/common/Avatar";
 import ImageLightbox from "@/components/common/ImageLightbox";
 import type { Message } from "@/types/chat";
@@ -19,15 +19,18 @@ type Props = {
   status?: string;
   onClickUser?: () => void;
   onDownloadFile?: (message: Message) => void;
+  onImageLoad?: (e: SyntheticEvent<HTMLImageElement>) => void;
 };
 
 /** ファイルメッセージの表示コンポーネント */
 const FileContent = ({
   message,
   onDownloadFile,
+  onImageLoad,
 }: {
   message: Message;
   onDownloadFile?: (message: Message) => void;
+  onImageLoad?: (e: SyntheticEvent<HTMLImageElement>) => void;
 }) => {
   const meta = message.fileMetadata;
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -49,6 +52,7 @@ const FileContent = ({
             alt={meta.name}
             className="max-w-full sm:max-w-96 max-h-96 rounded cursor-pointer"
             onClick={() => setLightboxOpen(true)}
+            onLoad={onImageLoad}
           />
           {lightboxOpen && (
             <ImageLightbox
@@ -93,6 +97,7 @@ const MessageBubble = ({
   status,
   onClickUser,
   onDownloadFile,
+  onImageLoad,
 }: Props) => {
   const { t } = useI18n();
   const time = formatTime(message.created_at);
@@ -132,7 +137,11 @@ const MessageBubble = ({
             {t("chat.decrypt_failed")}
           </span>
         ) : message.fileMetadata ? (
-          <FileContent message={message} onDownloadFile={onDownloadFile} />
+          <FileContent
+            message={message}
+            onDownloadFile={onDownloadFile}
+            onImageLoad={onImageLoad}
+          />
         ) : (
           <div className="text-base whitespace-pre-wrap break-words">
             {message.encrypted ? (
