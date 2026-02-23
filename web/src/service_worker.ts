@@ -5,12 +5,17 @@ import {
   enqueuePushNotification,
   hasPushInboxEntry,
 } from "@/utils/pushInboxStore";
+import {
+  tryDecryptPushMessageBody,
+  loadPushDecryptSecretsFromStore,
+} from "@/utils/pushMessageDecryptor";
 
-// @ts-ignore
+// @ts-expect-error Service Worker global scope is provided by runtime.
 const sw: ServiceWorkerGlobalScope = self;
 
 const NOTIFY_ACK_WAIT_MS = 1000;
 const ORIGIN = sw.location.origin;
+const DEFAULT_MESSAGE_BODY = "You have a new message";
 
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -131,13 +136,24 @@ sw.addEventListener("push", (ev) => {
             if (shouldSuppress) return;
           }
           if (!(await shouldShowAfterAckWait())) return;
+
+          let body = DEFAULT_MESSAGE_BODY;
+          const decryptedBody = await tryDecryptPushMessageBody(notification, {
+            origin: ORIGIN,
+            resolveSecrets: async (msg) =>
+              loadPushDecryptSecretsFromStore(msg.recipient_id),
+          });
+          if (decryptedBody) {
+            body = decryptedBody;
+          }
+
           const icon =
             resolveNotificationIconUrl(notification.icon_url) ??
             buildSenderIconUrl(notification.sender_id);
           await sw.registration.showNotification(
             notification.sender_name || "New message",
             {
-              body: "You have a new message",
+              body,
               tag: `msg-${notification.thread_id ?? notification.chat_id ?? "default"}`,
               icon,
               data: {

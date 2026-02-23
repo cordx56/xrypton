@@ -22,6 +22,7 @@ import {
   buildFileMessageContent,
   isImageType,
 } from "@/utils/fileMessage";
+import { tryDecryptPushMessageBody } from "@/utils/pushMessageDecryptor";
 import { setCachedContactIds, getAccountValue } from "@/utils/accountStore";
 import { loadPushInbox, removePushInboxEntry } from "@/utils/pushInboxStore";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
@@ -398,67 +399,27 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
           // メッセージリストの再取得をスキップ（ファイル送信時に完了前に表示されるのを防ぐ）
           if (data.is_self) return true;
 
-          // message_id からメッセージ本体を取得し、Worker経由で復号
+          // message_id から本文を取得し、通知用に復号
           let body = "New message";
-          if (
-            data.chat_id &&
-            data.thread_id &&
-            data.message_id &&
-            auth.worker &&
-            auth.privateKeys &&
-            auth.subPassphrase
-          ) {
-            try {
-              const signed = await auth.getSignedMessage();
-              if (signed) {
-                const client = authApiClient(signed.signedMessage);
-                const msg = await client.message.get(
-                  data.chat_id,
-                  data.thread_id,
-                  data.message_id,
-                );
-                if (typeof msg.content === "string" && msg.content.length > 0) {
-                  const decryptWithKnownKeys = async (): Promise<string> =>
-                    new Promise<string>((resolve, reject) => {
-                      auth.worker!.eventWaiter("decrypt", (result) => {
-                        if (result.success) {
-                          resolve(decodeBase64Url(result.data.payload));
-                        } else {
-                          reject(new Error(result.message));
-                        }
-                      });
-                      auth.worker!.postMessage({
-                        call: "decrypt",
-                        passphrase: auth.subPassphrase!,
-                        privateKeys: auth.privateKeys!,
-                        knownPublicKeys: knownPublicKeys.current,
-                        message: msg.content,
-                      });
-                    });
-
-                  try {
-                    body = await decryptWithKnownKeys();
-                  } catch {
-                    // チャット未選択時などに送信者鍵が未キャッシュなケースを補完して再試行
-                    if (data.sender_id) {
-                      const senderKeys = await resolveKeys(data.sender_id);
-                      if (senderKeys) {
-                        knownPublicKeys.current = {
-                          ...knownPublicKeys.current,
-                          [senderKeys.primary_key_fingerprint]: {
-                            name: data.sender_id,
-                            publicKeys: senderKeys.signing_public_key,
-                          },
-                        };
-                        body = await decryptWithKnownKeys();
-                      }
-                    }
+          const signed = await auth.getSignedMessage();
+          const decryptedBody = await tryDecryptPushMessageBody(data, {
+            origin: window.location.origin,
+            signedMessage: signed?.signedMessage,
+            secrets:
+              auth.privateKeys && auth.subPassphrase
+                ? {
+                    privateKeys: auth.privateKeys,
+                    subPassphrase: auth.subPassphrase,
                   }
-                }
-              }
-            } catch {
-              // 復号失敗時はデフォルトのbodyを使用
-            }
+                : undefined,
+            senderSigningPublicKey:
+              data.sender_id && memberProfilesRef.current[data.sender_id]
+                ? (memberProfilesRef.current[data.sender_id]
+                    .signing_public_key ?? undefined)
+                : undefined,
+          });
+          if (decryptedBody) {
+            body = decryptedBody;
           }
 
           // 現在表示中のチャットと一致する場合、メッセージリストを再取得
@@ -845,6 +806,9 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
     if (!chatId) return;
     const group = chat.groups.find((g) => g.id === chatId);
     if (group) setSelectedGroupName(group.name || group.id);
+    // 前のチャンネルのスレッド一覧を即座にクリアしてスピナーを表示
+    chat.setThreads([]);
+    setArchivedThreads([]);
     groupDetailReady.current = fetchGroupDetail(chatId).catch(() => {});
   }, [chatId]);
 
@@ -852,6 +816,10 @@ const ChatLayout = ({ chatId, threadId }: Props) => {
   useEffect(() => {
     if (!chatId || !threadId) {
       messageLoadVersionRef.current += 1;
+      // 前のスレッドのメッセージを即座にクリア
+      chat.setMessages([]);
+      chat.setTotalMessages(0);
+      setLoading(false);
       return;
     }
     const requestVersion = ++messageLoadVersionRef.current;
