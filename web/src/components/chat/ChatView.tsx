@@ -1,4 +1,4 @@
-import { useState, useRef, useLayoutEffect, useMemo, useCallback } from "react";
+import { useState, useRef, useLayoutEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useChat } from "@/contexts/ChatContext";
 import { useI18n } from "@/contexts/I18nContext";
@@ -11,6 +11,8 @@ import DateSeparator from "./DateSeparator";
 import ChatInput from "./ChatInput";
 import Spinner from "@/components/common/Spinner";
 import type { Message } from "@/types/chat";
+
+const BOTTOM_THRESHOLD = 64;
 
 type MemberProfile = {
   display_name: string;
@@ -54,18 +56,48 @@ const ChatView = ({
   const prevScrollHeightRef = useRef(0);
   const prevMessageCountRef = useRef(0);
   const isLoadingMore = useRef(false);
+  const shouldAutoScrollRef = useRef(true);
   const [isDragging, setIsDragging] = useState(false);
 
+  const getDistanceFromBottom = useCallback((el: HTMLDivElement) => {
+    return el.scrollHeight - (el.scrollTop + el.clientHeight);
+  }, []);
+
   // children を監視し、サイズ変更時に差分スクロール
-  const observer = useMemo(() => {
-    return new ResizeObserver((_entries) => {
-      const el = scrollRef.current;
-      if (el) {
-        el.scrollTop += el.scrollHeight - prevScrollHeightRef.current;
-        prevScrollHeightRef.current = el.scrollHeight;
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    prevScrollHeightRef.current = el.scrollHeight;
+
+    const observer = new ResizeObserver(() => {
+      const container = scrollRef.current;
+      if (!container) return;
+
+      const diff = container.scrollHeight - prevScrollHeightRef.current;
+      if (diff === 0) return;
+
+      const isNearBottom =
+        getDistanceFromBottom(container) - diff < BOTTOM_THRESHOLD;
+      const hasNewMessages = messages.length > prevMessageCountRef.current;
+
+      if (isNearBottom) {
+        container.scrollTop = container.scrollHeight;
+      } else if (isLoadingMore.current || !hasNewMessages) {
+        container.scrollTop += diff;
       }
+
+      prevScrollHeightRef.current = container.scrollHeight;
     });
-  }, [messages]);
+
+    Array.from(el.children).forEach((child) => {
+      observer.observe(child);
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [getDistanceFromBottom, messages.length]);
 
   // 追加ロード前にスクロール高さを記録
   const handleLoadMoreWrapped = () => {
@@ -77,22 +109,33 @@ const ChatView = ({
     onLoadMore();
   };
 
-  // メッセージ変化後のスクロール制御
+  // メッセージ件数変化後のスクロール制御
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+
+    const hasNewMessages = messages.length > prevMessageCountRef.current;
+    const previousDistanceFromBottom =
+      prevScrollHeightRef.current - (el.scrollTop + el.clientHeight);
+    const wasNearBottom = previousDistanceFromBottom < BOTTOM_THRESHOLD;
 
     if (isLoadingMore.current) {
       // 追加ロード: スクロール位置を維持
       const diff = el.scrollHeight - prevScrollHeightRef.current;
       el.scrollTop += diff;
       isLoadingMore.current = false;
-    } else if (messages.length !== prevMessageCountRef.current) {
-      // 新メッセージ or 初回ロード: 最下部へ
+    } else if (
+      hasNewMessages &&
+      (shouldAutoScrollRef.current || wasNearBottom)
+    ) {
+      // 新メッセージ受信時、最下部にいる場合のみ最下部へ追従
       el.scrollTop = el.scrollHeight;
+      shouldAutoScrollRef.current = true;
     }
+
+    prevScrollHeightRef.current = el.scrollHeight;
     prevMessageCountRef.current = messages.length;
-  }, [messages]);
+  }, [messages.length]);
 
   // ドラッグカウンタでネストされたenter/leaveを追跡
   const dragCounter = useRef(0);
@@ -123,9 +166,6 @@ const ChatView = ({
     }
   };
 
-  // 日付でグルーピングしてメッセージを表示
-  let lastDate = "";
-
   return (
     <div
       className={`flex flex-col h-full w-full ${isDragging ? "ring-2 ring-accent ring-inset" : ""}`}
@@ -150,6 +190,8 @@ const ChatView = ({
         className="flex-1 overflow-y-auto px-3 py-2"
         onScroll={(e) => {
           const el = e.currentTarget;
+          shouldAutoScrollRef.current =
+            getDistanceFromBottom(el) < BOTTOM_THRESHOLD;
           if (
             el.scrollTop < 100 &&
             messages.length < totalMessages &&
@@ -163,25 +205,16 @@ const ChatView = ({
         {messages.length === 0 && !loading && (
           <p className="text-center text-muted p-8">{t("chat.no_messages")}</p>
         )}
-        {messages.map((msg) => {
+        {messages.map((msg, index) => {
           const date = formatDate(msg.created_at);
-          let separator = null;
-          if (date !== lastDate) {
-            lastDate = date;
-            separator = <DateSeparator key={`date-${date}`} date={date} />;
-          }
+          const previousDate =
+            index > 0 ? formatDate(messages[index - 1].created_at) : null;
+          const shouldShowDateSeparator = date !== previousDate;
           const senderId = msg.sender_id;
           const profile = senderId ? memberProfiles[senderId] : undefined;
           return (
-            <div
-              key={msg.id}
-              ref={(ref) => {
-                if (ref) {
-                  observer.observe(ref);
-                }
-              }}
-            >
-              {separator}
+            <div key={msg.id}>
+              {shouldShowDateSeparator && <DateSeparator date={date} />}
               <MessageBubble
                 message={msg}
                 isOwn={senderId != null && senderId === currentUserId}
