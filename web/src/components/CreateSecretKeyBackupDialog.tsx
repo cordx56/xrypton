@@ -34,14 +34,22 @@ const CreateSecretKeyBackupDialog = ({
   const [subPassphrase, setSubPassphrase] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const withDetail = (base: string, detail?: string): string => {
+    if (!detail) return base;
+    return `${base} (${detail})`;
+  };
+
   const mapCreateBackupError = (error: unknown): string => {
     if (error instanceof ApiError) {
-      if (error.status === 400) return t("error.bad_request");
-      if (error.status === 401) return t("error.unauthorized");
-      if (error.status === 403) return t("error.forbidden");
-      if (error.status === 404) return t("error.not_found");
-      if (error.status >= 500) return t("error.network");
-      return t("error.backup_create_failed");
+      const detail = error.errorMessage || `HTTP ${error.status}`;
+      if (error.status === 400)
+        return withDetail(t("error.bad_request"), detail);
+      if (error.status === 401)
+        return withDetail(t("error.unauthorized"), detail);
+      if (error.status === 403) return withDetail(t("error.forbidden"), detail);
+      if (error.status === 404) return withDetail(t("error.not_found"), detail);
+      if (error.status >= 500) return withDetail(t("error.network"), detail);
+      return withDetail(t("error.backup_create_failed"), detail);
     }
 
     if (
@@ -55,6 +63,9 @@ const CreateSecretKeyBackupDialog = ({
 
     if (error instanceof Error) {
       const msg = error.message.toLowerCase();
+      if (msg.includes("webauthn_prf_unavailable")) {
+        return t("error.webauthn_prf_unavailable");
+      }
       if (msg.includes("webauthn") || msg.includes("prf")) {
         return t("error.webauthn_failed");
       }
@@ -67,7 +78,7 @@ const CreateSecretKeyBackupDialog = ({
       return `${t("error.backup_create_failed")} (${error.message})`;
     }
 
-    return t("error.backup_create_failed");
+    return `${t("error.backup_create_failed")} (${String(error)})`;
   };
 
   const handleSubmit = async () => {

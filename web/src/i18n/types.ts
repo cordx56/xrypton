@@ -96,6 +96,7 @@ export type TranslationKeys = {
   "error.backup_not_found": string;
   "error.backup_decrypt_failed": string;
   "error.webauthn_failed": string;
+  "error.webauthn_prf_unavailable": string;
   "settings.delete_account": string;
   "settings.create_secret_key_backup": string;
   "settings.create_secret_key_backup_desc": string;

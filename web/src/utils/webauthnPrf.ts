@@ -67,7 +67,7 @@ export async function getWebAuthnPrfResult(
   const outputs = prf?.results;
   const firstOutput = outputs?.first;
   if (!(firstOutput instanceof ArrayBuffer) || firstOutput.byteLength === 0) {
-    throw new Error("WebAuthn PRF output is unavailable");
+    throw new Error("webauthn_prf_unavailable");
   }
 
   const credentialIdB64 = bytesToBase64(new Uint8Array(credential.rawId));

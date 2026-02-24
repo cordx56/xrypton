@@ -101,6 +101,8 @@ export const en: TranslationKeys = {
   "error.backup_not_found": "Backup not found.",
   "error.backup_decrypt_failed": "Failed to decrypt backup.",
   "error.webauthn_failed": "WebAuthn verification failed.",
+  "error.webauthn_prf_unavailable":
+    "This passkey does not support PRF. Please re-register WebAuthn.",
   "settings.delete_account": "Delete Account",
   "settings.create_secret_key_backup": "Create Secret Key Backup",
   "settings.create_secret_key_backup_desc":

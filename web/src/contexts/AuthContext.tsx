@@ -366,6 +366,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               residentKey: "preferred",
               userVerification: "required",
             },
+            extensions: {
+              prf: {},
+            },
           },
         })) as PublicKeyCredential | null;
 

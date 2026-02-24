@@ -104,6 +104,8 @@ export const ja: TranslationKeys = {
   "error.backup_not_found": "バックアップが見つかりません。",
   "error.backup_decrypt_failed": "バックアップの復号に失敗しました。",
   "error.webauthn_failed": "WebAuthn認証に失敗しました。",
+  "error.webauthn_prf_unavailable":
+    "このパスキーではPRFが利用できません。WebAuthnを再登録してください。",
   "settings.delete_account": "アカウントを削除",
   "settings.create_secret_key_backup": "秘密鍵のバックアップ作成",
   "settings.create_secret_key_backup_desc":
