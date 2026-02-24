@@ -1,13 +1,12 @@
 import { apiClient, authApiClient } from "@/api/client";
 import type { WorkerEventWaiter } from "@/hooks/useWorker";
+import { WorkerCallMessage } from "@/utils/schema";
+import { z } from "zod";
 import { getWebAuthnPrfResult } from "@/utils/webauthnPrf";
 
 type WorkerBridge = {
   eventWaiter: WorkerEventWaiter;
-  postMessage: (msg: {
-    call: "backup_encrypt" | "backup_decrypt" | "sign" | "validate_passphrases";
-    [key: string]: unknown;
-  }) => void;
+  postMessage: (msg: z.infer<typeof WorkerCallMessage>) => void;
 };
 
 type BackupPayload = {

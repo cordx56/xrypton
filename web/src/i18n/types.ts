@@ -90,10 +90,15 @@ export type TranslationKeys = {
   "error.invalid_contact_query": string;
   "error.invalid_key_format": string;
   "error.passphrase_validation_failed": string;
+  "error.backup_create_failed": string;
   "error.backup_not_found": string;
   "error.backup_decrypt_failed": string;
   "error.webauthn_failed": string;
   "settings.delete_account": string;
+  "settings.create_secret_key_backup": string;
+  "settings.create_secret_key_backup_desc": string;
+  "settings.creating_backup": string;
+  "settings.backup_created": string;
   "settings.delete_account_confirm": string;
   "settings.deleting_account": string;
   "error.delete_account_failed": string;
@@ -124,6 +129,7 @@ export type TranslationKeys = {
   "error.min_length": string;
   "auth.registration_complete": string;
   "auth.save_keys_warning": string;
+  "auth.create_backup_recommended": string;
   "auth.continue": string;
   "error.reserved_user_id": string;
   "chat.decrypt_failed": string;

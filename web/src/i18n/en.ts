@@ -95,10 +95,16 @@ export const en: TranslationKeys = {
   "error.invalid_contact_query": "Enter a User ID or User ID@domain.",
   "error.invalid_key_format": "Invalid key format.",
   "error.passphrase_validation_failed": "Passphrase validation failed.",
+  "error.backup_create_failed": "Failed to create secret key backup.",
   "error.backup_not_found": "Backup not found.",
   "error.backup_decrypt_failed": "Failed to decrypt backup.",
   "error.webauthn_failed": "WebAuthn verification failed.",
   "settings.delete_account": "Delete Account",
+  "settings.create_secret_key_backup": "Create Secret Key Backup",
+  "settings.create_secret_key_backup_desc":
+    "Creating a secret key backup enables login with your main passphrase and WebAuthn.",
+  "settings.creating_backup": "Creating backup...",
+  "settings.backup_created": "Secret key backup created.",
   "settings.delete_account_confirm":
     "Are you sure you want to delete your account? This action cannot be undone. All data on the server and this device will be permanently deleted.",
   "settings.deleting_account": "Deleting...",
@@ -136,6 +142,8 @@ export const en: TranslationKeys = {
   "auth.registration_complete": "Registration Complete",
   "auth.save_keys_warning":
     "Please export and save your private keys in a safe place. You will need them to log in from another device.",
+  "auth.create_backup_recommended":
+    "Next, create a secret key backup so you can restore and log in from backup.",
   "auth.continue": "Continue",
   "auth.confirm_passphrase": "Confirm Passphrases",
   "auth.confirm_passphrase_desc":

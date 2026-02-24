@@ -16,6 +16,7 @@ import QrReader from "@/components/QrReader";
 import Dialog from "@/components/common/Dialog";
 import Spinner from "@/components/common/Spinner";
 import { getWebAuthnPrfResult } from "@/utils/webauthnPrf";
+import { saveSecretKeyBackup } from "@/utils/secretKeyBackup";
 
 type GenerateKeyMode = "init" | "settings";
 type FormMode = "generate" | "import" | "backup";
@@ -25,7 +26,7 @@ const MIN_LENGTH = 4;
 const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
   const auth = useAuth();
   const { worker, activateAccount } = auth;
-  const { showError } = useErrorToast();
+  const { showError, showSuccess } = useErrorToast();
   const { t } = useI18n();
   const { pushDialog } = useDialogs();
 
@@ -682,6 +683,141 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
     window.location.reload();
   };
 
+  const openCreateBackupDialog = (keys: string) => {
+    if (!worker || !auth.userId) {
+      showError(t("error.unknown"));
+      return;
+    }
+
+    pushDialog((p) => {
+      const BackupDialog = () => {
+        const [mainPassphraseInput, setMainPassphraseInput] = useState("");
+        const [subPassphraseInput, setSubPassphraseInput] = useState("");
+        const [submitting, setSubmitting] = useState(false);
+
+        const handleSubmit = async () => {
+          if (
+            mainPassphraseInput.length < MIN_LENGTH ||
+            subPassphraseInput.length < MIN_LENGTH
+          ) {
+            showError(t("error.min_length"));
+            return;
+          }
+
+          setSubmitting(true);
+          try {
+            const validated = await new Promise<boolean>((resolve) => {
+              worker.eventWaiter("validate_passphrases", (data) => {
+                resolve(data.success);
+              });
+              worker.postMessage({
+                call: "validate_passphrases",
+                privateKeys: keys,
+                mainPassphrase: mainPassphraseInput,
+                subPassphrase: subPassphraseInput,
+              });
+            });
+
+            if (!validated) {
+              showError(t("error.passphrase_validation_failed"));
+              return;
+            }
+
+            const signedMessage = await new Promise<string | null>(
+              (resolve) => {
+                worker.eventWaiter("sign", (result) => {
+                  resolve(result.success ? result.data.signed_message : null);
+                });
+                worker.postMessage({
+                  call: "sign",
+                  keys,
+                  passphrase: subPassphraseInput,
+                  payload: buildAuthPayload(),
+                });
+              },
+            );
+
+            if (!signedMessage) {
+              showError(t("error.unauthorized"));
+              return;
+            }
+
+            await saveSecretKeyBackup({
+              worker,
+              signed: {
+                signedMessage,
+                userId: auth.userId!,
+              },
+              secretKey: keys,
+              subpassphrase: subPassphraseInput,
+              mainPassphrase: mainPassphraseInput,
+            });
+
+            auth.setSubPassphraseSession(subPassphraseInput);
+            showSuccess(t("settings.backup_created"));
+            p.close();
+          } catch {
+            showError(t("error.backup_create_failed"));
+          } finally {
+            setSubmitting(false);
+          }
+        };
+
+        return (
+          <Dialog {...p} title={t("settings.create_secret_key_backup")}>
+            <div className="space-y-4">
+              <p className="text-sm text-muted">
+                {t("settings.create_secret_key_backup_desc")}
+              </p>
+              <div className="space-y-2">
+                <label className="block text-sm">
+                  {t("auth.main_passphrase")}
+                </label>
+                <input
+                  className="w-full border border-accent/30 rounded px-3 py-2 bg-transparent"
+                  type="password"
+                  value={mainPassphraseInput}
+                  onChange={(e) => setMainPassphraseInput(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm">
+                  {t("auth.sub_passphrase")}
+                </label>
+                <input
+                  className="w-full border border-accent/30 rounded px-3 py-2 bg-transparent"
+                  type="password"
+                  value={subPassphraseInput}
+                  onChange={(e) => setSubPassphraseInput(e.target.value)}
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded border border-accent/30 hover:bg-accent/10 text-sm"
+                  onClick={p.close}
+                  disabled={submitting}
+                >
+                  {t("common.cancel")}
+                </button>
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded bg-accent/30 hover:bg-accent/50 text-sm disabled:opacity-50"
+                  onClick={handleSubmit}
+                  disabled={submitting}
+                >
+                  {submitting ? t("settings.creating_backup") : t("common.ok")}
+                </button>
+              </div>
+            </div>
+          </Dialog>
+        );
+      };
+
+      return <BackupDialog />;
+    });
+  };
+
   // 登録完了画面
   if (completedKeys) {
     return (
@@ -689,13 +825,15 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
         <h2 className="text-lg font-semibold">
           {t("auth.registration_complete")}
         </h2>
-        <p className="text-center text-muted">{t("auth.save_keys_warning")}</p>
+        <p className="text-center text-muted">
+          {t("auth.create_backup_recommended")}
+        </p>
         <button
           type="button"
           className="px-6 py-2 rounded bg-accent/30 hover:bg-accent/50 font-medium"
-          onClick={() => openExportDialog(completedKeys)}
+          onClick={() => openCreateBackupDialog(completedKeys)}
         >
-          {t("profile.export_private_keys")}
+          {t("settings.create_secret_key_backup")}
         </button>
         <button
           type="button"

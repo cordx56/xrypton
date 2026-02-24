@@ -12,16 +12,19 @@ import ErrorToast from "@/components/common/ErrorToast";
 
 type ErrorToastContextType = {
   showError: (message: string) => void;
+  showSuccess: (message: string) => void;
 };
 
 const ErrorToastContext = createContext<ErrorToastContextType>({
   showError: () => {},
+  showSuccess: () => {},
 });
 
 const FADE_OUT_MS = 300;
 
 export const ErrorToastProvider = ({ children }: { children: ReactNode }) => {
   const [message, setMessage] = useState<string | null>(null);
+  const [variant, setVariant] = useState<"error" | "success">("error");
   const [fading, setFading] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -55,6 +58,21 @@ export const ErrorToastProvider = ({ children }: { children: ReactNode }) => {
     (msg: string) => {
       clearTimers();
       setFading(false);
+      setVariant("error");
+      setMessage(msg);
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        startFadeOut();
+      }, 5000);
+    },
+    [clearTimers, startFadeOut],
+  );
+
+  const showSuccess = useCallback(
+    (msg: string) => {
+      clearTimers();
+      setFading(false);
+      setVariant("success");
       setMessage(msg);
       timerRef.current = setTimeout(() => {
         timerRef.current = null;
@@ -65,10 +83,15 @@ export const ErrorToastProvider = ({ children }: { children: ReactNode }) => {
   );
 
   return (
-    <ErrorToastContext.Provider value={{ showError }}>
+    <ErrorToastContext.Provider value={{ showError, showSuccess }}>
       {children}
       {message && (
-        <ErrorToast message={message} fading={fading} onDismiss={dismiss} />
+        <ErrorToast
+          message={message}
+          fading={fading}
+          variant={variant}
+          onDismiss={dismiss}
+        />
       )}
     </ErrorToastContext.Provider>
   );

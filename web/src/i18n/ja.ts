@@ -98,10 +98,16 @@ export const ja: TranslationKeys = {
     "ユーザIDまたはユーザID@ドメインの形式で入力してください。",
   "error.invalid_key_format": "鍵の形式が不正です。",
   "error.passphrase_validation_failed": "パスフレーズの検証に失敗しました。",
+  "error.backup_create_failed": "秘密鍵バックアップの作成に失敗しました。",
   "error.backup_not_found": "バックアップが見つかりません。",
   "error.backup_decrypt_failed": "バックアップの復号に失敗しました。",
   "error.webauthn_failed": "WebAuthn認証に失敗しました。",
   "settings.delete_account": "アカウントを削除",
+  "settings.create_secret_key_backup": "秘密鍵のバックアップ作成",
+  "settings.create_secret_key_backup_desc":
+    "秘密鍵のバックアップを作成すると、main passphraseとWebAuthnでログインが可能になります。",
+  "settings.creating_backup": "バックアップ作成中...",
+  "settings.backup_created": "秘密鍵バックアップを作成しました。",
   "settings.delete_account_confirm":
     "アカウントを削除しますか？この操作は取り消せません。サーバとこの端末のすべてのデータが完全に削除されます。",
   "settings.deleting_account": "削除中...",
@@ -139,6 +145,8 @@ export const ja: TranslationKeys = {
   "auth.registration_complete": "登録完了",
   "auth.save_keys_warning":
     "秘密鍵を安全な場所にエクスポートして保存してください。他の端末からログインする際に必要になります。",
+  "auth.create_backup_recommended":
+    "次に秘密鍵のバックアップを作成してください。バックアップから復旧してログインできるようになります。",
   "auth.continue": "続ける",
   "auth.confirm_passphrase": "パスフレーズの確認",
   "auth.confirm_passphrase_desc":
