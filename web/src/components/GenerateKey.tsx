@@ -15,18 +15,20 @@ import QrDisplay from "@/components/QrDisplay";
 import QrReader from "@/components/QrReader";
 import Dialog from "@/components/common/Dialog";
 import Spinner from "@/components/common/Spinner";
+import CreateSecretKeyBackupDialog from "@/components/CreateSecretKeyBackupDialog";
 import { getWebAuthnPrfResult } from "@/utils/webauthnPrf";
-import { saveSecretKeyBackup } from "@/utils/secretKeyBackup";
+import {
+  allPassphrasesMeetMinLength,
+  hasMinPassphraseLength,
+} from "@/utils/passphraseValidation";
 
 type GenerateKeyMode = "init" | "settings";
 type FormMode = "generate" | "import" | "backup";
 
-const MIN_LENGTH = 4;
-
 const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
   const auth = useAuth();
   const { worker, activateAccount } = auth;
-  const { showError, showSuccess } = useErrorToast();
+  const { showError } = useErrorToast();
   const { t } = useI18n();
   const { pushDialog } = useDialogs();
 
@@ -132,10 +134,7 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
         return;
       }
     }
-    if (
-      mainPassphrase.length < MIN_LENGTH ||
-      subPassphrase.length < MIN_LENGTH
-    ) {
+    if (!allPassphrasesMeetMinLength(mainPassphrase, subPassphrase)) {
       showError(t("error.min_length"));
       return;
     }
@@ -173,10 +172,7 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
   // パスフレーズ確認後の登録処理
   const confirmPassphrases = async () => {
     if (!worker || !pendingKeys || processing) return;
-    if (
-      confirmMainPass.length < MIN_LENGTH ||
-      confirmSubPass.length < MIN_LENGTH
-    ) {
+    if (!allPassphrasesMeetMinLength(confirmMainPass, confirmSubPass)) {
       showError(t("error.min_length"));
       return;
     }
@@ -300,10 +296,7 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
       showError(t("error.invalid_user_id"));
       return;
     }
-    if (
-      mainPassphrase.length < MIN_LENGTH ||
-      subPassphrase.length < MIN_LENGTH
-    ) {
+    if (!allPassphrasesMeetMinLength(mainPassphrase, subPassphrase)) {
       showError(t("error.min_length"));
       return;
     }
@@ -453,7 +446,7 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
       showError(t("error.invalid_user_id"));
       return;
     }
-    if (mainPassphrase.length < MIN_LENGTH) {
+    if (!hasMinPassphraseLength(mainPassphrase)) {
       showError(t("error.min_length"));
       return;
     }
@@ -684,138 +677,19 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
   };
 
   const openCreateBackupDialog = (keys: string) => {
-    if (!worker || !auth.userId) {
+    if (!auth.userId) {
       showError(t("error.unknown"));
       return;
     }
 
-    pushDialog((p) => {
-      const BackupDialog = () => {
-        const [mainPassphraseInput, setMainPassphraseInput] = useState("");
-        const [subPassphraseInput, setSubPassphraseInput] = useState("");
-        const [submitting, setSubmitting] = useState(false);
-
-        const handleSubmit = async () => {
-          if (
-            mainPassphraseInput.length < MIN_LENGTH ||
-            subPassphraseInput.length < MIN_LENGTH
-          ) {
-            showError(t("error.min_length"));
-            return;
-          }
-
-          setSubmitting(true);
-          try {
-            const validated = await new Promise<boolean>((resolve) => {
-              worker.eventWaiter("validate_passphrases", (data) => {
-                resolve(data.success);
-              });
-              worker.postMessage({
-                call: "validate_passphrases",
-                privateKeys: keys,
-                mainPassphrase: mainPassphraseInput,
-                subPassphrase: subPassphraseInput,
-              });
-            });
-
-            if (!validated) {
-              showError(t("error.passphrase_validation_failed"));
-              return;
-            }
-
-            const signedMessage = await new Promise<string | null>(
-              (resolve) => {
-                worker.eventWaiter("sign", (result) => {
-                  resolve(result.success ? result.data.signed_message : null);
-                });
-                worker.postMessage({
-                  call: "sign",
-                  keys,
-                  passphrase: subPassphraseInput,
-                  payload: buildAuthPayload(),
-                });
-              },
-            );
-
-            if (!signedMessage) {
-              showError(t("error.unauthorized"));
-              return;
-            }
-
-            await saveSecretKeyBackup({
-              worker,
-              signed: {
-                signedMessage,
-                userId: auth.userId!,
-              },
-              secretKey: keys,
-              subpassphrase: subPassphraseInput,
-              mainPassphrase: mainPassphraseInput,
-            });
-
-            auth.setSubPassphraseSession(subPassphraseInput);
-            showSuccess(t("settings.backup_created"));
-            p.close();
-          } catch {
-            showError(t("error.backup_create_failed"));
-          } finally {
-            setSubmitting(false);
-          }
-        };
-
-        return (
-          <Dialog {...p} title={t("settings.create_secret_key_backup")}>
-            <div className="space-y-4">
-              <p className="text-sm text-muted">
-                {t("settings.create_secret_key_backup_desc")}
-              </p>
-              <div className="space-y-2">
-                <label className="block text-sm">
-                  {t("auth.main_passphrase")}
-                </label>
-                <input
-                  className="w-full border border-accent/30 rounded px-3 py-2 bg-transparent"
-                  type="password"
-                  value={mainPassphraseInput}
-                  onChange={(e) => setMainPassphraseInput(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="block text-sm">
-                  {t("auth.sub_passphrase")}
-                </label>
-                <input
-                  className="w-full border border-accent/30 rounded px-3 py-2 bg-transparent"
-                  type="password"
-                  value={subPassphraseInput}
-                  onChange={(e) => setSubPassphraseInput(e.target.value)}
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  className="px-4 py-2 rounded border border-accent/30 hover:bg-accent/10 text-sm"
-                  onClick={p.close}
-                  disabled={submitting}
-                >
-                  {t("common.cancel")}
-                </button>
-                <button
-                  type="button"
-                  className="px-4 py-2 rounded bg-accent/30 hover:bg-accent/50 text-sm disabled:opacity-50"
-                  onClick={handleSubmit}
-                  disabled={submitting}
-                >
-                  {submitting ? t("settings.creating_backup") : t("common.ok")}
-                </button>
-              </div>
-            </div>
-          </Dialog>
-        );
-      };
-
-      return <BackupDialog />;
-    });
+    pushDialog((p) => (
+      <CreateSecretKeyBackupDialog
+        {...p}
+        keys={keys}
+        userId={auth.userId!}
+        onSaved={(sub) => auth.setSubPassphraseSession(sub)}
+      />
+    ));
   };
 
   // 登録完了画面
