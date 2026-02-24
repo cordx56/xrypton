@@ -91,6 +91,8 @@ export type TranslationKeys = {
   "error.invalid_key_format": string;
   "error.passphrase_validation_failed": string;
   "error.backup_create_failed": string;
+  "error.backup_encrypt_failed": string;
+  "error.backup_upload_failed": string;
   "error.backup_not_found": string;
   "error.backup_decrypt_failed": string;
   "error.webauthn_failed": string;

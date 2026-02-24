@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Dialog from "@/components/common/Dialog";
+import { ApiError } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useErrorToast } from "@/contexts/ErrorToastContext";
 import { useI18n } from "@/contexts/I18nContext";
@@ -32,6 +33,42 @@ const CreateSecretKeyBackupDialog = ({
   const [mainPassphrase, setMainPassphrase] = useState("");
   const [subPassphrase, setSubPassphrase] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  const mapCreateBackupError = (error: unknown): string => {
+    if (error instanceof ApiError) {
+      if (error.status === 400) return t("error.bad_request");
+      if (error.status === 401) return t("error.unauthorized");
+      if (error.status === 403) return t("error.forbidden");
+      if (error.status === 404) return t("error.not_found");
+      if (error.status >= 500) return t("error.network");
+      return t("error.backup_create_failed");
+    }
+
+    if (
+      error instanceof DOMException &&
+      (error.name === "NotAllowedError" ||
+        error.name === "InvalidStateError" ||
+        error.name === "NotSupportedError")
+    ) {
+      return t("error.webauthn_failed");
+    }
+
+    if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes("webauthn") || msg.includes("prf")) {
+        return t("error.webauthn_failed");
+      }
+      if (msg.includes("backup_encrypt_failed")) {
+        return t("error.backup_encrypt_failed");
+      }
+      if (msg.includes("backup_upload_failed")) {
+        return t("error.backup_upload_failed");
+      }
+      return `${t("error.backup_create_failed")} (${error.message})`;
+    }
+
+    return t("error.backup_create_failed");
+  };
 
   const handleSubmit = async () => {
     if (!allPassphrasesMeetMinLength(mainPassphrase, subPassphrase)) {
@@ -92,8 +129,9 @@ const CreateSecretKeyBackupDialog = ({
       onSaved?.(subPassphrase);
       showSuccess(t("settings.backup_created"));
       close();
-    } catch {
-      showError(t("error.backup_create_failed"));
+    } catch (error) {
+      console.error("create secret key backup failed", error);
+      showError(mapCreateBackupError(error));
     } finally {
       setSubmitting(false);
     }

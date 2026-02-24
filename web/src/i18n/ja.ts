@@ -99,6 +99,8 @@ export const ja: TranslationKeys = {
   "error.invalid_key_format": "鍵の形式が不正です。",
   "error.passphrase_validation_failed": "パスフレーズの検証に失敗しました。",
   "error.backup_create_failed": "秘密鍵バックアップの作成に失敗しました。",
+  "error.backup_encrypt_failed": "バックアップ暗号化に失敗しました。",
+  "error.backup_upload_failed": "バックアップのアップロードに失敗しました。",
   "error.backup_not_found": "バックアップが見つかりません。",
   "error.backup_decrypt_failed": "バックアップの復号に失敗しました。",
   "error.webauthn_failed": "WebAuthn認証に失敗しました。",

@@ -1,4 +1,4 @@
-import { apiClient, authApiClient } from "@/api/client";
+import { ApiError, apiClient, authApiClient } from "@/api/client";
 import type { WorkerEventWaiter } from "@/hooks/useWorker";
 import { WorkerCallMessage } from "@/utils/schema";
 import { z } from "zod";
@@ -18,6 +18,13 @@ type SignedAuth = {
   signedMessage: string;
   userId: string;
 };
+
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+}
 
 async function workerEncryptBackup(
   worker: WorkerBridge,
@@ -82,7 +89,11 @@ export async function saveSecretKeyBackup(params: {
   subpassphrase: string;
   mainPassphrase: string;
 }): Promise<void> {
-  const prf = await getWebAuthnPrfResult();
+  const prf = await getWebAuthnPrfResult().catch((error: unknown) => {
+    throw new Error(
+      `webauthn_prf_failed:${errorMessage(error, "unable to obtain PRF output")}`,
+    );
+  });
   const payloadJson = JSON.stringify({
     secret_key: params.secretKey,
     subpassphrase: params.subpassphrase,
@@ -94,16 +105,26 @@ export async function saveSecretKeyBackup(params: {
     params.mainPassphrase,
     prf.prfOutputB64,
     prf.credentialIdB64,
-  );
+  ).catch((error: unknown) => {
+    throw new Error(
+      `backup_encrypt_failed:${errorMessage(error, "worker encryption failed")}`,
+    );
+  });
 
-  await authApiClient(params.signed.signedMessage).user.putSecretKeyBackup(
-    params.signed.userId,
-    {
+  await authApiClient(params.signed.signedMessage)
+    .user.putSecretKeyBackup(params.signed.userId, {
       armor: armored,
       version: 1,
       webauthn_credential_id_b64: prf.credentialIdB64,
-    },
-  );
+    })
+    .catch((error: unknown) => {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new Error(
+        `backup_upload_failed:${errorMessage(error, "failed to upload backup")}`,
+      );
+    });
 }
 
 export async function restoreSecretKeyBackup(params: {

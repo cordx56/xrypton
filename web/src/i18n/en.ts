@@ -96,6 +96,8 @@ export const en: TranslationKeys = {
   "error.invalid_key_format": "Invalid key format.",
   "error.passphrase_validation_failed": "Passphrase validation failed.",
   "error.backup_create_failed": "Failed to create secret key backup.",
+  "error.backup_encrypt_failed": "Failed to encrypt backup.",
+  "error.backup_upload_failed": "Failed to upload backup.",
   "error.backup_not_found": "Backup not found.",
   "error.backup_decrypt_failed": "Failed to decrypt backup.",
   "error.webauthn_failed": "WebAuthn verification failed.",
