@@ -17,8 +17,14 @@ type CachedVerifyEntry =
 const ICON_VERIFY_CACHE_MAX = 200;
 const iconVerifyCache = new Map<string, CachedVerifyEntry>();
 
+const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
+  const view = new Uint8Array(new ArrayBuffer(bytes.length));
+  view.set(bytes);
+  return view.buffer;
+};
+
 const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const digest = await crypto.subtle.digest("SHA-256", toArrayBuffer(bytes));
   return Array.from(new Uint8Array(digest), (b) =>
     b.toString(16).padStart(2, "0"),
   ).join("");
@@ -170,7 +176,7 @@ const Avatar = ({
                   return { status: "warning" };
                 }
 
-                const blob = new Blob([rawBytes.buffer as ArrayBuffer]);
+                const blob = new Blob([toArrayBuffer(rawBytes)]);
                 return {
                   status: "verified",
                   resolvedUrl: URL.createObjectURL(blob),
