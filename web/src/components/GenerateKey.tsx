@@ -562,16 +562,6 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
       setArmoredKey(restoredKey);
       setSubPassphraseLocal(restoredSub);
 
-      let webauthnOk = await auth.verifyWebAuthn();
-      if (!webauthnOk) {
-        webauthnOk = await auth.registerWebAuthn(address);
-      }
-      if (!webauthnOk) {
-        showError(t("error.webauthn_failed"));
-        setProcessing(false);
-        return;
-      }
-
       const signedMessage = await new Promise<string | null>((resolve) => {
         worker.eventWaiter("sign", (result) => {
           resolve(result.success ? result.data.signed_message : null);
