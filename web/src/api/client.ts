@@ -1,6 +1,7 @@
 import {
   NotificationPublicKeyResponse,
   SecretKeyBackupBody,
+  SecretKeyBackupPutResponse,
   SecretKeyBackupResponse,
   AtprotoAccountSchema,
   AtprotoSignatureSchema,
@@ -350,7 +351,7 @@ export function authApiClient(signedMessage: string) {
           { method: "PUT", body: JSON.stringify(payload) },
           auth,
         );
-        return SecretKeyBackupResponse.parse(await resp.json());
+        return SecretKeyBackupPutResponse.parse(await resp.json());
       },
       getSecretKeyBackup: async (id: string) => {
         const resp = await apiFetch(

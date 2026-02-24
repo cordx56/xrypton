@@ -169,6 +169,11 @@ export const SecretKeyBackupResponse = z.object({
   updated_at: z.string(),
 });
 
+export const SecretKeyBackupPutResponse = z.object({
+  saved: z.boolean(),
+  version: z.number().int(),
+});
+
 // POST /v1/chat
 export const CreateChatRequest = z.object({
   name: z.string(),
