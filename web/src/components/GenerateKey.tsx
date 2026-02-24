@@ -15,8 +15,10 @@ import QrDisplay from "@/components/QrDisplay";
 import QrReader from "@/components/QrReader";
 import Dialog from "@/components/common/Dialog";
 import Spinner from "@/components/common/Spinner";
+import { getWebAuthnPrfResult } from "@/utils/webauthnPrf";
 
 type GenerateKeyMode = "init" | "settings";
+type FormMode = "generate" | "import" | "backup";
 
 const MIN_LENGTH = 4;
 
@@ -27,7 +29,7 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
   const { t } = useI18n();
   const { pushDialog } = useDialogs();
 
-  const [importMode, setImportMode] = useState(false);
+  const [formMode, setFormMode] = useState<FormMode>("generate");
   const [userId, setUserId] = useState("");
   const [mainPassphrase, setMainPassphrase] = useState("");
   const [subPassphrase, setSubPassphraseLocal] = useState("");
@@ -46,6 +48,8 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
     mode === "settings" && !!auth.userId && auth.isRegistered;
 
   const isAddAccountFlow = mode === "init" && auth.isAddingAccount;
+  const isImportMode = formMode === "import";
+  const isBackupMode = formMode === "backup";
 
   useEffect(() => {
     if (isUpdateMode && auth.userId) {
@@ -439,6 +443,231 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
     })();
   };
 
+  const restoreFromBackup = () => {
+    if (!worker || processing) return;
+    const bracketMatch = userId.match(/<([^>]+)>/);
+    const address = bracketMatch ? bracketMatch[1] : userId;
+    const localPart = address.includes("@") ? address.split("@")[0] : address;
+    if (!UserId.safeParse(localPart).success) {
+      showError(t("error.invalid_user_id"));
+      return;
+    }
+    if (mainPassphrase.length < MIN_LENGTH) {
+      showError(t("error.min_length"));
+      return;
+    }
+
+    setProcessing(true);
+    (async () => {
+      let backup;
+      try {
+        backup = await apiClient().user.getSecretKeyBackup(address);
+      } catch (e) {
+        if (e instanceof ApiError) {
+          if (e.status === 404) {
+            showError(t("error.backup_not_found"));
+          } else if (e.status === 400) {
+            showError(t("error.invalid_user_id"));
+          } else if (e.status === 410) {
+            showError(t("error.user_deleted"));
+          } else {
+            showError(t("error.network"));
+          }
+        } else {
+          showError(t("error.network"));
+        }
+        setProcessing(false);
+        return;
+      }
+
+      let prfOutputB64: string;
+      try {
+        const prf = await getWebAuthnPrfResult(
+          backup.webauthn_credential_id_b64,
+        );
+        prfOutputB64 = prf.prfOutputB64;
+      } catch {
+        showError(t("error.webauthn_failed"));
+        setProcessing(false);
+        return;
+      }
+
+      const restored = await new Promise<{
+        secret_key: string;
+        subpassphrase: string;
+      } | null>((resolve) => {
+        worker.eventWaiter("backup_decrypt", (result) => {
+          if (!result.success) {
+            resolve(null);
+            return;
+          }
+          try {
+            const parsed: unknown = JSON.parse(result.data.payloadJson);
+            if (
+              typeof parsed !== "object" ||
+              parsed === null ||
+              !("secret_key" in parsed) ||
+              !("subpassphrase" in parsed)
+            ) {
+              resolve(null);
+              return;
+            }
+            const secretKey = parsed.secret_key;
+            const subpassphrase = parsed.subpassphrase;
+            if (
+              typeof secretKey !== "string" ||
+              typeof subpassphrase !== "string" ||
+              !secretKey ||
+              !subpassphrase
+            ) {
+              resolve(null);
+              return;
+            }
+            resolve({
+              secret_key: secretKey,
+              subpassphrase,
+            });
+          } catch {
+            resolve(null);
+          }
+        });
+        worker.postMessage({
+          call: "backup_decrypt",
+          armored: backup.armor,
+          mainPassphrase,
+          prfOutputB64,
+          credentialIdB64: backup.webauthn_credential_id_b64,
+        });
+      });
+
+      if (!restored) {
+        showError(t("error.backup_decrypt_failed"));
+        setProcessing(false);
+        return;
+      }
+
+      const restoredKey = restored.secret_key.trim();
+      const restoredSub = restored.subpassphrase;
+      const validated = await new Promise<boolean>((resolve) => {
+        worker.eventWaiter("validate_passphrases", (data) => {
+          resolve(data.success);
+        });
+        worker.postMessage({
+          call: "validate_passphrases",
+          privateKeys: restoredKey,
+          mainPassphrase,
+          subPassphrase: restoredSub,
+        });
+      });
+      if (!validated) {
+        showError(t("error.passphrase_validation_failed"));
+        setProcessing(false);
+        return;
+      }
+
+      setArmoredKey(restoredKey);
+      setSubPassphraseLocal(restoredSub);
+
+      let webauthnOk = await auth.verifyWebAuthn();
+      if (!webauthnOk) {
+        webauthnOk = await auth.registerWebAuthn(address);
+      }
+      if (!webauthnOk) {
+        showError(t("error.webauthn_failed"));
+        setProcessing(false);
+        return;
+      }
+
+      const signedMessage = await new Promise<string | null>((resolve) => {
+        worker.eventWaiter("sign", (result) => {
+          resolve(result.success ? result.data.signed_message : null);
+        });
+        worker.postMessage({
+          call: "sign",
+          keys: restoredKey,
+          passphrase: restoredSub,
+          payload: buildAuthPayload(),
+        });
+      });
+
+      let isExistingUser = false;
+      let canonicalId: string | undefined;
+      if (signedMessage) {
+        try {
+          const client = authApiClient(signedMessage);
+          const keysResp = await client.user.getKeys(address);
+          isExistingUser = true;
+          canonicalId = keysResp.id as string;
+        } catch (e) {
+          if (
+            !(e instanceof ApiError && (e.status === 404 || e.status === 401))
+          ) {
+            showError(t("error.network"));
+            setProcessing(false);
+            return;
+          }
+        }
+      }
+
+      if (isExistingUser) {
+        const accountId = canonicalId || address;
+        await activateAccount(
+          accountId,
+          restoredKey,
+          saveSubPass ? restoredSub : undefined,
+          true,
+        );
+        if (!saveSubPass) {
+          auth.setSubPassphraseSession(restoredSub);
+        }
+        await setAccountValue(accountId, "isRegistered", "true");
+        window.location.reload();
+        return;
+      }
+
+      const publicKeys = await exportPublicKeys(restoredKey);
+      if (!publicKeys) {
+        showError(t("error.unknown"));
+        setProcessing(false);
+        return;
+      }
+
+      try {
+        const resp = await apiClient().user.postKeys(
+          address,
+          publicKeys,
+          publicKeys,
+        );
+        canonicalId = resp.id as string;
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 409) {
+          showError(t("auth.user_exists"));
+        } else if (e instanceof ApiError && e.status === 400) {
+          showError(e.errorMessage || t("auth.register_error"));
+        } else if (e instanceof Error && e.message === "key_mismatch") {
+          showError(t("auth.key_mismatch"));
+        } else {
+          showError(t("auth.register_error"));
+        }
+        setProcessing(false);
+        return;
+      }
+
+      const accountId = canonicalId || address;
+      await activateAccount(
+        accountId,
+        restoredKey,
+        saveSubPass ? restoredSub : undefined,
+        true,
+      );
+      if (!saveSubPass) {
+        auth.setSubPassphraseSession(restoredSub);
+      }
+      setCompletedKeys(restoredKey);
+      setProcessing(false);
+    })();
+  };
+
   const openExportDialog = (keys: string) => {
     pushDialog((p) => (
       <Dialog {...p} title={t("profile.export_private_keys")}>
@@ -558,32 +787,45 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
         <button
           type="button"
           className={`px-4 py-2 rounded font-medium ${
-            !importMode
+            formMode === "generate"
               ? "bg-accent/30"
               : "border border-accent/30 hover:bg-accent/10"
           }`}
-          onClick={() => setImportMode(false)}
+          onClick={() => setFormMode("generate")}
         >
           {t("auth.generate")}
         </button>
         <button
           type="button"
           className={`px-4 py-2 rounded font-medium ${
-            importMode
+            formMode === "import"
               ? "bg-accent/30"
               : "border border-accent/30 hover:bg-accent/10"
           }`}
-          onClick={() => setImportMode(true)}
+          onClick={() => setFormMode("import")}
         >
           {t("auth.import_key")}
         </button>
+        {!isUpdateMode && (
+          <button
+            type="button"
+            className={`px-4 py-2 rounded font-medium ${
+              formMode === "backup"
+                ? "bg-accent/30"
+                : "border border-accent/30 hover:bg-accent/10"
+            }`}
+            onClick={() => setFormMode("backup")}
+          >
+            {t("auth.restore_from_backup")}
+          </button>
+        )}
       </div>
 
       {/* 共通フィールド */}
       {(() => {
         const commonFields = (
           <>
-            {!importMode && (
+            {!isImportMode && (
               <>
                 <div className="col-span-3 sm:col-span-1">
                   {t("auth.user_id")}:
@@ -610,31 +852,35 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
                 onChange={(e) => setMainPassphrase(e.target.value)}
               />
             </div>
-            <div className="col-span-3 sm:col-span-1">
-              {t("auth.sub_passphrase")}:
-            </div>
-            <div className="col-span-3 sm:col-span-2">
-              <input
-                className="w-full border border-accent/30 rounded px-3 py-2 bg-transparent"
-                type="password"
-                value={subPassphrase}
-                onChange={(e) => setSubPassphraseLocal(e.target.value)}
-              />
-            </div>
-            <div className="col-span-3">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={saveSubPass}
-                  onChange={(e) => setSaveSubPass(e.target.checked)}
-                />
-                {t("auth.save_passphrase")}
-              </label>
-            </div>
+            {!isBackupMode && (
+              <>
+                <div className="col-span-3 sm:col-span-1">
+                  {t("auth.sub_passphrase")}:
+                </div>
+                <div className="col-span-3 sm:col-span-2">
+                  <input
+                    className="w-full border border-accent/30 rounded px-3 py-2 bg-transparent"
+                    type="password"
+                    value={subPassphrase}
+                    onChange={(e) => setSubPassphraseLocal(e.target.value)}
+                  />
+                </div>
+                <div className="col-span-3">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={saveSubPass}
+                      onChange={(e) => setSaveSubPass(e.target.checked)}
+                    />
+                    {t("auth.save_passphrase")}
+                  </label>
+                </div>
+              </>
+            )}
           </>
         );
 
-        return importMode ? (
+        return isImportMode ? (
           /* インポートフォーム */
           <div className="grid grid-cols-3 gap-4 items-center">
             <div className="col-span-3">
@@ -657,6 +903,28 @@ const GenerateKey = ({ mode = "init" }: { mode?: GenerateKeyMode }) => {
                 onClick={importKey}
               >
                 {t("auth.import_key")}
+              </button>
+              {isAddAccountFlow && (
+                <button
+                  className="px-4 py-2 rounded border border-accent/30 hover:bg-accent/10 font-medium"
+                  type="button"
+                  onClick={auth.cancelAddAccount}
+                >
+                  {t("common.cancel")}
+                </button>
+              )}
+            </div>
+          </div>
+        ) : isBackupMode ? (
+          <div className="grid grid-cols-3 gap-4 items-center">
+            {commonFields}
+            <div className="col-span-3 mt-2 flex gap-2">
+              <button
+                className="px-4 py-2 rounded bg-accent/30 hover:bg-accent/50 font-medium"
+                type="button"
+                onClick={restoreFromBackup}
+              >
+                {t("auth.restore_from_backup")}
               </button>
               {isAddAccountFlow && (
                 <button

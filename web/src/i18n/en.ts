@@ -69,6 +69,7 @@ export const en: TranslationKeys = {
   "auth.key_mismatch":
     "This user ID is registered with different keys. Please use a different user ID.",
   "auth.import_key": "Import Key",
+  "auth.restore_from_backup": "Restore from Backup",
   "auth.import_key_placeholder": "Paste armored private key here",
   "contacts.add": "Add Contact",
   "contacts.search_title": "Search User",
@@ -94,6 +95,8 @@ export const en: TranslationKeys = {
   "error.invalid_contact_query": "Enter a User ID or User ID@domain.",
   "error.invalid_key_format": "Invalid key format.",
   "error.passphrase_validation_failed": "Passphrase validation failed.",
+  "error.backup_not_found": "Backup not found.",
+  "error.backup_decrypt_failed": "Failed to decrypt backup.",
   "error.webauthn_failed": "WebAuthn verification failed.",
   "settings.delete_account": "Delete Account",
   "settings.delete_account_confirm":

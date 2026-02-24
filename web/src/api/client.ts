@@ -1,5 +1,7 @@
 import {
   NotificationPublicKeyResponse,
+  SecretKeyBackupBody,
+  SecretKeyBackupResponse,
   AtprotoAccountSchema,
   AtprotoSignatureSchema,
   AtprotoSignatureBatchResponse,
@@ -173,6 +175,12 @@ export function apiClient() {
         );
         return resp.json();
       },
+      getSecretKeyBackup: async (id: string) => {
+        const resp = await apiFetch(
+          `/v1/user/${encodeURIComponent(id)}/secret-key-backup`,
+        );
+        return SecretKeyBackupResponse.parse(await resp.json());
+      },
     },
     wot: {
       getKeyByFingerprint: async (
@@ -327,6 +335,38 @@ export function authApiClient(signedMessage: string) {
       },
       getIconUrl: (id: string) => {
         return `${getApiBaseUrl()}/v1/user/${encodeURIComponent(id)}/icon`;
+      },
+      putSecretKeyBackup: async (
+        id: string,
+        body: {
+          armor: string;
+          version: number;
+          webauthn_credential_id_b64: string;
+        },
+      ) => {
+        const payload = SecretKeyBackupBody.parse(body);
+        const resp = await apiFetch(
+          `/v1/user/${encodeURIComponent(id)}/secret-key-backup`,
+          { method: "PUT", body: JSON.stringify(payload) },
+          auth,
+        );
+        return SecretKeyBackupResponse.parse(await resp.json());
+      },
+      getSecretKeyBackup: async (id: string) => {
+        const resp = await apiFetch(
+          `/v1/user/${encodeURIComponent(id)}/secret-key-backup`,
+          {},
+          auth,
+        );
+        return SecretKeyBackupResponse.parse(await resp.json());
+      },
+      deleteSecretKeyBackup: async (id: string) => {
+        const resp = await apiFetch(
+          `/v1/user/${encodeURIComponent(id)}/secret-key-backup`,
+          { method: "DELETE" },
+          auth,
+        );
+        return resp.json();
       },
     },
     chat: {

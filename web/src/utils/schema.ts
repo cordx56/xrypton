@@ -22,6 +22,8 @@ export const WorkerResultCallList = {
   verify_extract_string: "verify_extract_string",
   extract_and_verify_string: "extract_and_verify_string",
   verify_extract_bytes: "verify_extract_bytes",
+  backup_encrypt: "backup_encrypt",
+  backup_decrypt: "backup_decrypt",
 } as const;
 export type WorkerResultCall =
   (typeof WorkerResultCallList)[keyof typeof WorkerResultCallList];
@@ -151,6 +153,20 @@ export const UpdateProfileRequest = z.object({
   status_signature: z.string().optional(),
   bio: z.string().optional(),
   bio_signature: z.string().optional(),
+});
+
+export const SecretKeyBackupBody = z.object({
+  armor: z.string(),
+  version: z.number().int(),
+  webauthn_credential_id_b64: z.string(),
+});
+
+export const SecretKeyBackupResponse = z.object({
+  armor: z.string(),
+  version: z.number().int(),
+  webauthn_credential_id_b64: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
 });
 
 // POST /v1/chat
@@ -402,6 +418,20 @@ export const WorkerCallMessage = z.union([
     publicKey: z.string(),
     data: z.base64(),
   }),
+  z.object({
+    call: z.literal(WorkerResultCallList["backup_encrypt"]),
+    payloadJson: z.string(),
+    mainPassphrase: z.string(),
+    prfOutputB64: z.string(),
+    credentialIdB64: z.string(),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["backup_decrypt"]),
+    armored: z.string(),
+    mainPassphrase: z.string(),
+    prfOutputB64: z.string(),
+    credentialIdB64: z.string(),
+  }),
 ]);
 
 export const WorkerResult = <T>(schema: T) =>
@@ -506,6 +536,16 @@ export const WorkerResultMessage = z.union([
     call: z.literal(WorkerResultCallList["verify_extract_bytes"]),
     result: WorkerResult(
       z.object({ data: z.base64(), fingerprint: z.string() }),
+    ),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["backup_encrypt"]),
+    result: WorkerResult(z.object({ armored: z.string() })),
+  }),
+  z.object({
+    call: z.literal(WorkerResultCallList["backup_decrypt"]),
+    result: WorkerResult(
+      z.object({ payloadJson: z.string(), credentialIdB64: z.string() }),
     ),
   }),
 ]);

@@ -2,6 +2,7 @@ use base64::engine::general_purpose::STANDARD;
 use base64::{Engine, engine::general_purpose::URL_SAFE};
 use wasm_bindgen::prelude::*;
 
+mod backup;
 mod keys;
 
 #[derive(thiserror::Error, Debug)]
@@ -66,6 +67,59 @@ pub fn generate_private_keys(
         value: vec![ResultData::String { data: keys }],
     }
     .to_value()
+}
+
+#[wasm_bindgen]
+pub fn backup_encrypt(
+    payload_json: String,
+    main_passphrase: String,
+    prf_output_b64: String,
+    credential_id_b64: String,
+) -> JsValue {
+    match backup::backup_encrypt(
+        &payload_json,
+        &main_passphrase,
+        &prf_output_b64,
+        &credential_id_b64,
+    ) {
+        Ok(armored) => ReturnValue::Ok {
+            value: vec![ResultData::String { data: armored }],
+        }
+        .to_value(),
+        Err(e) => ReturnValue::Error {
+            message: e.to_string(),
+        }
+        .to_value(),
+    }
+}
+
+#[wasm_bindgen]
+pub fn backup_decrypt(
+    armored: String,
+    main_passphrase: String,
+    prf_output_b64: String,
+    credential_id_b64: String,
+) -> JsValue {
+    match backup::backup_decrypt(
+        &armored,
+        &main_passphrase,
+        &prf_output_b64,
+        &credential_id_b64,
+    ) {
+        Ok((payload_json, credential_id)) => ReturnValue::Ok {
+            value: vec![
+                ResultData::String { data: payload_json },
+                ResultData::String {
+                    data: credential_id,
+                },
+            ],
+        }
+        .to_value(),
+        Err(e) => ReturnValue::Error {
+            message: e.to_string(),
+        }
+        .to_value(),
+    }
 }
 
 fn get_private_keys(keys: String) -> Result<keys::PrivateKeys, JsValue> {

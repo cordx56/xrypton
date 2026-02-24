@@ -19,6 +19,8 @@ import init, {
   verify_detached_signature,
   verify_extract_string,
   extract_and_verify_string,
+  backup_encrypt,
+  backup_decrypt,
   validate_passphrases,
 } from "xrypton-wasm";
 import {
@@ -1022,6 +1024,96 @@ worker.addEventListener("message", async ({ data }) => {
           success: false,
           message:
             e instanceof Error ? e.message : "verify extract bytes error",
+        },
+      });
+    }
+  } else if (parsed.data.call === "backup_encrypt") {
+    try {
+      const result = WasmReturnValue.safeParse(
+        backup_encrypt(
+          parsed.data.payloadJson,
+          parsed.data.mainPassphrase,
+          parsed.data.prfOutputB64,
+          parsed.data.credentialIdB64,
+        ),
+      );
+      if (
+        result.success &&
+        result.data.result === "ok" &&
+        result.data.value[0]?.type === "string"
+      ) {
+        post({
+          call: "backup_encrypt",
+          result: {
+            success: true,
+            data: { armored: result.data.value[0].data },
+          },
+        });
+      } else {
+        post({
+          call: "backup_encrypt",
+          result: {
+            success: false,
+            message:
+              result.data?.result === "error"
+                ? result.data.message
+                : "backup encrypt error",
+          },
+        });
+      }
+    } catch (e) {
+      post({
+        call: "backup_encrypt",
+        result: {
+          success: false,
+          message: e instanceof Error ? e.message : "backup encrypt error",
+        },
+      });
+    }
+  } else if (parsed.data.call === "backup_decrypt") {
+    try {
+      const result = WasmReturnValue.safeParse(
+        backup_decrypt(
+          parsed.data.armored,
+          parsed.data.mainPassphrase,
+          parsed.data.prfOutputB64,
+          parsed.data.credentialIdB64,
+        ),
+      );
+      if (
+        result.success &&
+        result.data.result === "ok" &&
+        result.data.value[0]?.type === "string" &&
+        result.data.value[1]?.type === "string"
+      ) {
+        post({
+          call: "backup_decrypt",
+          result: {
+            success: true,
+            data: {
+              payloadJson: result.data.value[0].data,
+              credentialIdB64: result.data.value[1].data,
+            },
+          },
+        });
+      } else {
+        post({
+          call: "backup_decrypt",
+          result: {
+            success: false,
+            message:
+              result.data?.result === "error"
+                ? result.data.message
+                : "backup decrypt error",
+          },
+        });
+      }
+    } catch (e) {
+      post({
+        call: "backup_decrypt",
+        result: {
+          success: false,
+          message: e instanceof Error ? e.message : "backup decrypt error",
         },
       });
     }

@@ -1,4 +1,5 @@
 mod atproto;
+mod backup;
 mod chat;
 mod contacts;
 mod federation;
@@ -31,6 +32,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(federation::routes())
         .merge(atproto::routes())
         .merge(x::routes())
+        .merge(backup::routes())
         .merge(realtime::routes());
 
     Router::new()

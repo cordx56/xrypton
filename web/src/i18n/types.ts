@@ -64,6 +64,7 @@ export type TranslationKeys = {
   "auth.user_exists": string;
   "auth.key_mismatch": string;
   "auth.import_key": string;
+  "auth.restore_from_backup": string;
   "auth.import_key_placeholder": string;
   "contacts.add": string;
   "contacts.search_title": string;
@@ -89,6 +90,8 @@ export type TranslationKeys = {
   "error.invalid_contact_query": string;
   "error.invalid_key_format": string;
   "error.passphrase_validation_failed": string;
+  "error.backup_not_found": string;
+  "error.backup_decrypt_failed": string;
   "error.webauthn_failed": string;
   "settings.delete_account": string;
   "settings.delete_account_confirm": string;

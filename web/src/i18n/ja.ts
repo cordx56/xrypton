@@ -69,6 +69,7 @@ export const ja: TranslationKeys = {
   "auth.key_mismatch":
     "このユーザIDは異なる鍵で登録済みです。別のユーザIDを使用してください。",
   "auth.import_key": "鍵をインポート",
+  "auth.restore_from_backup": "バックアップから復旧",
   "auth.import_key_placeholder": "PGP秘密鍵を貼り付けてください",
   "contacts.add": "連絡先を追加",
   "contacts.search_title": "ユーザーを検索",
@@ -97,6 +98,8 @@ export const ja: TranslationKeys = {
     "ユーザIDまたはユーザID@ドメインの形式で入力してください。",
   "error.invalid_key_format": "鍵の形式が不正です。",
   "error.passphrase_validation_failed": "パスフレーズの検証に失敗しました。",
+  "error.backup_not_found": "バックアップが見つかりません。",
+  "error.backup_decrypt_failed": "バックアップの復号に失敗しました。",
   "error.webauthn_failed": "WebAuthn認証に失敗しました。",
   "settings.delete_account": "アカウントを削除",
   "settings.delete_account_confirm":

@@ -97,6 +97,16 @@ pub struct PushSubscriptionRow {
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct SecretKeyBackupRow {
+    pub user_id: String,
+    pub armor: String,
+    pub version: i32,
+    pub webauthn_credential_id_b64: String,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct ContactRow {
     pub user_id: String,
     pub contact_user_id: String,
